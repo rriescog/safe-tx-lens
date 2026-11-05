@@ -4,7 +4,9 @@ import { localCredentials } from './tenderly-storage.mjs';
 const GATEWAY = 'https://safe-client.safe.global';
 
 async function gatewayGet(network, path) {
-  if (!/^\/[a-zA-Z0-9/_?=&.%-]+$/.test(path)) throw new Error('Invalid Safe Gateway path');
+  // Reject dot segments and encoded separators before URL normalization can
+  // turn a transaction lookup into a request for another API resource.
+  if (!/^\/[a-zA-Z0-9/_?=&.-]+$/.test(path) || path.includes('..')) throw new Error('Invalid Safe Gateway path');
   const response = await fetch(`${GATEWAY}/v1/chains/${chainId(network)}${path}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`Safe Client Gateway ${response.status}`);
   return response.json();
@@ -21,7 +23,7 @@ export function gatewayTransaction(raw) {
     safe, to, safeTxHash, value: String(data.value), data: data.hexData ?? '0x', operation: Number(data.operation), nonce: String(info.nonce),
     safeTxGas: String(info.safeTxGas), baseGas: String(info.baseGas), gasPrice: String(info.gasPrice), gasToken: info.gasToken, refundReceiver: info.refundReceiver.value,
     isExecuted: raw.executedAt != null || ['SUCCESS', 'FAILED'].includes(raw.txStatus), isSuccessful: raw.txStatus === 'SUCCESS' ? true : raw.txStatus === 'FAILED' ? false : null,
-    transactionHash: raw.txHash ?? null, confirmationsRequired: info.confirmationsRequired ?? null,
+    transactionHash: raw.txHash ?? null, executor: raw.executor?.value ?? info.executor?.value ?? null, confirmationsRequired: info.confirmationsRequired ?? null,
     confirmations: (info.confirmations ?? []).map(c => ({ owner: c.signer?.value, signature: c.signature ?? null })),
   };
 }
@@ -40,7 +42,7 @@ let anonymousQuotaUntil = 0;
 export async function safeGet(network, path, apiKey) {
   apiKey ??= (await localCredentials()).SAFE_API_KEY;
   chainId(network);
-  if (!/^\/[a-zA-Z0-9/_?=&.%-]+$/.test(path)) throw new Error('Invalid Safe API path');
+  if (!/^\/[a-zA-Z0-9/_?=&.-]+$/.test(path) || path.includes('..')) throw new Error('Invalid Safe API path');
   if (!apiKey && Date.now() < anonymousQuotaUntil) throw new Error('Safe anonymous monthly quota exhausted. Import transaction JSON for offchain proposals or use an onchain execution hash.');
   const headers = { Accept: 'application/json' };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;

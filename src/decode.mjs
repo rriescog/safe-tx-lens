@@ -31,6 +31,8 @@ const IFACE = new Interface([
   'function multiSend(bytes transactions)',
 ]);
 
+// Bound recursive decoding so hostile or malformed nested calldata cannot
+// consume unbounded CPU or produce an unusably large review graph.
 const MAX_DEPTH = 8;
 const MAX_NODES = 256;
 
@@ -41,12 +43,16 @@ function clean(value) {
 }
 
 export function unpackMultiSend(packed) {
+  // Safe MultiSend records are tightly packed, not ABI-encoded tuples.
+  // Each record is operation(1) + target(20) + value(32) + length(32) + data.
+  if (!/^0x(?:[0-9a-fA-F]{2})*$/.test(packed)) throw new Error('Invalid MultiSend hex bytes');
   const bytes = Buffer.from(packed.slice(2), 'hex');
   const result = [];
   let offset = 0;
   while (offset < bytes.length) {
     if (bytes.length - offset < 85) throw new Error('Truncated MultiSend record');
     const operation = bytes[offset++];
+    if (operation !== 0 && operation !== 1) throw new Error('Invalid MultiSend operation');
     const to = getAddress(`0x${bytes.subarray(offset, offset + 20).toString('hex')}`); offset += 20;
     const value = BigInt(`0x${bytes.subarray(offset, offset + 32).toString('hex')}`).toString(); offset += 32;
     const length = BigInt(`0x${bytes.subarray(offset, offset + 32).toString('hex')}`); offset += 32;

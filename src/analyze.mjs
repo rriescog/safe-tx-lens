@@ -3,6 +3,7 @@ import { chainId } from './chains.mjs';
 import { decodeCall, summarizeCalls } from './decode.mjs';
 import { assessRisk } from './risk.mjs';
 import { fetchTransaction, safeGet } from './safe-api.mjs';
+import { localCredentials } from './tenderly-storage.mjs';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 const SAFE_TYPES = { SafeTx: [
@@ -39,13 +40,21 @@ export function normalizeTransaction(raw) {
     isExecuted: Boolean(tx.isExecuted), isSuccessful: tx.isSuccessful ?? null,
     blockNumber: tx.blockNumber ?? null, confirmationsRequired: tx.confirmationsRequired ?? null,
     signatures: /^0x(?:[0-9a-fA-F]{2})+$/.test(tx.signatures ?? '') && tx.signatures.length <= 20002 ? tx.signatures : null,
-    transactionHash: tx.transactionHash ?? null, confirmations: tx.confirmations ?? [],
+    transactionHash: tx.transactionHash ?? null, executor: isAddress(tx.executor) ? getAddress(tx.executor) : null, confirmations: tx.confirmations ?? [],
   };
 }
 
 export function calculateHash(tx, network) {
-  const { safe, safeTxHash, isExecuted, isSuccessful, transactionHash, confirmations, blockNumber, confirmationsRequired, signatures, ...message } = tx;
+  const { safe, safeTxHash, isExecuted, isSuccessful, transactionHash, executor, confirmations, blockNumber, confirmationsRequired, signatures, ...message } = tx;
   return TypedDataEncoder.hash({ chainId: chainId(network), verifyingContract: safe }, SAFE_TYPES, message);
+}
+
+export function calculateHashComponents(tx, network) {
+  const { safe, safeTxHash, isExecuted, isSuccessful, transactionHash, executor, confirmations, blockNumber, confirmationsRequired, signatures, ...message } = tx;
+  const domain = { chainId: chainId(network), verifyingContract: safe };
+  // Expose the two intermediate hashes for an independent second opinion.
+  // They are calculated by the same local library as the final Safe hash.
+  return { domainHash: TypedDataEncoder.hashDomain(domain), messageHash: TypedDataEncoder.hashStruct('SafeTx', SAFE_TYPES, message) };
 }
 
 export function classifyIntent(call) {
@@ -132,9 +141,11 @@ function collectSignatures(tx, threshold) {
 }
 
 async function simulate(tx, network, safeInfo, options) {
-  const key = options.tenderlyKey ?? process.env.TENDERLY_ACCESS_KEY;
-  const account = options.tenderlyAccount ?? process.env.TENDERLY_ACCOUNT;
-  const project = options.tenderlyProject ?? process.env.TENDERLY_PROJECT;
+  // Credentials stay server-side. The same local config loader serves CLI, UI, and MCP.
+  const credentials = await localCredentials();
+  const key = options.tenderlyKey ?? credentials.TENDERLY_ACCESS_KEY;
+  const account = options.tenderlyAccount ?? credentials.TENDERLY_ACCOUNT;
+  const project = options.tenderlyProject ?? credentials.TENDERLY_PROJECT;
   if (!key || !account || !project) return { unavailable: 'Tenderly credentials not configured' };
   const required = Number(tx.isExecuted && tx.confirmationsRequired ? tx.confirmationsRequired : safeInfo.threshold);
   const signatures = tx.signatures ?? collectSignatures(tx, required);
@@ -142,6 +153,7 @@ async function simulate(tx, network, safeInfo, options) {
   const input = EXEC_IFACE.encodeFunctionData('execTransaction', [tx.to, tx.value, tx.data, tx.operation, tx.safeTxGas, tx.baseGas, tx.gasPrice, tx.gasToken, tx.refundReceiver, signatures]);
   let blockNumber;
   if (tx.isExecuted) {
+    if (!tx.executor) return { unavailable: 'Historical executor unknown; cannot reproduce signature checks faithfully' };
     if (!tx.transactionHash || !options.rpcUrl) return { unavailable: 'Historical execution needs RPC_URL to simulate at the preceding block' };
     const receipt = await new JsonRpcProvider(options.rpcUrl).getTransactionReceipt(tx.transactionHash);
     if (receipt) blockNumber = receipt.blockNumber - 1;
@@ -149,7 +161,9 @@ async function simulate(tx, network, safeInfo, options) {
     else return { unavailable: 'Historical execution receipt unavailable' };
   }
   const endpoint = `https://api.tenderly.co/api/v1/account/${encodeURIComponent(account)}/project/${encodeURIComponent(project)}/simulate`;
-  const executor = tx.confirmations.find(c => c.signatureType === 'APPROVED_HASH' && c.owner)?.owner ?? safeInfo.owners?.[0] ?? tx.safe;
+  // For an executed Safe transaction msg.sender must equal the real outer
+  // transaction sender; approved-hash signatures can depend on that context.
+  const executor = tx.executor ?? tx.confirmations.find(c => c.signatureType === 'APPROVED_HASH' && c.owner)?.owner ?? safeInfo.owners?.[0] ?? tx.safe;
   const response = await fetch(endpoint, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Access-Key': key },
     body: JSON.stringify({ network_id: String(chainId(network)), from: executor, to: tx.safe, input, gas: 8000000, gas_price: '0', save: true, save_if_fails: true, simulation_type: 'full', ...(blockNumber !== undefined ? { block_number: blockNumber } : {}) }),
@@ -158,15 +172,18 @@ async function simulate(tx, network, safeInfo, options) {
   if (!response.ok) return { unavailable: `Tenderly API returned ${response.status}` };
   const result = await response.json();
   const transaction = result.transaction ?? {};
+  const info = transaction.transaction_info ?? {};
   const storageDiffs = [];
-  for (const item of transaction.transaction_info?.state_diff ?? []) {
-    if (item.soltype?.name && item.original !== null && item.dirty !== null && String(item.original) !== String(item.dirty)) {
-      storageDiffs.push({ address: item.address, label: item.soltype.name, from: String(item.original), to: String(item.dirty) });
-    } else for (const raw of item.raw ?? []) if (String(raw.original) !== String(raw.dirty)) {
-      storageDiffs.push({ address: item.address, label: String(raw.key ?? 'raw slot'), from: String(raw.original), to: String(raw.dirty) });
+  const stateValue = value => typeof value === 'string' ? value : JSON.stringify(value) ?? String(value);
+  // A decoded variable and its raw slot are two views of the same change. Prefer
+  // the named variable; use raw slots when the provider has no decoded variable.
+  for (const item of Array.isArray(info.state_diff) ? info.state_diff : []) {
+    if (item.soltype?.name && item.original != null && item.dirty != null && stateValue(item.original) !== stateValue(item.dirty)) {
+      storageDiffs.push({ address: item.address, label: item.soltype.name, from: stateValue(item.original), to: stateValue(item.dirty) });
+    } else for (const raw of Array.isArray(item.raw) ? item.raw : []) if (stateValue(raw.original) !== stateValue(raw.dirty)) {
+      storageDiffs.push({ address: item.address, label: String(raw.key ?? 'raw slot'), from: stateValue(raw.original), to: stateValue(raw.dirty) });
     }
   }
-  const info = transaction.transaction_info ?? {};
   const balanceDiffs = (info.balance_changes ?? info.balance_diff ?? []).map(d => ({ address: d.address, from: String(d.original ?? d.before ?? ''), to: String(d.dirty ?? d.after ?? '') }));
   const assetChanges = (info.asset_changes ?? []).map(change => ({
     type: String(change.type ?? 'token'), token: String(change.token_info?.contract_address ?? change.asset?.address ?? change.token_address ?? ''),
@@ -177,18 +194,19 @@ async function simulate(tx, network, safeInfo, options) {
   if (typeof output === 'string' && /^0x[0-9a-fA-F]{64}$/.test(output)) {
     try { safeExecutionSuccess = Boolean(EXEC_IFACE.decodeFunctionResult('execTransaction', output)[0]); } catch {}
   }
-  for (const log of info.logs ?? []) {
+  for (const log of info.logs ?? info.call_trace?.logs ?? []) {
     const topic = String(log.topics?.[0] ?? log.raw?.topics?.[0] ?? '').toLowerCase();
     if (log.address?.toLowerCase() === tx.safe.toLowerCase() && topic === EXEC_SUCCESS_TOPIC) safeExecutionSuccess = true;
     if (log.address?.toLowerCase() === tx.safe.toLowerCase() && topic === EXEC_FAILURE_TOPIC) safeExecutionSuccess = false;
   }
-  return { evmSuccess: transaction.status === true, safeExecutionSuccess, success: transaction.status === true && safeExecutionSuccess === true ? true : transaction.status === false || safeExecutionSuccess === false ? false : null, url: result.simulation?.id ? `https://dashboard.tenderly.co/${encodeURIComponent(account)}/${encodeURIComponent(project)}/simulator/${result.simulation.id}` : null, storageDiffs, balanceDiffs, assetChanges, error: transaction.error_message ?? null, blockNumber: blockNumber ?? 'latest' };
+  return { evmSuccess: transaction.status === true, safeExecutionSuccess, success: transaction.status === true && safeExecutionSuccess === true ? true : transaction.status === false || safeExecutionSuccess === false ? false : null, url: result.simulation?.id ? `https://dashboard.tenderly.co/${encodeURIComponent(account)}/${encodeURIComponent(project)}/simulator/${result.simulation.id}` : null, stateDiffAvailable: Array.isArray(info.state_diff), storageDiffs, balanceDiffs, assetChanges, error: transaction.error_message ?? null, blockNumber: blockNumber ?? 'latest' };
 }
 
 export async function analyze(raw, network = 'eth', options = {}) {
   chainId(network);
   const tx = normalizeTransaction(raw);
   const calculatedHash = calculateHash(tx, network);
+  const hashComponents = calculateHashComponents(tx, network);
   const warnings = [];
   const checks = [{ name: 'Local EIP-712 hash', status: tx.safeTxHash ? calculatedHash.toLowerCase() === tx.safeTxHash.toLowerCase() ? 'pass' : 'fail' : 'unverified', detail: calculatedHash }];
   if (checks[0].status === 'fail') warnings.push('The API or JSON safeTxHash does not match the transaction fields. Do not sign.');
@@ -220,7 +238,8 @@ export async function analyze(raw, network = 'eth', options = {}) {
   if (tx.isExecuted && safeInfo && (safeInfo.source === 'rpc_current_fallback' || !safeInfo.source)) warnings.push('Signer and threshold context is from the current Safe state; historical owners and threshold were not independently recovered.');
   let simulation = null;
   if (options.simulate) {
-    try { simulation = safeInfo ? await simulate(tx, network, safeInfo, options) : { unavailable: 'Current Safe state unavailable' }; }
+    // Never spend simulation quota on fields that already fail hash verification.
+    try { simulation = checks.some(check => check.status === 'fail') ? { unavailable: 'Safe hash verification failed; simulation skipped' } : safeInfo ? await simulate(tx, network, safeInfo, options) : { unavailable: 'Current Safe state unavailable' }; }
     catch (error) { simulation = { unavailable: error.message }; }
   }
   if (tx.isExecuted && typeof tx.isSuccessful === 'boolean' && typeof simulation?.success === 'boolean' && tx.isSuccessful !== simulation.success) {
@@ -229,7 +248,7 @@ export async function analyze(raw, network = 'eth', options = {}) {
   const effects = classifyEffects(simulation?.unavailable ? null : simulation, tx.safe);
   const risk = assessRisk({ call, actions, findings, effects, checks, simulation, transaction: tx });
   const status = checks.some(c => c.status === 'fail') ? 'BLOCK' : findings.some(f => f.severity === 'critical') || effects.some(e => e.severity === 'critical') ? 'REVIEW' : 'INSPECT';
-  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, status, risk, checks, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
+  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, risk, checks, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
 }
 
 export async function analyzeHash(hash, network, options = {}) {

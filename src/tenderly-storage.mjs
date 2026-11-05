@@ -13,6 +13,8 @@ function parseEnv(contents) {
 }
 
 export async function localCredentials() {
+  // Process variables override the ignored local file. A separate optional
+  // env file can supply credentials without copying them into this checkout.
   const local = parseEnv(await readFile(localConfig, 'utf8').catch(() => ''));
   const config = { ...local, ...process.env };
   const monitorEnv = config.TENDERLY_MONITOR_ENV_FILE

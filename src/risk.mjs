@@ -8,6 +8,8 @@ const LEVELS = [
 function level(score) { return LEVELS.find(item => score >= item.min).level; }
 
 function actionImpact(action) {
+  // Scores are review priorities for possible impact, not exploit likelihood.
+  // Unknown selectors remain high because a name cannot be inferred safely.
   const method = action.method?.split('(')[0] ?? null;
   if (['upgradeTo', 'upgradeToAndCall', 'updateImplementation', 'changeAdmin'].includes(method)) return { score: 95, reason: 'Changes implementation or admin authority.' };
   if (['addOwnerWithThreshold', 'removeOwner', 'swapOwner', 'changeThreshold', 'enableModule', 'disableModule', 'setGuard', 'setFallbackHandler'].includes(method)) return { score: 95, reason: 'Changes who can control or execute from the Safe.' };
@@ -22,6 +24,8 @@ function actionImpact(action) {
 }
 
 export function assessRisk({ call, actions, findings, effects, checks, simulation, transaction }) {
+  // Measured simulation effects may raise priority, but absence of a diff may
+  // only mean the provider omitted it. Never lower decoded-call priority.
   const actionRatings = actions.map(action => {
     const impact = actionImpact(action);
     return { ...action, level: level(impact.score), score: impact.score, reason: impact.reason };

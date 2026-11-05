@@ -11,8 +11,8 @@ export const PUBLIC_RPC = Object.freeze({ eth: 'https://ethereum.publicnode.com'
 
 export async function findRecentExecutionBySafeHash(safe, safeHash, network = 'eth', options = {}) {
   const rpcUrl = options.rpcUrl ?? PUBLIC_RPC[network];
-  if (!rpcUrl) return null;
-  const provider = new JsonRpcProvider(rpcUrl);
+  if (!rpcUrl && !options.provider) return null;
+  const provider = options.provider ?? new JsonRpcProvider(rpcUrl);
   const [chain, latest] = await Promise.all([provider.getNetwork(), provider.getBlockNumber()]);
   if (Number(chain.chainId) !== chainId(network)) throw new Error('RPC chain does not match selected network');
   const logs = await provider.getLogs({ address: safe, topics: [[SUCCESS_TOPIC, FAILURE_TOPIC], safeHash], fromBlock: Math.max(0, latest - 8100), toBlock: 'latest' });
@@ -22,8 +22,8 @@ export async function findRecentExecutionBySafeHash(safe, safeHash, network = 'e
 
 export async function fetchRecentExecutions(safe, network = 'eth', options = {}) {
   const rpcUrl = options.rpcUrl ?? PUBLIC_RPC[network];
-  if (!rpcUrl) throw new Error(`An RPC URL is required for ${network}`);
-  const provider = new JsonRpcProvider(rpcUrl);
+  if (!rpcUrl && !options.provider) throw new Error(`An RPC URL is required for ${network}`);
+  const provider = options.provider ?? new JsonRpcProvider(rpcUrl);
   const [chain, latest] = await Promise.all([provider.getNetwork(), provider.getBlockNumber()]);
   if (Number(chain.chainId) !== chainId(network)) throw new Error('RPC chain does not match selected network');
   const fromBlock = Math.max(0, latest - 8100);
@@ -35,10 +35,13 @@ export async function fetchRecentExecutions(safe, network = 'eth', options = {})
 }
 
 export async function analyzeExecutionHash(hash, network = 'eth', options = {}) {
+  // An execution transaction contains Safe.execTransaction calldata, but its
+  // nonce is not an argument. Recover that nonce by matching the emitted Safe
+  // hash against locally recomputed candidates, never by trusting a label.
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('Invalid Ethereum execution transaction hash');
   const rpcUrl = options.rpcUrl ?? PUBLIC_RPC[network];
-  if (!rpcUrl) throw new Error(`An RPC URL is required for ${network}`);
-  const provider = new JsonRpcProvider(rpcUrl);
+  if (!rpcUrl && !options.provider) throw new Error(`An RPC URL is required for ${network}`);
+  const provider = options.provider ?? new JsonRpcProvider(rpcUrl);
   const [chain, outer, receipt] = await Promise.all([provider.getNetwork(), provider.getTransaction(hash), provider.getTransactionReceipt(hash)]);
   if (Number(chain.chainId) !== chainId(network)) throw new Error('RPC chain does not match selected network');
   if (!outer || !receipt || !outer.to) throw new Error('Execution transaction was not found on the selected chain');
@@ -49,7 +52,7 @@ export async function analyzeExecutionHash(hash, network = 'eth', options = {}) 
     safe: outer.to, to: a[0], value: a[1].toString(), data: a[2], operation: Number(a[3]),
     safeTxGas: a[4].toString(), baseGas: a[5].toString(), gasPrice: a[6].toString(),
     gasToken: a[7], refundReceiver: a[8], signatures: a[9],
-    transactionHash: hash, blockNumber: receipt.blockNumber, isExecuted: true,
+    executor: outer.from, transactionHash: hash, blockNumber: receipt.blockNumber, isExecuted: true,
   };
   const event = receipt.logs.find(log => log.address.toLowerCase() === raw.safe.toLowerCase() && [SUCCESS_TOPIC, FAILURE_TOPIC].includes(log.topics[0]?.toLowerCase()));
   if (!event) throw new Error('Safe execution event with transaction hash was not found');
@@ -62,6 +65,8 @@ export async function analyzeExecutionHash(hash, network = 'eth', options = {}) 
     const result = await provider.call({ to: raw.safe, data: nonceData, blockTag: receipt.blockNumber - 1 });
     latestNonce = BigInt(STATE.decodeFunctionResult('nonce', result)[0]);
   } catch {
+    // Some public RPCs lack archive state. Current nonce gives a bounded
+    // search, while the EIP-712 match still decides which candidate is valid.
     const result = await provider.call({ to: raw.safe, data: nonceData });
     latestNonce = BigInt(STATE.decodeFunctionResult('nonce', result)[0]);
   }

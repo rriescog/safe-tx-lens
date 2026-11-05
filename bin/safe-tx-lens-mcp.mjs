@@ -6,7 +6,7 @@ import { resolve } from '../src/resolve.mjs';
 import { analyzeExecutionHash } from '../src/onchain.mjs';
 
 const NETWORK = z.enum(['eth', 'gno', 'pol', 'arb1', 'oeth', 'base', 'sep', 'zkevm', 'bnb', 'avax']).default('eth');
-const COMMON = { network: NETWORK, rpcUrl: z.string().url().optional().describe('Optional EVM RPC URL. Ethereum uses a public RPC by default.'), simulate: z.boolean().default(false).describe('Use Tenderly credentials from this process environment when possible.') };
+const COMMON = { network: NETWORK, rpcUrl: z.string().url().optional().describe('Optional EVM RPC URL. Ethereum uses a public RPC by default.'), simulate: z.boolean().default(false).describe('Explicitly run a Tenderly simulation when credentials and compatible signatures are available.') };
 const COMMON_AUTO = { ...COMMON, network: z.enum(['auto', 'eth', 'gno', 'pol', 'arb1', 'oeth', 'base', 'sep', 'zkevm', 'bnb', 'avax']).default('auto') };
 
 function output(work) {
@@ -26,7 +26,7 @@ serveStdio(() => {
 
   server.registerTool('inspect', {
     title: 'Inspect Safe transaction or Safe address',
-    description: 'Inspect a Safe transaction hash, onchain execution transaction hash, Safe URL, or Safe address. Auto-detects the network from a configured Tenderly monitor or Safe URL; otherwise select a network. Pending offchain hashes require a proposal source.',
+    description: 'Inspect a Safe transaction hash, onchain execution transaction hash, Safe URL, or Safe address. Auto-detects supported networks from available sources; a Safe URL specifies its network. Pending offchain hashes require a proposal source.',
     inputSchema: z.object({ input: z.string().min(1), ...COMMON_AUTO }), annotations,
   }, output(({ input, network, rpcUrl, simulate }) => resolve(input, network, { rpcUrl, simulate })));
 
@@ -44,13 +44,13 @@ serveStdio(() => {
 
   server.registerTool('list_pending', {
     title: 'List pending Safe proposals',
-    description: 'Inspect pending offchain transactions for a Safe address from a configured Tenderly monitor or Safe service. Auto-detects the network when the monitor contains the Safe.',
+    description: 'Inspect pending offchain transactions for a Safe address from available proposal sources. Auto-detects supported networks when possible.',
     inputSchema: z.object({ safe: z.string().min(1), ...COMMON_AUTO }), annotations,
   }, output(({ safe, network, rpcUrl, simulate }) => resolve(safe, network, { rpcUrl, simulate, limit: 20 })));
 
   server.registerTool('list_history', {
     title: 'List executed Safe transactions',
-    description: 'Inspect the latest 20 executed multisig transactions for a Safe address. Ethereum can fall back to recent RPC logs. Auto-detects the network when the monitor contains the Safe.',
+    description: 'Inspect the latest 20 executed multisig transactions for a Safe address. Ethereum can fall back to recent RPC logs. Auto-detects supported networks when possible.',
     inputSchema: z.object({ safe: z.string().min(1), ...COMMON_AUTO }), annotations,
   }, output(({ safe, network, rpcUrl, simulate }) => resolve(safe, network, { rpcUrl, simulate, scope: 'history', limit: 20 })));
 

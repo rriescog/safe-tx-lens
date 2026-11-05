@@ -12,7 +12,7 @@ Inputs: Safe tx hash, onchain execution tx hash, Safe address, app.safe.global U
 Options:
   --network <auto|eth|gno|pol|arb1|oeth|base|sep|zkevm|bnb|avax>
   --rpc <url>          Verify against the Safe contract; historical simulation
-  --simulate           Simulate with Tenderly when standard EOA signatures suffice
+  --simulate           Simulate an inspected transaction with Tenderly
   --json               Machine-readable output
   --interval <seconds> Watch polling interval (minimum 15)
   --once               Watch one poll and exit
@@ -75,7 +75,9 @@ async function watch(input, network, options, interval, once) {
   if (parsed.kind !== 'safe') throw new Error('watch needs a Safe address or Safe URL');
   const seen = new Map();
   const poll = async () => {
-    const queue = await resolve(parsed.address, parsed.network, { ...options, scope: 'pending', limit: 100 });
+    // A poll can contain up to 100 proposals. Simulate individual reports,
+    // never every item on every refresh.
+    const queue = await resolve(parsed.address, parsed.network, { ...options, simulate: false, scope: 'pending', limit: 100 });
     if (queue.availability === 'unavailable') throw new Error(queue.warnings.join('; '));
     const current = new Set(queue.reports.map(report => report.hash));
     for (const hash of [...seen.keys()]) {
@@ -111,7 +113,10 @@ try {
   const [command, ...rest] = process.argv.slice(2);
   const flags = args(rest);
   if (!command || flags.help || command === 'help') help();
-  else if (command === 'serve') await serve({ port: Number(flags.port ?? 4173), rpcUrl: flags.rpc ?? process.env.RPC_URL, simulate: flags.simulate });
+  else if (command === 'serve') {
+    if (flags.simulate) throw new Error('In the UI, open one transaction and select Run simulation');
+    await serve({ port: Number(flags.port ?? 4173), rpcUrl: flags.rpc ?? process.env.RPC_URL });
+  }
   else if (command === 'inspect' || command === 'watch') {
     if (!flags._[0]) throw new Error(`${command} needs an input`);
     let input = flags._[0];

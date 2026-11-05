@@ -9,6 +9,8 @@ import { CHAINS } from './chains.mjs';
 import { findIndexedExecution } from './execution-index.mjs';
 
 async function detectNetwork(parsed) {
+  // Neither a 32-byte hash nor a 20-byte address contains a chain ID. Every
+  // inferred network below must come from a source that actually saw it.
   if (parsed.kind === 'json') {
     const id = parsed.transaction.chainId ?? parsed.transaction.transaction?.chainId;
     const chain = Object.entries(CHAINS).find(([, value]) => String(value) === String(id))?.[0];
@@ -42,6 +44,8 @@ async function detectNetwork(parsed) {
         }
       }
       if (networks.size === 1) return [...networks][0];
+      // The same Safe address may be deployed on several chains. Return every
+      // observed match and let the UI ask which network the reviewer wants.
       if (networks.size > 1) return [...networks];
     }
     if (parsed.kind === 'hash') {
@@ -100,6 +104,8 @@ export async function resolve(input, network = 'eth', options = {}) {
         return report;
       }
     } catch { /* Continue with Safe services and onchain execution lookup. */ }
+    // An indexed event is a discovery hint. The execution calldata, Safe
+    // address, and recomputed Safe hash still have to match onchain.
     try {
       const indexed = await findIndexedExecution(parsed.hash, parsed.network);
       if (indexed) {

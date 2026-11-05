@@ -19,6 +19,8 @@ function normalizeCall(value) {
 }
 
 export function compareCalls(builderCalls, report) {
+  // Builder metadata has no Safe nonce or gas fields. Compare the actual
+  // top-level operations byte-for-byte after retrieving a real Safe tx.
   const actual = report.call.method === 'multiSend(bytes)' ? report.call.children : [report.call];
   if (actual.length !== builderCalls.length) return { status: 'mismatch', detail: `Builder has ${builderCalls.length} top-level calls; Safe transaction has ${actual.length}.` };
   for (let i = 0; i < actual.length; i++) {
@@ -32,6 +34,7 @@ export function compareCalls(builderCalls, report) {
 }
 
 export async function analyzeBuilderExport(exported, network, options = {}) {
+  // An export is a plan until the optional Safe hash comparison succeeds.
   if (String(exported.chainId) !== String(chainId(network))) throw new Error(`Builder export is for chain ${exported.chainId}; selected network is ${network} (${chainId(network)}).`);
   if (!exported.transactions.length || exported.transactions.length > 100) throw new Error('Builder export needs 1–100 transactions');
   const calls = exported.transactions.map(normalizeCall);
