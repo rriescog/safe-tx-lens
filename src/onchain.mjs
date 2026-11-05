@@ -1,0 +1,78 @@
+import { Interface, JsonRpcProvider, id } from 'ethers';
+import { analyze, calculateHash } from './analyze.mjs';
+import { chainId } from './chains.mjs';
+
+const EXEC = new Interface(['function execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes) returns (bool)']);
+const STATE = new Interface(['function nonce() view returns (uint256)']);
+const SUCCESS_TOPIC = id('ExecutionSuccess(bytes32,uint256)').toLowerCase();
+const FAILURE_TOPIC = id('ExecutionFailure(bytes32,uint256)').toLowerCase();
+
+export const PUBLIC_RPC = Object.freeze({ eth: 'https://ethereum.publicnode.com' });
+
+export async function findRecentExecutionBySafeHash(safe, safeHash, network = 'eth', options = {}) {
+  const rpcUrl = options.rpcUrl ?? PUBLIC_RPC[network];
+  if (!rpcUrl) return null;
+  const provider = new JsonRpcProvider(rpcUrl);
+  const [chain, latest] = await Promise.all([provider.getNetwork(), provider.getBlockNumber()]);
+  if (Number(chain.chainId) !== chainId(network)) throw new Error('RPC chain does not match selected network');
+  const logs = await provider.getLogs({ address: safe, topics: [[SUCCESS_TOPIC, FAILURE_TOPIC], safeHash], fromBlock: Math.max(0, latest - 8100), toBlock: 'latest' });
+  if (!logs.length) return null;
+  return analyzeExecutionHash(logs.at(-1).transactionHash, network, options);
+}
+
+export async function fetchRecentExecutions(safe, network = 'eth', options = {}) {
+  const rpcUrl = options.rpcUrl ?? PUBLIC_RPC[network];
+  if (!rpcUrl) throw new Error(`An RPC URL is required for ${network}`);
+  const provider = new JsonRpcProvider(rpcUrl);
+  const [chain, latest] = await Promise.all([provider.getNetwork(), provider.getBlockNumber()]);
+  if (Number(chain.chainId) !== chainId(network)) throw new Error('RPC chain does not match selected network');
+  const fromBlock = Math.max(0, latest - 8100);
+  const logs = await provider.getLogs({ address: safe, topics: [[SUCCESS_TOPIC, FAILURE_TOPIC]], fromBlock, toBlock: 'latest' });
+  const hashes = [...new Set(logs.reverse().map(log => log.transactionHash))].slice(0, options.limit ?? 20);
+  const reports = [];
+  for (const hash of hashes) reports.push(await analyzeExecutionHash(hash, network, options));
+  return { reports, fromBlock, toBlock: latest, truncated: logs.length > hashes.length || fromBlock > 0 };
+}
+
+export async function analyzeExecutionHash(hash, network = 'eth', options = {}) {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('Invalid Ethereum execution transaction hash');
+  const rpcUrl = options.rpcUrl ?? PUBLIC_RPC[network];
+  if (!rpcUrl) throw new Error(`An RPC URL is required for ${network}`);
+  const provider = new JsonRpcProvider(rpcUrl);
+  const [chain, outer, receipt] = await Promise.all([provider.getNetwork(), provider.getTransaction(hash), provider.getTransactionReceipt(hash)]);
+  if (Number(chain.chainId) !== chainId(network)) throw new Error('RPC chain does not match selected network');
+  if (!outer || !receipt || !outer.to) throw new Error('Execution transaction was not found on the selected chain');
+  const decoded = EXEC.parseTransaction({ data: outer.data });
+  if (!decoded || decoded.name !== 'execTransaction') throw new Error('Onchain transaction is not a Safe execTransaction');
+  const a = decoded.args;
+  const raw = {
+    safe: outer.to, to: a[0], value: a[1].toString(), data: a[2], operation: Number(a[3]),
+    safeTxGas: a[4].toString(), baseGas: a[5].toString(), gasPrice: a[6].toString(),
+    gasToken: a[7], refundReceiver: a[8], signatures: a[9],
+    transactionHash: hash, blockNumber: receipt.blockNumber, isExecuted: true,
+  };
+  const event = receipt.logs.find(log => log.address.toLowerCase() === raw.safe.toLowerCase() && [SUCCESS_TOPIC, FAILURE_TOPIC].includes(log.topics[0]?.toLowerCase()));
+  if (!event) throw new Error('Safe execution event with transaction hash was not found');
+  raw.safeTxHash = event.topics[1] ?? (event.data.length >= 66 ? `0x${event.data.slice(2, 66)}` : null);
+  if (!raw.safeTxHash) throw new Error('Safe execution event has no transaction hash');
+  raw.isSuccessful = event.topics[0].toLowerCase() === SUCCESS_TOPIC;
+  const nonceData = STATE.encodeFunctionData('nonce', []);
+  let latestNonce;
+  try {
+    const result = await provider.call({ to: raw.safe, data: nonceData, blockTag: receipt.blockNumber - 1 });
+    latestNonce = BigInt(STATE.decodeFunctionResult('nonce', result)[0]);
+  } catch {
+    const result = await provider.call({ to: raw.safe, data: nonceData });
+    latestNonce = BigInt(STATE.decodeFunctionResult('nonce', result)[0]);
+  }
+  let matched = false;
+  for (let offset = 0n; offset <= 5000n && latestNonce >= offset; offset++) {
+    const nonce = latestNonce - offset;
+    raw.nonce = nonce.toString();
+    if (calculateHash(raw, network).toLowerCase() === raw.safeTxHash.toLowerCase()) { matched = true; break; }
+  }
+  if (!matched) throw new Error('Could not recover Safe nonce from the execution event within 5,000 recent nonces');
+  const report = await analyze(raw, network, { ...options, rpcUrl });
+  const block = await provider.getBlock(receipt.blockNumber);
+  return { ...report, evidence: { source: 'onchain_execution', executionHash: hash, blockNumber: receipt.blockNumber, blockTime: block ? new Date(block.timestamp * 1000).toISOString() : null } };
+}

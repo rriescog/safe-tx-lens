@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Safe Tx Lens</title>
+  <meta name="description" content="Independent, read-only Safe transaction inspection from proposal to execution.">
+  <link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand"><span class="mark" aria-hidden="true">◎</span><span>Safe Tx Lens</span></div>
+    <span class="edition">Independent transaction review</span>
+    <a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">Cross-check the hash</a>
+  </header>
+  <main>
+    <section class="intro"><div><p class="kicker">Before you sign. Before it executes.</p><h1>See what a Safe transaction can actually do.</h1><p>Paste a Safe hash, onchain execution hash, Safe URL, address, or transaction JSON. Pending offchain hashes need a proposal source.</p></div><div class="trust-note"><strong>Read-only by design</strong><span>This app never asks for a wallet connection, private key, or signature. A successful simulation does not prove a transaction is safe.</span></div></section>
+    <section class="workspace">
+      <aside class="input-panel">
+        <h2>Inspect</h2>
+        <form id="inspect-form">
+          <label for="input">Transaction or Safe</label>
+          <textarea id="input" rows="5" placeholder="Safe hash, execution hash, Safe address or URL, or JSON" spellcheck="false" required></textarea>
+          <label for="json-file">Or import transaction JSON</label>
+          <input id="json-file" type="file" accept=".json,application/json">
+          <p class="import-note">Pending hashes are looked up through Safe services. Executed hashes can also be found through indexed onchain events. Import JSON for offline inspection.</p>
+          <label for="safe-address">Safe multisig address (optional for JSON)</label>
+          <input id="safe-address" class="text-input" placeholder="0x…" spellcheck="false">
+          <label for="safe-hash">Safe transaction hash to compare (optional)</label>
+          <input id="safe-hash" class="text-input" placeholder="0x…" spellcheck="false">
+          <label for="network">Network</label>
+          <select id="network"><option value="auto">Auto-detect across supported networks</option><option value="eth">Ethereum</option><option value="gno">Gnosis Chain</option><option value="pol">Polygon</option><option value="arb1">Arbitrum One</option><option value="oeth">Optimism</option><option value="base">Base</option><option value="sep">Sepolia</option><option value="zkevm">Polygon zkEVM</option><option value="bnb">BNB Chain</option><option value="avax">Avalanche</option></select>
+          <p class="import-note">A hash does not encode a readable chain. Auto-detect searches supported indexes and Safe services. A Safe address can show results from several networks.</p>
+          <label for="scope">When inspecting a Safe address</label>
+          <select id="scope"><option value="pending">Pending proposals</option><option value="history">Executed history</option><option value="both">Both (20 of each)</option></select>
+          <button id="submit" type="submit">Decode input / compare</button>
+        </form>
+        <button id="load-pending" class="secondary-button" type="button">Read queued for this Safe</button>
+        <button id="load-history" class="secondary-button" type="button">Read historical for this Safe</button>
+        <div class="watch-control"><label class="switch"><input id="watch" type="checkbox"><span>Watch this Safe every 30 seconds</span></label><p>Available for a Safe address or Safe URL. New and newly confirmed proposals appear here.</p></div>
+        <p class="local-note">Runs on your computer at 127.0.0.1. API keys stay in the server environment.</p>
+      </aside>
+      <section class="results" aria-live="polite"><div id="status" class="status">Ready to inspect</div><div id="report" class="empty"><div class="empty-icon" aria-hidden="true">⌕</div><h2>Start with anything you have</h2><p>Onchain execution hashes and exported JSON work without a Safe API key. A pending Safe hash needs access to the proposal data.</p></div></section>
+    </section>
+  </main>
+  <footer><span>Safe Tx Lens is an independent community tool.</span><span>Verify the hash on your hardware wallet and cross-check critical actions with a second tool.</span></footer>
+  <script src="/web/app.js" defer></script>
+</body>
+</html>

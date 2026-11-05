@@ -1,0 +1,15 @@
+{
+  "safe": "0xFa7D2a996aC6350f4b56C043112Da0366a59b74c",
+  "to": "0xFa7D2a996aC6350f4b56C043112Da0366a59b74c",
+  "value": "0",
+  "data": "0x",
+  "operation": 0,
+  "safeTxGas": "0",
+  "baseGas": "0",
+  "gasPrice": "0",
+  "gasToken": "0x0000000000000000000000000000000000000000",
+  "refundReceiver": "0x0000000000000000000000000000000000000000",
+  "nonce": 243,
+  "safeTxHash": "0xc315c0224cd40f31ed13239c161a6e3d897521e8688d56f0ce96d423eecadb5a",
+  "isExecuted": false
+}

@@ -1,0 +1,26 @@
+{
+  "name": "safe-tx-lens",
+  "version": "0.2.0",
+  "description": "Independent, read-only Safe transaction review from proposal to execution",
+  "type": "module",
+  "bin": {
+    "safe-tx-lens": "./bin/safe-tx-lens.mjs",
+    "safe-tx-lens-mcp": "./bin/safe-tx-lens-mcp.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node bin/safe-tx-lens.mjs serve"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "ethers": "^6.16.0",
+    "zod": "^4.6.7"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0"
+  }
+}

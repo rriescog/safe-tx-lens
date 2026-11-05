@@ -1,0 +1,241 @@
+import { Interface, JsonRpcProvider, TypedDataEncoder, getAddress, id, isAddress } from 'ethers';
+import { chainId } from './chains.mjs';
+import { decodeCall, summarizeCalls } from './decode.mjs';
+import { assessRisk } from './risk.mjs';
+import { fetchTransaction, safeGet } from './safe-api.mjs';
+
+const ZERO = '0x0000000000000000000000000000000000000000';
+const SAFE_TYPES = { SafeTx: [
+  { name: 'to', type: 'address' }, { name: 'value', type: 'uint256' },
+  { name: 'data', type: 'bytes' }, { name: 'operation', type: 'uint8' },
+  { name: 'safeTxGas', type: 'uint256' }, { name: 'baseGas', type: 'uint256' },
+  { name: 'gasPrice', type: 'uint256' }, { name: 'gasToken', type: 'address' },
+  { name: 'refundReceiver', type: 'address' }, { name: 'nonce', type: 'uint256' },
+] };
+const HASH_IFACE = new Interface(['function getTransactionHash(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,uint256) view returns (bytes32)']);
+const EXEC_IFACE = new Interface(['function execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes) returns (bool)']);
+const STATE_IFACE = new Interface(['function getOwners() view returns (address[])', 'function getThreshold() view returns (uint256)', 'function nonce() view returns (uint256)']);
+const EXEC_SUCCESS_TOPIC = id('ExecutionSuccess(bytes32,uint256)').toLowerCase();
+const EXEC_FAILURE_TOPIC = id('ExecutionFailure(bytes32,uint256)').toLowerCase();
+
+export function normalizeTransaction(raw) {
+  const tx = raw?.transaction ?? raw;
+  if (!tx || !isAddress(tx.safe) || !isAddress(tx.to)) throw new Error('Transaction needs valid safe and to addresses');
+  const data = tx.data ?? '0x';
+  if (!/^0x(?:[0-9a-fA-F]{2})*$/.test(data) || data.length > 2000002) throw new Error('Invalid or oversized calldata');
+  const operation = Number(tx.operation ?? 0);
+  if (operation !== 0 && operation !== 1) throw new Error('Unsupported operation');
+  const number = (value, label) => {
+    const string = String(value ?? '0');
+    if (!/^\d+$/.test(string)) throw new Error(`Invalid ${label}`);
+    return string;
+  };
+  return {
+    safe: getAddress(tx.safe), to: getAddress(tx.to), data, operation,
+    value: number(tx.value, 'value'), safeTxGas: number(tx.safeTxGas, 'safeTxGas'),
+    baseGas: number(tx.baseGas, 'baseGas'), gasPrice: number(tx.gasPrice, 'gasPrice'),
+    gasToken: getAddress(tx.gasToken ?? ZERO), refundReceiver: getAddress(tx.refundReceiver ?? ZERO),
+    nonce: number(tx.nonce, 'nonce'), safeTxHash: tx.safeTxHash ?? null,
+    isExecuted: Boolean(tx.isExecuted), isSuccessful: tx.isSuccessful ?? null,
+    blockNumber: tx.blockNumber ?? null, confirmationsRequired: tx.confirmationsRequired ?? null,
+    signatures: /^0x(?:[0-9a-fA-F]{2})+$/.test(tx.signatures ?? '') && tx.signatures.length <= 20002 ? tx.signatures : null,
+    transactionHash: tx.transactionHash ?? null, confirmations: tx.confirmations ?? [],
+  };
+}
+
+export function calculateHash(tx, network) {
+  const { safe, safeTxHash, isExecuted, isSuccessful, transactionHash, confirmations, blockNumber, confirmationsRequired, signatures, ...message } = tx;
+  return TypedDataEncoder.hash({ chainId: chainId(network), verifyingContract: safe }, SAFE_TYPES, message);
+}
+
+export function classifyIntent(call) {
+  const findings = [];
+  const walk = (node, path) => {
+    const method = node.method?.split('(')[0] ?? null;
+    const add = (severity, code, message) => findings.push({ severity, code, path, message });
+    if (node.operation === 1) add('critical', 'DELEGATECALL', 'Delegatecall runs target code in the Safe storage context; inspect target bytecode and simulation.');
+    if (node.value !== '0') add('info', 'NATIVE_VALUE', `Sends ${node.value} wei from the Safe.`);
+    if (!method && node.data !== '0x') add('warning', 'UNKNOWN_SELECTOR', `Selector ${node.selector} has no locally verified ABI. A label from an API would not prove behavior.`);
+    if (['upgradeTo', 'upgradeToAndCall', 'updateImplementation', 'changeAdmin'].includes(method)) add('critical', 'UPGRADE', `Possible implementation or admin change: ${method}.`);
+    if (['addOwnerWithThreshold', 'removeOwner', 'swapOwner', 'changeThreshold', 'enableModule', 'disableModule', 'setGuard', 'setFallbackHandler'].includes(method)) add('critical', 'SAFE_AUTHORITY', `Safe authority change: ${method}.`);
+    if (['approve', 'increaseAllowance', 'setApprovalForAll'].includes(method)) add('warning', 'APPROVAL', `Approval or operator change: ${method}.`);
+    if (['transfer', 'transferFrom'].includes(method)) add('info', 'TOKEN_TRANSFER', `Token transfer intent: ${method}.`);
+    if (method === 'cleanMapToken') add('warning', 'TOKEN_MAPPING_CHANGE', 'Token mapping cleanup can affect bridge lookups; verify the target contract and resulting state.');
+    if (method === 'multiSend') add('warning', 'MULTISEND_TARGET_UNVERIFIED', 'Inner calls are decoded from the bytes, but this tool has not verified that the target bytecode is the canonical Safe MultiSend contract.');
+    if (method === 'multiSend' && node.children.length === 0) add('warning', 'EMPTY_BATCH', 'MultiSend decoded with no inner calls.');
+    node.children.forEach((child, index) => walk(child, `${path}.${index + 1}`));
+  };
+  walk(call, '1');
+  return findings;
+}
+
+export function classifyEffects(simulation, safeAddress) {
+  if (!simulation) return [];
+  const effects = [];
+  for (const diff of simulation.storageDiffs ?? []) {
+    const label = String(diff.label ?? 'raw storage slot');
+    const safeSlotZero = diff.address?.toLowerCase() === safeAddress?.toLowerCase() && /^0x0{64}$/i.test(label);
+    const sensitive = safeSlotZero || /owner|threshold|module|guard|fallback|implementation|admin|paused/i.test(label);
+    effects.push({ kind: safeSlotZero ? 'safe_singleton' : sensitive ? 'authority_or_control' : 'storage', severity: sensitive ? 'critical' : 'info', address: diff.address, label: safeSlotZero ? 'Safe singleton (storage slot 0)' : label, before: diff.from, after: diff.to });
+  }
+  for (const diff of simulation.balanceDiffs ?? []) {
+    effects.push({ kind: 'native_balance', severity: 'warning', address: diff.address, before: diff.from, after: diff.to });
+  }
+  for (const change of simulation.assetChanges ?? []) {
+    effects.push({ kind: 'asset_transfer', severity: 'warning', address: change.token, label: change.type, before: change.from, after: change.to, amount: change.amount });
+  }
+  return effects;
+}
+
+async function onchainHash(tx, rpcUrl) {
+  const provider = new JsonRpcProvider(rpcUrl);
+  const network = await provider.getNetwork();
+  const input = HASH_IFACE.encodeFunctionData('getTransactionHash', [tx.to, tx.value, tx.data, tx.operation, tx.safeTxGas, tx.baseGas, tx.gasPrice, tx.gasToken, tx.refundReceiver, tx.nonce]);
+  const blockTag = tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest';
+  const output = await provider.call({ to: tx.safe, data: input, blockTag });
+  return { hash: HASH_IFACE.decodeFunctionResult('getTransactionHash', output)[0], chainId: Number(network.chainId) };
+}
+
+async function safeState(tx, network) {
+  return safeGet(network, `/safes/${tx.safe}/`);
+}
+
+async function rpcSafeState(tx, rpcUrl) {
+  const provider = new JsonRpcProvider(rpcUrl);
+  let blockTag = 'latest';
+  if (tx.isExecuted) {
+    const receipt = tx.transactionHash ? await provider.getTransactionReceipt(tx.transactionHash) : null;
+    if (receipt) blockTag = receipt.blockNumber - 1;
+    else if (Number.isInteger(tx.blockNumber) && tx.blockNumber > 0) blockTag = tx.blockNumber - 1;
+  }
+  const read = async (name, atBlock) => {
+    const result = await provider.call({ to: tx.safe, data: STATE_IFACE.encodeFunctionData(name, []), blockTag: atBlock });
+    return STATE_IFACE.decodeFunctionResult(name, result)[0];
+  };
+  let state;
+  try { state = await Promise.all([read('getOwners', blockTag), read('getThreshold', blockTag), read('nonce', blockTag)]); }
+  catch (error) {
+    if (blockTag === 'latest') throw error;
+    blockTag = 'latest';
+    state = await Promise.all([read('getOwners', blockTag), read('getThreshold', blockTag), read('nonce', blockTag)]);
+  }
+  const [owners, threshold, nonce] = state;
+  return { owners: [...owners], threshold: threshold.toString(), nonce: nonce.toString(), blockTag, source: blockTag === 'latest' && tx.isExecuted ? 'rpc_current_fallback' : 'rpc' };
+}
+
+function collectSignatures(tx, threshold) {
+  const confirmations = tx.confirmations.filter(c => c.owner && /^0x[0-9a-fA-F]{130}$/.test(c.signature ?? ''));
+  const unique = new Map(confirmations.map(c => [c.owner.toLowerCase(), c]));
+  const ordered = [...unique.values()].sort((a, b) => a.owner.toLowerCase().localeCompare(b.owner.toLowerCase()));
+  if (ordered.length < threshold) return null;
+  return `0x${ordered.slice(0, threshold).map(c => c.signature.slice(2)).join('')}`;
+}
+
+async function simulate(tx, network, safeInfo, options) {
+  const key = options.tenderlyKey ?? process.env.TENDERLY_ACCESS_KEY;
+  const account = options.tenderlyAccount ?? process.env.TENDERLY_ACCOUNT;
+  const project = options.tenderlyProject ?? process.env.TENDERLY_PROJECT;
+  if (!key || !account || !project) return { unavailable: 'Tenderly credentials not configured' };
+  const required = Number(tx.isExecuted && tx.confirmationsRequired ? tx.confirmationsRequired : safeInfo.threshold);
+  const signatures = tx.signatures ?? collectSignatures(tx, required);
+  if (!signatures) return { unavailable: 'Insufficient standard EOA signatures for faithful execTransaction simulation' };
+  const input = EXEC_IFACE.encodeFunctionData('execTransaction', [tx.to, tx.value, tx.data, tx.operation, tx.safeTxGas, tx.baseGas, tx.gasPrice, tx.gasToken, tx.refundReceiver, signatures]);
+  let blockNumber;
+  if (tx.isExecuted) {
+    if (!tx.transactionHash || !options.rpcUrl) return { unavailable: 'Historical execution needs RPC_URL to simulate at the preceding block' };
+    const receipt = await new JsonRpcProvider(options.rpcUrl).getTransactionReceipt(tx.transactionHash);
+    if (receipt) blockNumber = receipt.blockNumber - 1;
+    else if (Number.isInteger(tx.blockNumber) && tx.blockNumber > 0) blockNumber = tx.blockNumber - 1;
+    else return { unavailable: 'Historical execution receipt unavailable' };
+  }
+  const endpoint = `https://api.tenderly.co/api/v1/account/${encodeURIComponent(account)}/project/${encodeURIComponent(project)}/simulate`;
+  const executor = tx.confirmations.find(c => c.signatureType === 'APPROVED_HASH' && c.owner)?.owner ?? safeInfo.owners?.[0] ?? tx.safe;
+  const response = await fetch(endpoint, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Access-Key': key },
+    body: JSON.stringify({ network_id: String(chainId(network)), from: executor, to: tx.safe, input, gas: 8000000, gas_price: '0', save: true, save_if_fails: true, simulation_type: 'full', ...(blockNumber !== undefined ? { block_number: blockNumber } : {}) }),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!response.ok) return { unavailable: `Tenderly API returned ${response.status}` };
+  const result = await response.json();
+  const transaction = result.transaction ?? {};
+  const storageDiffs = [];
+  for (const item of transaction.transaction_info?.state_diff ?? []) {
+    if (item.soltype?.name && item.original !== null && item.dirty !== null && String(item.original) !== String(item.dirty)) {
+      storageDiffs.push({ address: item.address, label: item.soltype.name, from: String(item.original), to: String(item.dirty) });
+    } else for (const raw of item.raw ?? []) if (String(raw.original) !== String(raw.dirty)) {
+      storageDiffs.push({ address: item.address, label: String(raw.key ?? 'raw slot'), from: String(raw.original), to: String(raw.dirty) });
+    }
+  }
+  const info = transaction.transaction_info ?? {};
+  const balanceDiffs = (info.balance_changes ?? info.balance_diff ?? []).map(d => ({ address: d.address, from: String(d.original ?? d.before ?? ''), to: String(d.dirty ?? d.after ?? '') }));
+  const assetChanges = (info.asset_changes ?? []).map(change => ({
+    type: String(change.type ?? 'token'), token: String(change.token_info?.contract_address ?? change.asset?.address ?? change.token_address ?? ''),
+    from: String(change.from ?? change.from_address ?? ''), to: String(change.to ?? change.to_address ?? ''), amount: String(change.amount ?? change.raw_amount ?? ''),
+  }));
+  let safeExecutionSuccess = null;
+  const output = transaction.output ?? info.call_trace?.output;
+  if (typeof output === 'string' && /^0x[0-9a-fA-F]{64}$/.test(output)) {
+    try { safeExecutionSuccess = Boolean(EXEC_IFACE.decodeFunctionResult('execTransaction', output)[0]); } catch {}
+  }
+  for (const log of info.logs ?? []) {
+    const topic = String(log.topics?.[0] ?? log.raw?.topics?.[0] ?? '').toLowerCase();
+    if (log.address?.toLowerCase() === tx.safe.toLowerCase() && topic === EXEC_SUCCESS_TOPIC) safeExecutionSuccess = true;
+    if (log.address?.toLowerCase() === tx.safe.toLowerCase() && topic === EXEC_FAILURE_TOPIC) safeExecutionSuccess = false;
+  }
+  return { evmSuccess: transaction.status === true, safeExecutionSuccess, success: transaction.status === true && safeExecutionSuccess === true ? true : transaction.status === false || safeExecutionSuccess === false ? false : null, url: result.simulation?.id ? `https://dashboard.tenderly.co/${encodeURIComponent(account)}/${encodeURIComponent(project)}/simulator/${result.simulation.id}` : null, storageDiffs, balanceDiffs, assetChanges, error: transaction.error_message ?? null, blockNumber: blockNumber ?? 'latest' };
+}
+
+export async function analyze(raw, network = 'eth', options = {}) {
+  chainId(network);
+  const tx = normalizeTransaction(raw);
+  const calculatedHash = calculateHash(tx, network);
+  const warnings = [];
+  const checks = [{ name: 'Local EIP-712 hash', status: tx.safeTxHash ? calculatedHash.toLowerCase() === tx.safeTxHash.toLowerCase() ? 'pass' : 'fail' : 'unverified', detail: calculatedHash }];
+  if (checks[0].status === 'fail') warnings.push('The API or JSON safeTxHash does not match the transaction fields. Do not sign.');
+  if (options.rpcUrl) {
+    try {
+      const chain = await onchainHash(tx, options.rpcUrl);
+      checks.push({ name: tx.isExecuted && tx.blockNumber ? 'Safe contract hash at pre-execution block' : 'Safe contract hash', status: chain.chainId === chainId(network) && chain.hash.toLowerCase() === calculatedHash.toLowerCase() ? 'pass' : 'fail', detail: chain.hash });
+      if (checks.at(-1).status === 'fail') warnings.push('The Safe contract hash or RPC chain differs from the locally calculated hash. Do not sign.');
+    } catch (error) { checks.push({ name: tx.isExecuted && tx.blockNumber ? 'Safe contract hash at pre-execution block' : 'Safe contract hash', status: 'unavailable', detail: String(error.shortMessage ?? error.message).slice(0, 240) }); }
+  }
+  const call = decodeCall(tx);
+  const actions = summarizeCalls(call);
+  const findings = classifyIntent(call);
+  if (tx.to.toLowerCase() === tx.safe.toLowerCase() && tx.data === '0x' && tx.value === '0' && tx.operation === 0) {
+    findings.push({ severity: 'info', code: 'SAFE_REJECTION', path: '1', message: 'Empty self-call: this consumes the Safe nonce if executed and can cancel a competing proposal at the same nonce.' });
+  }
+  if (tx.gasToken !== ZERO || tx.refundReceiver !== ZERO || tx.gasPrice !== '0') findings.push({ severity: 'warning', code: 'GAS_REFUND', path: '1', message: 'Custom gas payment fields may transfer value outside the apparent call.' });
+  let safeInfo = options.safeInfo ?? null;
+  if (!safeInfo && options.fetchState !== false) {
+    try { safeInfo = await safeState(tx, network); }
+    catch (error) {
+      if (options.rpcUrl) {
+        try { safeInfo = await rpcSafeState(tx, options.rpcUrl); }
+        catch (rpcError) { warnings.push(`Safe state unavailable: API ${error.message}; RPC ${rpcError.message}`); }
+      } else warnings.push(`Safe state unavailable: ${error.message}`);
+    }
+  }
+  if (safeInfo && !tx.isExecuted && BigInt(tx.nonce) < BigInt(safeInfo.nonce)) findings.push({ severity: 'warning', code: 'STALE_NONCE', path: '1', message: 'Safe nonce has already passed this proposal.' });
+  if (tx.isExecuted && safeInfo && (safeInfo.source === 'rpc_current_fallback' || !safeInfo.source)) warnings.push('Signer and threshold context is from the current Safe state; historical owners and threshold were not independently recovered.');
+  let simulation = null;
+  if (options.simulate) {
+    try { simulation = safeInfo ? await simulate(tx, network, safeInfo, options) : { unavailable: 'Current Safe state unavailable' }; }
+    catch (error) { simulation = { unavailable: error.message }; }
+  }
+  if (tx.isExecuted && typeof tx.isSuccessful === 'boolean' && typeof simulation?.success === 'boolean' && tx.isSuccessful !== simulation.success) {
+    findings.push({ severity: 'critical', code: 'EXECUTION_MISMATCH', path: '1', message: 'Historical simulation result differs from the Safe Transaction Service execution result. Investigate the block, signatures, and full trace.' });
+  }
+  const effects = classifyEffects(simulation?.unavailable ? null : simulation, tx.safe);
+  const risk = assessRisk({ call, actions, findings, effects, checks, simulation, transaction: tx });
+  const status = checks.some(c => c.status === 'fail') ? 'BLOCK' : findings.some(f => f.severity === 'critical') || effects.some(e => e.severity === 'critical') ? 'REVIEW' : 'INSPECT';
+  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, status, risk, checks, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
+}
+
+export async function analyzeHash(hash, network, options = {}) {
+  const raw = await fetchTransaction(hash, network);
+  if (raw.safeTxHash?.toLowerCase() !== hash.toLowerCase()) throw new Error('Safe API returned a different hash');
+  if (options.expectedSafe && raw.safe?.toLowerCase() !== options.expectedSafe.toLowerCase()) throw new Error('Safe URL address does not match transaction');
+  const report = await analyze(raw, network, options);
+  return { ...report, evidence: { source: raw.lookupSource, retrievedAt: new Date().toISOString() } };
+}
