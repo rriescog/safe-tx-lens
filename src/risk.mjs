@@ -43,6 +43,9 @@ export function assessRisk({ call, actions, findings, effects, checks, simulatio
     }
     if (finding.code === 'GAS_REFUND') add(80, 'Gas refund fields can move value beyond the visible target call.');
     if (finding.code === 'EXECUTION_MISMATCH') add(100, 'Historical simulation differs from the recorded execution outcome.');
+    if (finding.code === 'TARGET_CODE_MISMATCH') add(100, 'Verified source bytecode differs from the target bytecode returned by the RPC.');
+    if (finding.code === 'TARGET_ABI_MISMATCH') add(80, 'Decoded selector does not appear in the verified source ABI.');
+    if (finding.code === 'TARGET_NO_CODE') add(75, 'A called target has no bytecode at the inspected block.');
     if (finding.code === 'SAFE_REJECTION') add(55, 'Empty self-call can cancel a competing Safe transaction by consuming its nonce.');
   }
   if (checks.some(check => check.status === 'fail')) add(100, 'Safe transaction hash verification failed. Do not sign.');

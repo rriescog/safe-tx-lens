@@ -11,6 +11,13 @@ const status = document.getElementById('status');
 const submit = document.getElementById('submit');
 const watch = document.getElementById('watch');
 const jsonFile = document.getElementById('json-file');
+const publicMode = document.body.dataset.publicMode === 'true';
+if (publicMode) {
+  document.querySelector('.local-note').textContent = 'Public demo: no owner API keys or simulation. Run the CLI or local UI for unrestricted review with your own credentials.';
+  document.querySelector('.watch-control').hidden = true;
+  document.querySelector('#network option[value="auto"]').disabled = true;
+  network.value = 'eth';
+}
 let timer = null;
 let watchInput = null;
 let importedJson = null;
@@ -18,6 +25,7 @@ let lastFingerprints = new Map();
 let activeReportInput = null;
 let activeReportNetwork = null;
 let activeReportEvidence = null;
+let activeReportTargetChecks = null;
 
 function esc(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]); }
 function pill(value) { return `<span class="pill ${esc(String(value).toLowerCase())}">${esc(value)}</span>`; }
@@ -51,6 +59,16 @@ function crossCheckHtml(r) {
   const hashes = r.hashComponents ? `<div class="field-grid">${field('Domain hash', r.hashComponents.domainHash)}${field('Message hash', r.hashComponents.messageHash)}${field('Safe transaction hash', r.calculatedHash)}</div>` : '<p class="meta">Complete Safe transaction fields are required to calculate hash components.</p>';
   return `<p class="meta">Compare these locally calculated values with <a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">pcaversaccio's independent verifier</a>. This app does not run or bundle that separate AGPL tool.</p>${hashes}${command ? `<p class="meta">Run in a separate checkout of that project:</p><code class="cross-check-command">${esc(command)}</code>` : ''}`;
 }
+function targetChecksHtml(r) {
+  const checks = r.targetChecks ?? [];
+  const rows = checks.map(check => {
+    const proxy = check.proxy ? `<p>ERC-1967 implementation: <span class="mono">${esc(check.proxy.implementation)}</span> · ${esc(check.proxy.implementationCode?.status ?? 'unavailable')}${check.proxy.implementationCode?.bytecodeHash ? ` · <span class="mono">${esc(check.proxy.implementationCode.bytecodeHash)}</span>` : ''}</p>` : '';
+    const abi = check.abiSelectors?.length ? `<p>Selectors in verified ABI: ${check.abiSelectors.map(item => `${esc(item.selector)} ${item.present ? 'yes' : 'no'}`).join(' · ')}</p>` : check.abiWarning ? `<p>${esc(check.abiWarning)}</p>` : '';
+    return `<div class="item">${pill(check.status)}<div class="item-content"><strong class="mono">${esc(check.address)}</strong><p>${esc(check.reason)} · block ${esc(check.blockTag)}${check.bytecodeHash ? `<br>Runtime bytecode: <span class="mono">${esc(check.bytecodeHash)}</span>` : ''}${check.source ? `<br><a href="${esc(check.source)}" target="_blank" rel="noopener noreferrer">Inspect verified source</a>` : ''}</p>${abi}${proxy}</div></div>`;
+  }).join('');
+  const complete = checks.length > 0 && checks.every(check => ['verified', 'verified_current'].includes(check.status) && (!check.proxy || ['verified', 'verified_current'].includes(check.proxy.implementationCode?.status)));
+  return `<div class="notice">${checks.length ? complete ? 'Matching verified runtime bytecode was found for every inspected target. This does not prove the code is safe.' : 'Source verification is incomplete. Inspect every unverified target before signing.' : 'Target code has not been checked yet.'}</div>${rows}<div class="simulation-action"><button type="button" id="verify-targets">Verify all target bytecode</button><p>Uses this network’s RPC and Sourcify. ERC-1967 implementations are inspected separately. Other proxy patterns and code changes during execution need manual review.</p></div>`;
+}
 function reportHtml(r) {
   const tx = r.transaction;
   const evidence = r.evidence?.source === 'onchain_execution'
@@ -68,8 +86,8 @@ function reportHtml(r) {
   const emptyEffects = r.simulation?.unavailable ? 'Simulation was unavailable, so no state change was measured.' : r.simulation && r.simulation.stateDiffAvailable === false ? 'The simulation provider did not return a storage diff. Absence of a diff is not evidence of no change.' : r.simulation ? 'The simulation returned no storage, balance, or asset changes in its response.' : 'No simulation or execution trace has measured these changes yet.';
   const effects = r.effects.length ? r.effects.map(e => `<div class="item">${pill(e.severity)}<div class="item-content"><strong>${esc(e.kind)} · ${esc(e.label ?? '')}</strong><p class="mono">${esc(e.address)}<br>${esc(short(e.before))} → ${esc(short(e.after))}${e.amount ? `<br>Amount: ${esc(e.amount)}` : ''}</p><details><summary>Full before and after values</summary><div class="raw mono">Before: ${esc(e.before)}<br>After: ${esc(e.after)}</div></details></div></div>`).join('') : `<div class="state-empty"><strong>No measured state change</strong><p>${esc(emptyEffects)}</p></div>`;
   const sim = r.simulation ? r.simulation.unavailable ? `<div class="notice">Simulation unavailable: ${esc(r.simulation.unavailable)}</div>` : `<div class="item">${pill(r.simulation.success === true ? 'pass' : r.simulation.success === false ? 'fail' : 'unavailable')}<div class="item-content"><strong>${r.simulation.success === true ? 'Safe execution succeeded in simulation' : r.simulation.success === false ? 'Safe execution failed in simulation' : 'EVM completed; Safe inner result unverified'}</strong><p>Block: ${esc(r.simulation.blockNumber)}${r.simulation.error ? ` · ${esc(r.simulation.error)}` : ''}${r.simulation.url ? ` · <a href="${esc(r.simulation.url)}" target="_blank" rel="noopener noreferrer">Open Tenderly trace</a>` : ''}</p></div></div>` : '<p class="meta">Simulation has not been run for this transaction.</p>';
-  const simulateAction = `<div class="simulation-action"><button type="button" id="run-simulation">${r.simulation ? 'Run simulation again' : 'Run simulation and inspect state changes'}</button><p>Sends this transaction's calldata and signatures to the configured Tenderly project. The saved simulation covers one chain state and execution path.</p></div>`;
-  return `<div class="report-header"><div class="report-heading">${pill(r.status)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(tx.isExecuted ? 'Executed transaction' : 'Pending proposal')} on ${esc(r.network)}</span></div><div class="hash-line mono">${esc(r.hash)}</div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('What this transaction can do', `${riskHtml}${flow}`)}${section('Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('State changes measured by simulation or execution', effects)}${section('Checks and simulation', `${checks}${sim}${simulateAction}`)}${section('Independent hash cross-check', crossCheckHtml(r))}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', tx.isExecuted ? (tx.isSuccessful ? 'Executed successfully' : 'Executed, failed') : 'Offchain proposal')}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}<details class="technical"><summary>Technical details: decoded arguments and raw calldata</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`;
+  const simulateAction = publicMode ? '<p class="meta">Simulation is available in the local tool with your own Tenderly credentials.</p>' : `<div class="simulation-action"><button type="button" id="run-simulation">${r.simulation ? 'Run simulation again' : 'Run simulation and inspect state changes'}</button><p>Sends this transaction's calldata and signatures to the configured Tenderly project. The saved simulation covers one chain state and execution path.</p></div>`;
+  return `<div class="report-header"><div class="report-heading">${pill(r.status)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(tx.isExecuted ? 'Executed transaction' : 'Pending proposal')} on ${esc(r.network)}</span></div><div class="hash-line mono">${esc(r.hash)}</div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('What this transaction can do', `${riskHtml}${flow}`)}${section('Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('Target bytecode and verified source', targetChecksHtml(r))}${section('State changes measured by simulation or execution', effects)}${section('Checks and simulation', `${checks}${sim}${simulateAction}`)}${section('Independent hash cross-check', crossCheckHtml(r))}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', tx.isExecuted ? (tx.isSuccessful ? 'Executed successfully' : 'Executed, failed') : 'Offchain proposal')}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}<details class="technical"><summary>Technical details: decoded arguments and raw calldata</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`;
 }
 function queueHtml(result) {
   const title = result.scope === 'history' ? 'Executed history' : result.scope === 'both' ? 'Pending and executed' : 'Pending proposals';
@@ -89,20 +107,26 @@ function showTransactionReport(result) {
   activeReportInput = result.transaction;
   activeReportNetwork = result.network;
   activeReportEvidence = result.evidence ?? null;
+  activeReportTargetChecks = result.targetChecks ?? null;
   report.innerHTML = reportHtml(result);
-  report.querySelector('#run-simulation').addEventListener('click', event => {
+  report.querySelector('#run-simulation')?.addEventListener('click', event => {
     event.currentTarget.disabled = true;
     inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, simulate: true });
   });
+  report.querySelector('#verify-targets').addEventListener('click', event => {
+    event.currentTarget.disabled = true;
+    inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, verifyTargets: true });
+  });
 }
-async function inspect({ silent = false, overrideInput = null, overrideNetwork = null, simulate = false } = {}) {
+async function inspect({ silent = false, overrideInput = null, overrideNetwork = null, simulate = false, verifyTargets = true } = {}) {
   const selectedInput = overrideInput ?? importedJson ?? input.value.trim();
-  const priorEvidence = simulate ? activeReportEvidence : null;
-  const priorHash = simulate ? activeReportInput?.safeTxHash : null;
+  const priorEvidence = simulate || verifyTargets ? activeReportEvidence : null;
+  const priorHash = simulate || verifyTargets ? activeReportInput?.safeTxHash : null;
+  const priorTargetChecks = simulate ? activeReportTargetChecks : null;
   if (!selectedInput) return;
   if (!silent) { submit.disabled = true; status.textContent = simulate ? 'Simulating Safe execution and measuring state changes…' : 'Inspecting Safe data and recalculating hashes…'; }
   try {
-    const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? network.value, scope: scope.value, simulate, safeAddress: safeAddress.value.trim() || undefined, safeHash: safeHash.value.trim() || undefined }) });
+    const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? network.value, scope: scope.value, simulate, verifyTargets, safeAddress: safeAddress.value.trim() || undefined, safeHash: safeHash.value.trim() || undefined }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error ?? 'Inspection failed');
     report.classList.remove('empty');
@@ -138,11 +162,11 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
         inspect({ overrideInput: result.safe });
       }));
       report.querySelectorAll('.queue-row').forEach(row => {
-        const open = () => { const selected = result.reports[Number(row.dataset.index)]; showTransactionReport(selected); status.textContent = 'Transaction details'; };
+        const open = () => { const selected = result.reports[Number(row.dataset.index)]; showTransactionReport(selected); status.textContent = 'Verifying selected transaction targets…'; inspect({ overrideInput: selected.transaction, overrideNetwork: selected.network, verifyTargets: true }); };
         row.addEventListener('click', open);
         row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
       });
-    } else { if (priorEvidence && priorHash?.toLowerCase() === result.hash?.toLowerCase()) result.evidence = priorEvidence; showTransactionReport(result); status.textContent = simulate ? 'Simulation reviewed' : 'Inspection complete'; if (watch.checked) { watch.checked = false; clearInterval(timer); timer = null; } }
+    } else { if (priorHash?.toLowerCase() === result.hash?.toLowerCase()) { if (priorEvidence) result.evidence = priorEvidence; if (priorTargetChecks?.length) result.targetChecks = priorTargetChecks; } showTransactionReport(result); status.textContent = simulate ? 'Simulation reviewed' : 'Inspection complete'; if (watch.checked) { watch.checked = false; clearInterval(timer); timer = null; } }
   } catch (error) { status.textContent = 'Inspection failed'; report.innerHTML = `<div class="empty"><h2>Could not inspect</h2><p>${esc(error.message)}</p></div>`; }
   finally { submit.disabled = false; }
 }

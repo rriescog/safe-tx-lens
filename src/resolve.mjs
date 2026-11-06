@@ -1,7 +1,7 @@
 import { analyze, analyzeHash } from './analyze.mjs';
 import { parseInput } from './inputs.mjs';
 import { fetchSafeTransactions, safeGet } from './safe-api.mjs';
-import { analyzeExecutionHash, fetchRecentExecutions, findRecentExecutionBySafeHash, PUBLIC_RPC } from './onchain.mjs';
+import { analyzeExecutionHash, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcFor } from './onchain.mjs';
 import { analyzeBuilderExport, isBuilderExport } from './builder.mjs';
 import { analyzeMonitorStorage, isMonitorStorage } from './monitor-import.mjs';
 import { fetchMonitorStorage, localCredentials } from './tenderly-storage.mjs';
@@ -87,7 +87,7 @@ export async function resolve(input, network = 'eth', options = {}) {
       reports: results.flatMap(result => result.reports), reviewedAt: new Date().toISOString(),
     };
   }
-  const settings = { ...options, rpcUrl: options.rpcUrl ?? PUBLIC_RPC[parsed.network] };
+  const settings = { ...options, rpcUrl: rpcFor(parsed.network, options.rpcUrl), verifyTargets: options.verifyTargets ?? true };
   if (parsed.kind === 'hash') {
     let monitorFound = false;
     try {
@@ -171,7 +171,7 @@ export async function resolve(input, network = 'eth', options = {}) {
       sourceAvailable = true;
       truncated ||= page.truncated;
       for (const tx of page.transactions) {
-        const report = await analyze(tx, parsed.network, { ...settings, safeInfo: page.safe });
+        const report = await analyze(tx, parsed.network, { ...settings, verifyTargets: false, safeInfo: page.safe });
         reports.push({ ...report, evidence: { source: page.source, retrievedAt: new Date().toISOString() } });
       }
     } catch (error) {

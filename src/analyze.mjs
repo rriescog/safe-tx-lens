@@ -4,6 +4,7 @@ import { decodeCall, summarizeCalls } from './decode.mjs';
 import { assessRisk } from './risk.mjs';
 import { fetchTransaction, safeGet } from './safe-api.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
+import { inspectTargetCode } from './target-code.mjs';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 const SAFE_TYPES = { SafeTx: [
@@ -220,6 +221,16 @@ export async function analyze(raw, network = 'eth', options = {}) {
   const call = decodeCall(tx);
   const actions = summarizeCalls(call);
   const findings = classifyIntent(call);
+  // A selector is only a decoding hypothesis. Pin every resolved target to
+  // bytecode on the selected chain and compare Sourcify's verified runtime.
+  const targetChecks = options.verifyTargets ? await inspectTargetCode(call, network, { rpcUrl: options.rpcUrl, provider: options.targetProvider, blockTag: tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest', sourceLookup: options.sourceLookup }) : [];
+  for (const target of targetChecks) {
+    if (target.status === 'mismatch') findings.push({ severity: 'critical', code: 'TARGET_CODE_MISMATCH', path: target.address, message: target.reason });
+    // A plain value transfer to an EOA has no runtime code by design.
+    if (target.status === 'no_code' && target.selectors.length) findings.push({ severity: 'warning', code: 'TARGET_NO_CODE', path: target.address, message: target.reason });
+    if (target.abiSelectors?.some(selector => !selector.present) || target.proxy?.implementationCode?.abiSelectors?.some(selector => !selector.present)) findings.push({ severity: 'warning', code: 'TARGET_ABI_MISMATCH', path: target.address, message: 'The locally decoded selector is absent from the matching verified source ABI; the function label may be wrong.' });
+  }
+  if (options.verifyTargets && targetChecks.some(target => !['verified', 'verified_current'].includes(target.status) || (target.proxy && !['verified', 'verified_current'].includes(target.proxy.implementationCode?.status)))) warnings.push('At least one called target or ERC-1967 implementation lacks matching verified runtime bytecode. A decoded selector is only a hypothesis about behavior.');
   if (tx.to.toLowerCase() === tx.safe.toLowerCase() && tx.data === '0x' && tx.value === '0' && tx.operation === 0) {
     findings.push({ severity: 'info', code: 'SAFE_REJECTION', path: '1', message: 'Empty self-call: this consumes the Safe nonce if executed and can cancel a competing proposal at the same nonce.' });
   }
@@ -248,7 +259,7 @@ export async function analyze(raw, network = 'eth', options = {}) {
   const effects = classifyEffects(simulation?.unavailable ? null : simulation, tx.safe);
   const risk = assessRisk({ call, actions, findings, effects, checks, simulation, transaction: tx });
   const status = checks.some(c => c.status === 'fail') ? 'BLOCK' : findings.some(f => f.severity === 'critical') || effects.some(e => e.severity === 'critical') ? 'REVIEW' : 'INSPECT';
-  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, risk, checks, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
+  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, risk, checks, targetChecks, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
 }
 
 export async function analyzeHash(hash, network, options = {}) {

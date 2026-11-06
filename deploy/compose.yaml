@@ -1,0 +1,39 @@
+services:
+  app:
+    image: ${IMAGE:?Set the immutable GHCR image digest}
+    restart: unless-stopped
+    environment:
+      PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN}
+      PUBLIC_DAILY_LIMIT: ${PUBLIC_DAILY_LIMIT:-5}
+      PUBLIC_QUOTA_FILE: /data/public-quota.json
+    volumes:
+      - quota:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 512m
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+    ports:
+      - 80:80
+      - 443:443
+      - 443:443/udp
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  quota:
+  caddy_data:
+  caddy_config:

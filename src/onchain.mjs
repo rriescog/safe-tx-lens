@@ -7,10 +7,23 @@ const STATE = new Interface(['function nonce() view returns (uint256)']);
 const SUCCESS_TOPIC = id('ExecutionSuccess(bytes32,uint256)').toLowerCase();
 const FAILURE_TOPIC = id('ExecutionFailure(bytes32,uint256)').toLowerCase();
 
-export const PUBLIC_RPC = Object.freeze({ eth: 'https://ethereum.publicnode.com' });
+// These endpoints were chain-ID checked when added. They remain third-party
+// infrastructure: verify the returned chain ID on every request and surface
+// outages rather than silently treating missing code as an EOA.
+export const PUBLIC_RPC = Object.freeze({
+  eth: 'https://ethereum.publicnode.com', gno: 'https://gnosis.publicnode.com',
+  pol: 'https://polygon-bor-rpc.publicnode.com', arb1: 'https://arbitrum-one-rpc.publicnode.com',
+  oeth: 'https://optimism-rpc.publicnode.com', base: 'https://base-rpc.publicnode.com',
+  sep: 'https://ethereum-sepolia-rpc.publicnode.com', bnb: 'https://bsc-rpc.publicnode.com',
+  avax: 'https://avalanche-c-chain-rpc.publicnode.com',
+});
+
+export function rpcFor(network, override) {
+  return override ?? process.env[`RPC_URL_${network.toUpperCase()}`] ?? PUBLIC_RPC[network] ?? null;
+}
 
 export async function findRecentExecutionBySafeHash(safe, safeHash, network = 'eth', options = {}) {
-  const rpcUrl = options.rpcUrl ?? PUBLIC_RPC[network];
+  const rpcUrl = rpcFor(network, options.rpcUrl);
   if (!rpcUrl && !options.provider) return null;
   const provider = options.provider ?? new JsonRpcProvider(rpcUrl);
   const [chain, latest] = await Promise.all([provider.getNetwork(), provider.getBlockNumber()]);
@@ -21,7 +34,7 @@ export async function findRecentExecutionBySafeHash(safe, safeHash, network = 'e
 }
 
 export async function fetchRecentExecutions(safe, network = 'eth', options = {}) {
-  const rpcUrl = options.rpcUrl ?? PUBLIC_RPC[network];
+  const rpcUrl = rpcFor(network, options.rpcUrl);
   if (!rpcUrl && !options.provider) throw new Error(`An RPC URL is required for ${network}`);
   const provider = options.provider ?? new JsonRpcProvider(rpcUrl);
   const [chain, latest] = await Promise.all([provider.getNetwork(), provider.getBlockNumber()]);
@@ -39,7 +52,7 @@ export async function analyzeExecutionHash(hash, network = 'eth', options = {}) 
   // nonce is not an argument. Recover that nonce by matching the emitted Safe
   // hash against locally recomputed candidates, never by trusting a label.
   if (!/^0x[0-9a-fA-F]{64}$/.test(hash)) throw new Error('Invalid Ethereum execution transaction hash');
-  const rpcUrl = options.rpcUrl ?? PUBLIC_RPC[network];
+  const rpcUrl = rpcFor(network, options.rpcUrl);
   if (!rpcUrl && !options.provider) throw new Error(`An RPC URL is required for ${network}`);
   const provider = options.provider ?? new JsonRpcProvider(rpcUrl);
   const [chain, outer, receipt] = await Promise.all([provider.getNetwork(), provider.getTransaction(hash), provider.getTransactionReceipt(hash)]);
@@ -77,7 +90,7 @@ export async function analyzeExecutionHash(hash, network = 'eth', options = {}) 
     if (calculateHash(raw, network).toLowerCase() === raw.safeTxHash.toLowerCase()) { matched = true; break; }
   }
   if (!matched) throw new Error('Could not recover Safe nonce from the execution event within 5,000 recent nonces');
-  const report = await analyze(raw, network, { ...options, rpcUrl });
+  const report = await analyze(raw, network, { ...options, rpcUrl, verifyTargets: options.verifyTargets ?? true, targetProvider: options.targetProvider ?? provider });
   const block = await provider.getBlock(receipt.blockNumber);
   return { ...report, evidence: { source: 'onchain_execution', executionHash: hash, blockNumber: receipt.blockNumber, blockTime: block ? new Date(block.timestamp * 1000).toISOString() : null } };
 }

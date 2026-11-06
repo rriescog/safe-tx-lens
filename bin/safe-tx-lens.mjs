@@ -17,6 +17,8 @@ Options:
   --interval <seconds> Watch polling interval (minimum 15)
   --once               Watch one poll and exit
   --port <number>      Local UI port (default 4173)
+  --public             VPS mode: no owner keys, no simulation, shared daily budget
+  --origin <https://domain>  Required public UI origin
   --scope <pending|history|both>  Safe address listing (default pending)
   --safe-address <address>  Safe address to use when checking Builder JSON
   --safe-hash <hash>      Compare Builder JSON with this Safe transaction hash
@@ -29,10 +31,10 @@ function args(argv) {
   const result = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (['--network', '--rpc', '--interval', '--port', '--scope', '--safe-address', '--safe-hash'].includes(arg)) {
+    if (['--network', '--rpc', '--interval', '--port', '--scope', '--safe-address', '--safe-hash', '--origin'].includes(arg)) {
       if (!argv[i + 1]) throw new Error(`Missing value for ${arg}`);
       result[arg.slice(2)] = argv[++i];
-    } else if (['--simulate', '--json', '--once', '--help'].includes(arg)) result[arg.slice(2)] = true;
+    } else if (['--simulate', '--json', '--once', '--help', '--public'].includes(arg)) result[arg.slice(2)] = true;
     else if (arg.startsWith('--')) throw new Error(`Unknown option ${arg}`);
     else result._.push(arg);
   }
@@ -115,7 +117,7 @@ try {
   if (!command || flags.help || command === 'help') help();
   else if (command === 'serve') {
     if (flags.simulate) throw new Error('In the UI, open one transaction and select Run simulation');
-    await serve({ port: Number(flags.port ?? 4173), rpcUrl: flags.rpc ?? process.env.RPC_URL });
+    await serve({ port: Number(flags.port ?? 4173), rpcUrl: flags.rpc ?? process.env.RPC_URL, publicMode: flags.public, publicOrigin: flags.origin ?? process.env.PUBLIC_ORIGIN, quotaFile: process.env.PUBLIC_QUOTA_FILE ?? '/data/public-quota.json', dailyLimit: Number(process.env.PUBLIC_DAILY_LIMIT ?? 5) });
   }
   else if (command === 'inspect' || command === 'watch') {
     if (!flags._[0]) throw new Error(`${command} needs an input`);

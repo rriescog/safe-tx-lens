@@ -4,7 +4,7 @@ Read-only, open-source inspection for Safe multisig proposals. Give it a Safe tr
 
 **This is an aid for human review, not a proof of safety.** A matching hash proves the supplied fields hash to the expected value. It does not prove target bytecode is benign. A successful simulation covers one chain state and one execution path. Verify the hash on a hardware wallet and inspect every critical call independently.
 
-**Decoding is not source-code verification.** The tool reads Safe transaction fields and calldata from Safe services or an onchain execution, then matches function selectors against its built-in ABIs. It does not currently download verified Solidity source, verify proxy implementations or MultiSend bytecode, or decompile arbitrary EVM bytecode. Unknown selectors remain unknown. The Ethereum RPC used by default is `https://ethereum.publicnode.com`; an optional Etherscan key can locate historical execution events, but it does not supply the decoder's ABIs.
+**Decoding is not proof of behavior.** For a selected transaction, the tool reads runtime bytecode from that chain's RPC and compares its hash with Sourcify's verified runtime bytecode. It checks selectors against the matching ABI and follows ERC-1967 implementation slots. Missing source, a bytecode mismatch, and unavailable historical RPC state stay visible. Other proxy patterns, delegatecall semantics, and code changes within a transaction need independent review. It does not decompile arbitrary EVM bytecode.
 
 ## Quick start
 
@@ -45,7 +45,7 @@ node bin/safe-tx-lens.mjs inspect @builder-export.json --network eth --safe-hash
 node bin/safe-tx-lens.mjs watch 0xYOUR_SAFE_ADDRESS --network eth --interval 30
 ```
 
-Ethereum uses a public RPC by default; set `RPC_URL` (or `--rpc`) to choose your own provider. No key is needed for local JSON analysis or reconstruction from an onchain execution transaction hash. Pending proposals are offchain, so an EVM RPC cannot recover their calldata from a Safe transaction hash. Safe Transaction Service access is needed for reliable hash-only lookup of pending proposals. [Anonymous access](https://docs.safe.global/core-api/how-to-use-api-keys) has a monthly quota; `SAFE_API_KEY` enables authenticated access.
+Nine supported networks have public RPC defaults; Polygon zkEVM requires `RPC_URL_ZKEVM` or `--rpc` for bytecode and onchain reconstruction. Set `RPC_URL_<NETWORK>` or `--rpc` to choose your own provider. No key is needed for local JSON analysis or reconstruction from an onchain execution transaction hash. Pending proposals are offchain, so an EVM RPC cannot recover their calldata from a Safe transaction hash. Safe Transaction Service access is needed for reliable hash-only lookup of pending proposals. [Anonymous access](https://docs.safe.global/core-api/how-to-use-api-keys) has a monthly quota; `SAFE_API_KEY` enables authenticated access.
 
 For a Safe hash, the UI, CLI, and MCP look up offchain proposals through Safe services and can use an optional Etherscan event index to locate executed transactions. An indexed execution is reconstructed and checked against the EVM RPC; an index hit by itself is not treated as proof. For a Safe address, Safe services supply the pending queue and executed history; Ethereum history can fall back to a recent RPC scan. The RPC scan covers roughly the latest 8,000 blocks and reports its range. If every pending source fails, the queue is marked **unavailable**, never empty. Listings show at most 20 per category in the UI and MCP.
 
@@ -62,7 +62,7 @@ export RPC_URL='https://...'
 export TENDERLY_ACCESS_KEY='...'
 export TENDERLY_ACCOUNT='your-account'
 export TENDERLY_PROJECT='your-project'
-node bin/safe-tx-lens.mjs serve --simulate
+node bin/safe-tx-lens.mjs serve
 ```
 
 The JSON input should contain `safe`, `to`, `value`, `data`, `operation`, `nonce`, `safeTxGas`, `baseGas`, `gasPrice`, `gasToken`, and `refundReceiver`; absent numeric/gas fields default to zero. Include `safeTxHash` to check it against the calculated hash. For historical simulation include `transactionHash`, `blockNumber`, and either the exact `signatures` bytes from an onchain `execTransaction` or `confirmationsRequired` and `confirmations` from the Safe Transaction Service.
@@ -92,12 +92,15 @@ Example MCP host configuration (replace the path with your checkout):
 }
 ```
 
+The [VPS deployment guide](deploy/README.md) prepares a keyless public demo with a global request budget and CI/CD. It does not host MCP; each user runs the local stdio server with their own credentials.
+
 ## What the report distinguishes
 
 | Layer | Evidence | Limit |
 | --- | --- | --- |
 | Hash | Local EIP-712 recomputation; optional onchain `getTransactionHash` | Protects against mismatched fields, not malicious target code |
 | Decoded action and risk | Built-in ABI for common transfers, approvals, Safe authority changes, upgrades, timelock calls, governance forwarding, validator calls, and recursive MultiSend; action-based impact and review priority | A matching selector does not verify the target bytecode or prove the action will execute; unknown selectors stay unknown |
+| Target code | Chain-checked RPC bytecode hash compared with Sourcify's verified runtime; ABI selector check; ERC-1967 implementation inspection | Matching source does not prove safe behavior; unverified source or archive state is reported; other proxy patterns need manual review |
 | Observed effect | Storage, native balance, and asset changes reported by a simulation, with Safe singleton slot 0 highlighted | Only available when simulation succeeds and the provider returns changes |
 | Execution | Safe Transaction Service status and optional historical simulation at the previous block | A simulated success never guarantees future execution |
 
@@ -114,7 +117,7 @@ The added focus is a single input surface for hash, URL, JSON, and offchain queu
 ## Security and limitations
 
 - Supported Safe Transaction Service network prefixes are listed in `src/chains.mjs`. A Safe URL must be on `app.safe.global`.
-- The tool fetches from fixed Safe and Tenderly endpoints plus a public Ethereum RPC by default; `--rpc` or `RPC_URL` selects another RPC. The local UI listens on `127.0.0.1` and does not expose API keys to the browser.
+- The tool fetches from fixed Safe, Tenderly, and Sourcify endpoints plus network-specific public RPCs. `--rpc` or `RPC_URL_<NETWORK>` selects another RPC. The local UI listens on `127.0.0.1` and does not expose API keys to the browser.
 - The built-in ABI list is intentionally small. It must not be used to infer behavior of unverified bytecode, proxies, or arbitrary delegatecall targets.
 - State diffs can omit internal semantics and token transfers depending on Tenderly's response. Raw storage slots are shown without invented variable names.
 - A compromised RPC, Safe API, Tenderly service, computer, browser, or signing device can still mislead the reviewer. Cross-check against another provider and the hardware wallet display.
