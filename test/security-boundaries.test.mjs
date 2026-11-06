@@ -48,6 +48,7 @@ test('Safe URL parsing rejects a mismatched origin, malformed Safe, and unknown 
   for (const input of [
     `https://app.safe.global.evil.example/home?safe=eth:${SAFE}`,
     `https://app.safe.global/home?safe=eth:0x123`,
+    'https://app.safe.global/home',
     `https://app.safe.global/home?safe=unknown:${SAFE}`,
     '0x123',
   ]) assert.throws(() => parseInput(input, 'auto'));

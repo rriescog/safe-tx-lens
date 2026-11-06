@@ -43,6 +43,35 @@ test('argument summaries keep large bytes collapsed and render structured argume
   assert.equal(page.evaluate('argValue({name:"amount",value:7},sample)'), '7');
 });
 
+test('nested call and flow renderers distinguish scheduling, execution, delegatecall and decode failure', () => {
+  const page = ui();
+  page.context.sample = {
+    to: '0x2222222222222222222222222222222222222222', value: '1', data: '0x12345678', selector: '0x12345678', method: 'schedule(address)',
+    operation: 1, stage: 'schedule', via: 'batch call', decodeError: 'bad bytes', args: [{ name: 'payload', value: '0x1234' }],
+    children: [{ to: '0x3333333333333333333333333333333333333333', value: '0', data: '0x', selector: '0x', method: null, operation: 0, stage: 'call', children: [] }],
+  };
+  const rendered = page.evaluate('callHtml(sample)');
+  for (const value of ['DELEGATECALL', 'scheduled', 'batch call', 'Decode error', 'call-children']) assert.match(rendered, new RegExp(value));
+  assert.match(page.evaluate('flowHtml(sample,"1",new Map())'), /Schedule/);
+  page.context.sample = { ...page.context.sample, method: 'execute(address)', stage: 'call', operation: 0, children: [] };
+  assert.match(page.evaluate('flowHtml(sample,"1",new Map())'), /Execute/);
+  page.context.sample = { ...page.context.sample, method: null, operation: 1, data: '0x12345678' };
+  assert.match(page.evaluate('flowHtml(sample,"1",new Map())'), /Delegatecall/);
+});
+
+test('render helpers handle absent optional fields and long values', () => {
+  const page = ui();
+  assert.equal(page.evaluate('esc(null)'), '');
+  assert.equal(page.evaluate('short(null)'), '');
+  page.context.longValue = `0x${'ab'.repeat(80)}`;
+  assert.match(page.evaluate('short(longValue)'), /…/);
+  assert.match(page.evaluate('argValue({name:"datas",value:["0x12"]},{})'), /inspect raw calldata/);
+  assert.match(page.evaluate(`argValue({name:"payload",value:"0x${'ab'.repeat(80)}"},{})`), /inspect raw calldata/);
+  page.context.sample = { to: '0x1', value: '0', data: '0xdeadbeef', selector: '0xdeadbeef', operation: 0, children: [] };
+  assert.match(page.evaluate('callHtml(sample)'), /Unknown 0xdeadbeef/);
+  assert.match(page.evaluate('targetChecksHtml({})'), /Target code has not been checked yet/);
+});
+
 test('web inspector opens a report, handles unavailable queues and shows API errors', async () => {
   const page = ui();
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
@@ -61,6 +90,45 @@ test('web inspector opens a report, handles unavailable queues and shows API err
   await page.evaluate('inspect()');
   assert.match(page.elements.get('report').innerHTML, /&lt;unsafe&gt;/);
   assert.equal(page.elements.get('status').textContent, 'Inspection failed');
+});
+
+test('web form handles empty input, malformed JSON and an API error without a message', async () => {
+  const page = ui();
+  await page.evaluate('inspect()');
+  assert.equal(page.elements.get('report').innerHTML, '');
+  const file = page.elements.get('json-file');
+  await file.on_change();
+  file.files = [{ size: 2, name: 'broken.json', text: async () => '{' }];
+  await file.on_change();
+  assert.match(page.elements.get('status').textContent, /Could not import JSON/);
+  page.elements.get('input').value = '0x123';
+  page.context.fetch = async () => ({ ok: false, json: async () => ({}) });
+  await page.evaluate('inspect({verifyTargets:false})');
+  assert.match(page.elements.get('report').innerHTML, /Inspection failed/);
+  page.elements.get('input').value = 'https://app.safe.global/home';
+  page.elements.get('load-pending').on_click();
+  assert.match(page.elements.get('status').textContent, /Enter a Safe multisig address/);
+});
+
+test('web inspect renders a Builder response and preserves evidence on a rerun of the same hash', async () => {
+  const page = ui();
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const builder = await analyzeBuilderExport({ chainId: '1', meta: { name: 'Plan' }, transactions: [{ to: tx.to, value: '0', data: '0x' }] }, 'eth');
+  page.elements.get('input').value = 'plan';
+  page.context.fetch = async () => ({ ok: true, json: async () => builder });
+  await page.evaluate('inspect()');
+  assert.equal(page.elements.get('status').textContent, 'Builder JSON decoded');
+  const report = await analyze(tx, 'eth', { fetchState: false });
+  report.transaction.safeTxHash = report.hash;
+  report.evidence = { source: 'safe_api', retrievedAt: 'now' };
+  report.targetChecks = [{ address: tx.to, status: 'unverified', blockTag: 'latest', reason: 'unknown' }];
+  page.context.fetch = async () => ({ ok: true, json: async () => report });
+  await page.evaluate('inspect()');
+  const rerun = { ...report, evidence: undefined, targetChecks: [] };
+  page.context.fetch = async () => ({ ok: true, json: async () => rerun });
+  await page.evaluate('inspect({simulate:true,overrideInput:activeReportInput,overrideNetwork:activeReportNetwork})');
+  assert.match(page.elements.get('report').innerHTML, /Fetched live from Safe Transaction Service/);
+  assert.match(page.elements.get('report').innerHTML, /Source verification is incomplete/);
 });
 
 test('web buttons select a Safe, import JSON, and reject oversized files', async () => {
@@ -173,6 +241,65 @@ test('web report renders transaction evidence, target verification, effects, and
   review.evidence = { source: 'onchain_execution', blockNumber: 1, blockTime: 'now', executionHash: review.hash, discoveredBy: 'etherscan_index' };
   page.context.sample = review;
   assert.match(page.evaluate('reportHtml(sample)'), /Verified from eth onchain execution/);
+});
+
+test('web report marks unavailable verification and simulation outcomes explicitly', async () => {
+  const page = ui();
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const base = await analyze(tx, 'eth', { fetchState: false });
+  const variants = [
+    { ...base, network: 'zkevm', hashComponents: null, evidence: { source: 'safe_gateway', retrievedAt: 'now' }, simulation: { unavailable: 'quota' }, effects: [], targetChecks: [], findings: [] },
+    { ...base, transaction: { ...base.transaction, isExecuted: true, isSuccessful: false, operation: 1 }, simulation: { success: false, blockNumber: 7, error: 'revert', stateDiffAvailable: false }, effects: [], targetChecks: [{ address: tx.to, status: 'unverified', reason: 'missing', blockTag: 'latest', abiWarning: 'no ABI' }] },
+    { ...base, transaction: { ...base.transaction, isExecuted: true, isSuccessful: true }, simulation: { success: null, blockNumber: 7, stateDiffAvailable: true }, effects: [], targetChecks: [{ address: tx.to, status: 'verified_current', reason: 'matched', blockTag: 7, proxy: { implementation: tx.safe, implementationCode: { status: 'unverified' } } }] },
+  ];
+  const html = variants.map(variant => { page.context.sample = variant; return page.evaluate('reportHtml(sample)'); });
+  assert.match(html[0], /Safe Client Gateway/);
+  assert.match(html[0], /Simulation unavailable: quota/);
+  assert.match(html[0], /Complete Safe transaction fields are required/);
+  assert.match(html[1], /Safe execution failed in simulation/);
+  assert.match(html[1], /storage diff/);
+  assert.match(html[1], /no ABI/);
+  assert.match(html[2], /EVM completed; Safe inner result unverified/);
+  assert.match(html[2], /ERC-1967 implementation/);
+});
+
+test('web renderers show scheduled actions, proxy uncertainty and missing queue coverage', async () => {
+  const page = ui({ publicMode: true });
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const review = await analyze(tx, 'eth', { fetchState: false });
+  review.risk.actionRatings[0].stage = 'schedule';
+  review.targetChecks = [{ address: tx.to, status: 'verified_current', reason: 'current only', blockTag: 7, proxy: { implementation: tx.safe, implementationCode: { status: 'verified', bytecodeHash: review.hash } } }];
+  review.effects = [{ severity: 'info', kind: 'storage', address: tx.to, before: '0', after: '1' }];
+  page.context.sample = review;
+  assert.match(page.evaluate('reportHtml(sample)'), /Encoded to schedule/);
+  assert.match(page.evaluate('reportHtml(sample)'), /Simulation is available in the local tool/);
+  assert.match(page.evaluate('reportHtml(sample)'), /ERC-1967 implementation/);
+  page.context.sample = { ...review, targetChecks: [{ address: tx.to, status: 'unverified', reason: 'no source', blockTag: 7, proxy: { implementation: tx.safe } }] };
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /Source verification is incomplete/);
+  page.context.sample = { kind: 'queue', scope: 'history', safe: tx.safe, network: 'eth', source: 'tenderly_storage', availability: 'unavailable', reports: [] };
+  assert.match(page.evaluate('queueHtml(sample)'), /monitor JSON did not contain complete/);
+  page.context.sample = { kind: 'queue', scope: 'history', safe: tx.safe, network: 'eth', source: 'safe_api', availability: 'available', reports: [{ ...review, actions: [] }] };
+  assert.match(page.evaluate('queueHtml(sample)'), /Executed history/);
+});
+
+test('report variants expose absent onchain metadata and optional Builder comparison', async () => {
+  const page = ui();
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const report = await analyze(tx, 'eth', { fetchState: false });
+  report.evidence = { source: 'onchain_execution', blockNumber: 7, executionHash: report.hash };
+  report.risk.actionRatings = [];
+  report.findings = [];
+  report.targetChecks = [{ address: tx.to, status: 'unverified', blockTag: 7, reason: 'unknown', abiSelectors: [] }];
+  page.context.sample = report;
+  const html = page.evaluate('reportHtml(sample)');
+  assert.match(html, /No decoded action available/);
+  assert.doesNotMatch(html, /Located through an indexed Safe event/);
+  const builder = await analyzeBuilderExport({ chainId: '1', meta: { name: 'Plan' }, transactions: [{ to: tx.to, value: '0', data: '0x' }] }, 'eth');
+  builder.risk.actionRatings[0].stage = 'schedule';
+  builder.comparison = { status: 'match', detail: 'same', safeHash: report.hash, nonce: '7' };
+  page.context.sample = builder;
+  assert.match(page.evaluate('builderHtml(sample)'), /Would schedule/);
+  assert.match(page.evaluate('builderHtml(sample)'), /Verified hash/);
 });
 
 test('web queue and Builder renderers distinguish choices, absence and unavailable sources', async () => {

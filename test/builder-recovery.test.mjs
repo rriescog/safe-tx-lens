@@ -37,4 +37,15 @@ test('Builder comparison explicitly reports unavailable proposals and invalid in
   await assert.rejects(() => analyzeBuilderExport(exported, 'eth', { safeHash: '0x123' }), /Safe transaction hash/);
   await assert.rejects(() => analyzeBuilderExport(exported, 'eth', { safeAddress: '0x123' }), /Invalid Safe address/);
   await assert.rejects(() => analyzeBuilderExport({ ...exported, transactions: [{ ...exported.transactions[0], data: '0xabc' }] }, 'eth'), /invalid transaction/);
+  await assert.rejects(() => analyzeBuilderExport({ ...exported, transactions: [{ ...exported.transactions[0], value: '-1' }] }, 'eth'), /invalid transaction/);
+  await assert.rejects(() => analyzeBuilderExport({ ...exported, transactions: [{ ...exported.transactions[0], to: '0x123' }] }, 'eth'), /invalid transaction/);
+  const fallback = await analyzeBuilderExport(exported, 'eth', { safeHash: fixture.safeTxHash, rpcUrl: '', provider: { getNetwork: async () => { throw new Error('offline'); }, getBlockNumber: async () => 0 }, verifyTargets: false });
+  assert.equal(fallback.comparison.status, 'unavailable');
+  assert.match(fallback.warnings.join(' '), /Onchain hash lookup unavailable/);
+}));
+
+test('Builder comparison rejects a fetched transaction with a forged Safe hash', async () => withSafeResponse(async () => new Response(JSON.stringify({ ...fixture, nonce: Number(fixture.nonce) + 1 }), { status: 200 }), async () => {
+  const result = await analyzeBuilderExport(exported, 'eth', { safeHash: fixture.safeTxHash, fetchState: false, verifyTargets: false, rpcUrl: '' });
+  assert.equal(result.comparison.status, 'mismatch');
+  assert.match(result.comparison.detail, /failed independent EIP-712 verification/);
 }));

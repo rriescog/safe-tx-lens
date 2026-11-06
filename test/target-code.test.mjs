@@ -110,3 +110,13 @@ test('target verification deduplicates addresses and rejects oversized call grap
   })) };
   await assert.rejects(() => inspectTargetCode(many, 'eth', { provider: provider(), sourceLookup }), /more than 32/);
 });
+
+test('target graph skips invalid addresses and accepts Sourcify match field without ABI', async () => {
+  const root = { to: 'not-an-address', selector: 'invalid', operation: 0, children: [call] };
+  const reports = await inspectTargetCode(root, 'eth', {
+    provider: provider(), sourceLookup: async () => ({ match: 'match', runtimeBytecode: { onchainBytecode: '0x60016000' }, abi: [] }),
+  });
+  assert.equal(reports.length, 1);
+  assert.equal(reports[0].status, 'verified');
+  assert.equal(reports[0].abiSelectors[0].present, false);
+});
