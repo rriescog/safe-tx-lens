@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from '../src/resolve.mjs';
+import { calculateHash, normalizeTransaction } from '../src/analyze.mjs';
 
 const tx = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
 const monitorRecord = (prefix = 'eth') => ({
@@ -71,4 +72,30 @@ test('failed queue sources are unavailable, while JSON chain detection stays off
   const plan = await resolve(builder, 'auto', { rpcUrl: '' });
   assert.equal(plan.network, 'eth');
   await assert.rejects(() => resolve({ ...builder, chainId: '999999' }, 'auto'), /does not reveal its network/);
+}));
+
+test('an unseen hash can discover its network through the authenticated Safe Transaction Service', async () => withSources({}, async () => {
+  const gno = { ...tx, safeTxHash: calculateHash(normalizeTransaction(tx), 'gno') };
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    if (String(url).includes('/tx-service/gno/') && String(url).includes(gno.safeTxHash)) return new Response(JSON.stringify(gno), { status: 200 });
+    return original(url, options);
+  };
+  try {
+    const report = await resolve(gno.safeTxHash, 'auto', { rpcUrl: '', verifyTargets: false, fetchState: false });
+    assert.equal(report.network, 'gno');
+    assert.equal(report.hash, gno.safeTxHash);
+    assert.equal(report.checks[0].status, 'pass');
+  } finally { globalThis.fetch = original; }
+}));
+
+test('executed history explicitly reports the bounded RPC fallback after API outage', async () => withSources({}, async () => {
+  const provider = {
+    getNetwork: async () => ({ chainId: 1n }), getBlockNumber: async () => 10000,
+    getLogs: async () => [],
+  };
+  const history = await resolve(tx.safe, 'eth', { scope: 'history', rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
+  assert.equal(history.source, 'recent_rpc');
+  assert.equal(history.truncated, true);
+  assert.match(history.warnings.join(' '), /RPC scanned blocks/);
 }));

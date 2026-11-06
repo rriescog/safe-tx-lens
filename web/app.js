@@ -134,6 +134,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
     if (result.kind === 'builder') { report.innerHTML = builderHtml(result); status.textContent = 'Builder JSON decoded'; }
     else if (result.kind === 'queue') {
       if (result.availability === 'unavailable') { report.innerHTML = queueHtml(result); status.textContent = 'Queue source unavailable'; return; }
+      let exitNotice = '';
       if (silent) {
         const current = new Map(result.reports.map(r => [r.hash, `${r.transaction.confirmations?.length ?? 0}:${r.status}`]));
         const changed = [...current].filter(([hash, fp]) => lastFingerprints.get(hash) !== fp).length;
@@ -148,7 +149,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
               const finalReport = await finalResponse.json();
               const label = finalReport.transaction.isExecuted ? `Executed ${finalReport.transaction.isSuccessful ? 'successfully' : 'with failure'}` : 'No longer pending';
               status.textContent = `${label}: ${hash}`;
-              report.insertAdjacentHTML('afterbegin', `<div class="notice">${esc(label)}: ${esc(hash)}. Inspect this hash for the full report.</div>`);
+              exitNotice = `<div class="notice">${esc(label)}: ${esc(hash)}. Inspect this hash for the full report.</div>`;
             }
           } catch {}
         }
@@ -156,7 +157,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
         lastFingerprints = new Map(result.reports.map(r => [r.hash, `${r.transaction.confirmations?.length ?? 0}:${r.status}`]));
         status.textContent = `Inspected ${result.reports.length} ${result.scope} transaction(s)`;
       }
-      report.innerHTML = queueHtml(result);
+      report.innerHTML = exitNotice + queueHtml(result);
       report.querySelectorAll('[data-network]').forEach(button => button.addEventListener('click', () => {
         network.value = button.dataset.network;
         inspect({ overrideInput: result.safe });

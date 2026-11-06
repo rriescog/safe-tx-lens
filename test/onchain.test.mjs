@@ -57,3 +57,19 @@ test('onchain reconstruction rejects the wrong chain, missing Safe event, and un
   const wrongLog = { ...log, topics: [log.topics[0], `0x${'ff'.repeat(32)}`] };
   await assert.rejects(() => analyzeExecutionHash(EXECUTION_HASH, 'eth', { ...base, provider: provider({ getTransactionReceipt: async () => ({ blockNumber: 500, logs: [wrongLog] }) }) }), /Could not recover Safe nonce/);
 });
+
+test('onchain reconstruction can recover the nonce when archive RPC state is unavailable', async () => {
+  const calls = [];
+  const rpc = provider({
+    call: async request => {
+      calls.push(request.blockTag ?? 'latest');
+      if (request.blockTag !== undefined) throw new Error('archive state unavailable');
+      return STATE.encodeFunctionResult('nonce', [6]);
+    },
+    getBlock: async () => null,
+  });
+  const report = await analyzeExecutionHash(EXECUTION_HASH, 'eth', { provider: rpc, rpcUrl: '', fetchState: false });
+  assert.equal(report.transaction.nonce, '4');
+  assert.equal(report.evidence.blockTime, null);
+  assert.deepEqual(calls.slice(0, 2), [499, 'latest']);
+});

@@ -110,8 +110,9 @@ async function safeState(tx, network) {
   return safeGet(network, `/safes/${tx.safe}/`);
 }
 
-async function rpcSafeState(tx, rpcUrl) {
+async function rpcSafeState(tx, rpcUrl, network) {
   const provider = new JsonRpcProvider(rpcUrl);
+  if (Number((await provider.getNetwork()).chainId) !== chainId(network)) throw new Error('RPC chain does not match the transaction network');
   let blockTag = 'latest';
   if (tx.isExecuted) {
     const receipt = tx.transactionHash ? await provider.getTransactionReceipt(tx.transactionHash) : null;
@@ -240,7 +241,7 @@ export async function analyze(raw, network = 'eth', options = {}) {
     try { safeInfo = await safeState(tx, network); }
     catch (error) {
       if (options.rpcUrl) {
-        try { safeInfo = await rpcSafeState(tx, options.rpcUrl); }
+        try { safeInfo = await rpcSafeState(tx, options.rpcUrl, network); }
         catch (rpcError) { warnings.push(`Safe state unavailable: API ${error.message}; RPC ${rpcError.message}`); }
       } else warnings.push(`Safe state unavailable: ${error.message}`);
     }

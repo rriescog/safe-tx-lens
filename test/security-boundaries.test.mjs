@@ -67,6 +67,16 @@ test('MultiSend accepts exact packed boundaries and rejects malformed records', 
   assert.throws(() => unpackMultiSend(`0x${packedCall().slice(2).repeat(101)}`), /over 100 calls/);
 });
 
+test('nested decoding stops at its depth boundary', () => {
+  const iface = new Interface(['function multiSend(bytes transactions)']);
+  let data = '0x12345678';
+  for (let i = 0; i < 10; i++) data = iface.encodeFunctionData('multiSend', [packedCall({ to: TARGET, data })]);
+  let node = decodeCall({ to: TARGET, value: '0', operation: 0, data });
+  for (let i = 0; i < 9; i++) node = node.children[0];
+  assert.match(node.decodeError, /Nested decode limit reached/);
+  assert.equal(node.children.length, 0);
+});
+
 test('unknown selectors remain unknown and do not become trusted from a familiar target', async () => {
   const data = '0xdeadbeef';
   const call = decodeCall({ to: TARGET, value: '0', operation: 0, data });
