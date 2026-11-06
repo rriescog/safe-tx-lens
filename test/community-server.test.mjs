@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '../src/server.mjs';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
 const origin = 'https://lens.example.org';
 const plan = { chainId: '1', meta: {}, transactions: [{ to: '0x1111111111111111111111111111111111111111', value: '0', data: '0x' }] };
@@ -55,6 +56,23 @@ test('community server needs a Safe key and keeps simulation opt-in', async () =
     assert.equal(invalid.status, 200);
     assert.match(await invalid.text(), /isError.*true|"isError":true/);
   } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a remote MCP client can connect and decode through the public endpoint', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'safe-community-mcp-client-'));
+  const server = await serve({ port: 0, publicOrigin: origin, communityMode: true, communityQuotaFile: join(directory, 'quota.json'), credentialReader: async () => ({ SAFE_API_KEY: 'test-key' }) });
+  const client = new Client({ name: 'remote-test', version: '1.0.0' });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.address().port}/mcp`), { requestInit: { headers: { 'x-client-ip': '203.0.113.9' } } }));
+    assert.ok((await client.listTools()).tools.some(tool => tool.name === 'inspect_json'));
+    const result = await client.callTool({ name: 'inspect_json', arguments: { transaction: plan, network: 'eth' } });
+    assert.equal(result.isError, undefined);
+    assert.equal(result.structuredContent?.kind, 'builder');
+  } finally {
+    await client.close();
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });
   }
