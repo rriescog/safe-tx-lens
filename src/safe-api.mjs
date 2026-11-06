@@ -1,5 +1,6 @@
 import { chainId } from './chains.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
+import { getAddress } from 'ethers';
 
 const GATEWAY = 'https://safe-client.safe.global';
 
@@ -71,6 +72,9 @@ export async function fetchTransaction(hash, network) {
 export async function fetchSafeTransactions(address, network, scope = 'pending', limit = 100) {
   if (!['pending', 'history'].includes(scope)) throw new Error('Invalid transaction scope');
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('Invalid transaction limit');
+  // The Transaction Service rejects lowercase EVM addresses with HTTP 422.
+  // Inventories commonly store lowercase addresses, so normalize at the API boundary.
+  address = getAddress(address);
   const service = async () => {
     const safe = await safeGet(network, `/safes/${address}/`);
     const page = await safeGet(network, `/safes/${address}/multisig-transactions/?executed=${scope === 'history'}&limit=${limit}&ordering=-nonce`);

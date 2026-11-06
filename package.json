@@ -9,6 +9,8 @@
   },
   "scripts": {
     "test": "node --test",
+    "test:fuzz": "node --test test/fuzz.test.mjs",
+    "test:coverage": "c8 --all --reporter=text --reporter=html --include='src/**' --include='bin/**' --include='web/**' --include='scripts/**' node --test",
     "start": "node bin/safe-tx-lens.mjs serve"
   },
   "engines": {
@@ -21,6 +23,8 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@modelcontextprotocol/client": "^2.4.0"
+    "@modelcontextprotocol/client": "^2.4.0",
+    "c8": "^9.1.0",
+    "fast-check": "^4.10.2"
   }
 }

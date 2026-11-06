@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Interface, concat, keccak256 } from 'ethers';
+import { Interface, concat, getAddress, keccak256 } from 'ethers';
 import { analyze, calculateHashComponents, normalizeTransaction } from '../src/analyze.mjs';
 import { decodeCall, unpackMultiSend } from '../src/decode.mjs';
 import { parseInput } from '../src/inputs.mjs';
@@ -45,6 +45,13 @@ test('Safe URL parsing rejects a mismatched origin, malformed Safe, and unknown 
     `https://app.safe.global/home?safe=unknown:${SAFE}`,
     '0x123',
   ]) assert.throws(() => parseInput(input, 'auto'));
+  assert.throws(() => parseInput(null, 'auto'), /Input must be/);
+  assert.deepEqual(parseInput(' {"nonce":7} ', 'eth').transaction, { nonce: 7 });
+  assert.throws(() => parseInput('{broken', 'eth'), /JSON/);
+  assert.equal(parseInput(`https://app.safe.global/transactions/tx?safe=eth:${SAFE}&id=malformed`, 'auto').kind, 'safe');
+  const lowercaseSafe = '0xc74efc7fdb3bec9c6930e91ffdf761b160df79db';
+  assert.equal(parseInput(lowercaseSafe, 'auto').address, getAddress(lowercaseSafe));
+  assert.equal(parseInput(`https://app.safe.global/home?safe=eth:${lowercaseSafe}`, 'auto').address, getAddress(lowercaseSafe));
 });
 
 test('MultiSend accepts exact packed boundaries and rejects malformed records', () => {
@@ -57,6 +64,7 @@ test('MultiSend accepts exact packed boundaries and rejects malformed records', 
   assert.throws(() => unpackMultiSend('0xzz'), /hex/);
   assert.throws(() => unpackMultiSend(packedCall({ operation: 2 })), /operation/);
   assert.throws(() => unpackMultiSend(first.slice(0, -2)), /length/);
+  assert.throws(() => unpackMultiSend(`0x${packedCall().slice(2).repeat(101)}`), /over 100 calls/);
 });
 
 test('unknown selectors remain unknown and do not become trusted from a familiar target', async () => {

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { getAddress } from 'ethers';
 import { safeGet, fetchTransaction, fetchSafeTransactions } from '../src/safe-api.mjs';
 
 const SAFE = '0x1111111111111111111111111111111111111111';
@@ -46,4 +47,15 @@ test('a hash lookup records the live source and queue pages preserve their cover
 test('an API failure does not silently turn an unavailable queue into an empty one', async () => withFetch(async () => new Response('failure', { status: 503 }), async () => {
   await assert.rejects(() => fetchSafeTransactions(SAFE, 'eth', 'pending', 1), /Safe API 503.*Safe Client Gateway 503/);
   await assert.rejects(() => fetchSafeTransactions(SAFE, 'eth', 'pending', 0), /limit/);
+}));
+
+test('lowercase inventory addresses are checksummed before Safe API lookup', async () => withFetch(async url => {
+  const checksum = getAddress('0xc74efc7fdb3bec9c6930e91ffdf761b160df79db');
+  assert.match(String(url), new RegExp(`/safes/${checksum}/`));
+  if (String(url).endsWith(`/safes/${checksum}/`)) return new Response(JSON.stringify({ address: checksum, nonce: 0, owners: [], threshold: 1 }), { status: 200 });
+  return new Response(JSON.stringify({ results: [], next: null }), { status: 200 });
+}, async () => {
+  const queue = await fetchSafeTransactions('0xc74efc7fdb3bec9c6930e91ffdf761b160df79db', 'eth', 'pending', 1);
+  assert.equal(queue.source, 'safe_api');
+  assert.equal(queue.transactions.length, 0);
 }));
