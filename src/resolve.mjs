@@ -8,7 +8,7 @@ import { fetchMonitorStorage, localCredentials } from './tenderly-storage.mjs';
 import { CHAINS } from './chains.mjs';
 import { findIndexedExecution } from './execution-index.mjs';
 
-async function detectNetwork(parsed) {
+async function detectNetwork(parsed, options = {}) {
   // Neither a 32-byte hash nor a 20-byte address contains a chain ID. Every
   // inferred network below must come from a source that actually saw it.
   if (parsed.kind === 'json') {
@@ -16,7 +16,7 @@ async function detectNetwork(parsed) {
     const chain = Object.entries(CHAINS).find(([, value]) => String(value) === String(id))?.[0];
     if (chain) return chain;
   } else {
-    const snapshot = await fetchMonitorStorage().catch(() => null);
+    const snapshot = options.monitorFallback === true ? await fetchMonitorStorage().catch(() => null) : null;
     let monitoredNetworks = [];
     if (snapshot) {
       const raw = snapshot.PENDING_TXN_DATA;
@@ -77,7 +77,7 @@ async function monitorReports(network, options) {
 export async function resolve(input, network = 'eth', options = {}) {
   const parsed = parseInput(input, network);
   if (parsed.network === 'auto') {
-    const detected = await detectNetwork(parsed);
+    const detected = await detectNetwork(parsed, options);
     if (!Array.isArray(detected)) return resolve(input, detected, options);
     const results = await Promise.all(detected.map(chain => resolve(input, chain, options)));
     return {
@@ -91,21 +91,12 @@ export async function resolve(input, network = 'eth', options = {}) {
   }
   const settings = { ...options, rpcUrl: rpcFor(parsed.network, options.rpcUrl), verifyTargets: options.verifyTargets ?? true };
   if (parsed.kind === 'hash') {
-    let monitorFound = false;
-    try {
-      const monitor = await monitorReports(parsed.network, { ...settings, safeHash: parsed.hash, safeAddress: parsed.expectedSafe });
-      monitorFound = Boolean(monitor);
-      if (monitor?.reports.length) {
-        const report = monitor.reports[0];
-        if (settings.rpcUrl) {
-          try {
-            const executed = await findRecentExecutionBySafeHash(report.transaction.safe, report.hash, parsed.network, settings);
-            if (executed) return { ...executed, evidence: { ...executed.evidence, requestedHash: parsed.hash } };
-          } catch { /* Keep the monitor report with its source warning. */ }
-        }
-        return report;
-      }
-    } catch { /* Continue with Safe services and onchain execution lookup. */ }
+    let safeError;
+    try { return await analyzeHash(parsed.hash, parsed.network, { ...settings, expectedSafe: parsed.expectedSafe }); }
+    catch (error) {
+      if (/Safe API returned a different hash|Safe URL address does not match/.test(error.message)) throw error;
+      safeError = error;
+    }
     // An indexed event is a discovery hint. The execution calldata, Safe
     // address, and recomputed Safe hash still have to match onchain.
     try {
@@ -119,17 +110,31 @@ export async function resolve(input, network = 'eth', options = {}) {
     } catch (error) {
       if (/differs|does not match/.test(error.message)) throw error;
     }
-    try { return await analyzeHash(parsed.hash, parsed.network, { ...settings, expectedSafe: parsed.expectedSafe }); }
-    catch (safeError) {
-      if (settings.rpcUrl) {
-        try { return await analyzeExecutionHash(parsed.hash, parsed.network, settings); }
-        catch { /* A pending Safe hash cannot be recovered from an EVM RPC. */ }
-      }
-      if (safeError.message.includes('anonymous monthly quota exhausted')) {
-        throw new Error(`${monitorFound ? 'Hash not found in the configured Tenderly monitor snapshot. ' : ''}No matching indexed execution was found. Safe API quota is exhausted, so this hash alone cannot reveal an unindexed pending proposal. Supply its transaction JSON or connect a proposal source that contains it.`);
-      }
-      throw new Error(`${safeError.message.replace(/\.+$/, '')}. For an offchain proposal without Safe API access, paste or import its transaction JSON. An RPC can only recover transactions already executed onchain.`);
+    let monitorFound = false;
+    if (options.monitorFallback === true) {
+      try {
+        const monitor = await monitorReports(parsed.network, { ...settings, safeHash: parsed.hash, safeAddress: parsed.expectedSafe });
+        monitorFound = Boolean(monitor);
+        if (monitor?.reports.length) {
+          const report = monitor.reports[0];
+          if (settings.rpcUrl) {
+            try {
+              const executed = await findRecentExecutionBySafeHash(report.transaction.safe, report.hash, parsed.network, settings);
+              if (executed) return { ...executed, evidence: { ...executed.evidence, requestedHash: parsed.hash } };
+            } catch { /* Keep the monitor report with its source warning. */ }
+          }
+          return { ...report, warnings: [`Safe services did not return this transaction (${safeError.message}). Explicit Tenderly monitor fallback supplied an incomplete record; its Safe hash cannot be verified. Do not sign based on this report alone.`, ...report.warnings] };
+        }
+      } catch { /* Continue with onchain execution lookup. */ }
     }
+    if (settings.rpcUrl) {
+      try { return await analyzeExecutionHash(parsed.hash, parsed.network, settings); }
+      catch { /* A pending Safe hash cannot be recovered from an EVM RPC. */ }
+    }
+    if (safeError.message.includes('anonymous monthly quota exhausted')) {
+      throw new Error(`${monitorFound ? 'Hash not found in the explicitly enabled Tenderly monitor snapshot. ' : ''}No matching indexed execution was found. Safe API quota is exhausted, so this hash alone cannot reveal an unindexed pending proposal. Supply its transaction JSON or use an authenticated Safe API key.`);
+    }
+    throw new Error(`${safeError.message.replace(/\.+$/, '')}. For an offchain proposal without Safe API access, paste or import its transaction JSON. An RPC can only recover transactions already executed onchain.`);
   }
   if (parsed.kind === 'json') return isMonitorStorage(parsed.transaction) ? analyzeMonitorStorage(parsed.transaction, parsed.network, settings) : isBuilderExport(parsed.transaction) ? analyzeBuilderExport(parsed.transaction, parsed.network, settings) : analyze(parsed.transaction, parsed.network, settings);
   const scope = options.scope ?? 'pending';
@@ -142,34 +147,13 @@ export async function resolve(input, network = 'eth', options = {}) {
   let truncated = false;
   let source = 'safe_api';
   let sourceAvailable = false;
+  const usedSources = new Set();
   for (const part of scopes) {
-    if (part === 'pending') {
-      try {
-        const monitor = await monitorReports(parsed.network, { ...settings, safeAddress: parsed.address, limit });
-        if (monitor?.reports.length) {
-          for (const report of monitor.reports) {
-            let executed = null;
-            if (settings.rpcUrl) {
-              try { executed = await findRecentExecutionBySafeHash(parsed.address, report.hash, parsed.network, settings); }
-              catch (error) { warnings.push(`Could not cross-check nonce ${report.transaction.nonce} onchain: ${error.message}`); }
-            }
-            if (executed) {
-              warnings.push(`Monitor snapshot is stale: nonce ${report.transaction.nonce} (${report.hash}) has executed onchain. Open executed history to review it.`);
-            } else reports.push(report);
-          }
-          source = 'tenderly_monitor';
-          sourceAvailable = true;
-          truncated ||= monitor.truncated;
-          warnings.push('Pending proposals come from the Tenderly monitor snapshot. Its last refresh time and completeness are not independently verified; Safe hash recalculation requires fields omitted by this snapshot.');
-          warnings.push(...monitor.warnings);
-          continue;
-        }
-      } catch (error) { warnings.push(`Tenderly monitor unavailable: ${error.message}`); }
-    }
     try {
       const page = await fetchSafeTransactions(parsed.address, parsed.network, part, limit);
       safe = page.safe;
       source = page.source;
+      usedSources.add(page.source);
       sourceAvailable = true;
       truncated ||= page.truncated;
       for (const tx of page.transactions) {
@@ -177,15 +161,39 @@ export async function resolve(input, network = 'eth', options = {}) {
         reports.push({ ...report, evidence: { source: page.source, retrievedAt: new Date().toISOString() } });
       }
     } catch (error) {
+      if (part === 'pending' && options.monitorFallback === true) {
+        try {
+          const monitor = await monitorReports(parsed.network, { ...settings, safeAddress: parsed.address, limit });
+          if (monitor?.reports.length) {
+            for (const report of monitor.reports) {
+              let executed = null;
+              if (settings.rpcUrl) {
+                try { executed = await findRecentExecutionBySafeHash(parsed.address, report.hash, parsed.network, settings); }
+                catch (rpcError) { warnings.push(`Could not cross-check nonce ${report.transaction.nonce} onchain: ${rpcError.message}`); }
+              }
+              if (executed) warnings.push(`Monitor snapshot is stale: nonce ${report.transaction.nonce} (${report.hash}) has executed onchain. Open executed history to review it.`);
+              else reports.push({ ...report, warnings: [`Safe services unavailable (${error.message}). This explicit monitor fallback cannot verify the Safe hash. Do not sign based on this report alone.`, ...report.warnings] });
+            }
+            source = 'tenderly_monitor';
+            usedSources.add(source);
+            sourceAvailable = true;
+            truncated ||= monitor.truncated;
+            warnings.push(`Safe services unavailable (${error.message}). Showing the explicitly enabled Tenderly monitor snapshot; it omits fields required to verify Safe transaction hashes.`);
+            warnings.push(...monitor.warnings);
+            continue;
+          }
+        } catch (monitorError) { warnings.push(`Tenderly monitor fallback unavailable: ${monitorError.message}`); }
+      }
       if (part === 'history' && settings.rpcUrl) {
         const recent = await fetchRecentExecutions(parsed.address, parsed.network, { ...settings, limit });
         reports.push(...recent.reports);
         truncated = true;
         source = 'recent_rpc';
+        usedSources.add(source);
         sourceAvailable = true;
         warnings.push(`Safe API unavailable (${error.message}). RPC scanned blocks ${recent.fromBlock}–${recent.toBlock}; older history is not included.`);
       } else warnings.push(`${part} unavailable: ${error.message}`);
     }
   }
-  return { kind: 'queue', scope, source: sourceAvailable ? source : 'unavailable', availability: sourceAvailable ? 'available' : 'unavailable', network: parsed.network, safe: parsed.address, safeState: safe ? { nonce: safe.nonce, threshold: safe.threshold, owners: safe.owners } : null, truncated, warnings, reports, reviewedAt: new Date().toISOString() };
+  return { kind: 'queue', scope, source: sourceAvailable ? usedSources.size > 1 ? 'multiple_sources' : source : 'unavailable', availability: sourceAvailable ? 'available' : 'unavailable', network: parsed.network, safe: parsed.address, safeState: safe ? { nonce: safe.nonce, threshold: safe.threshold, owners: safe.owners } : null, truncated, warnings, reports, reviewedAt: new Date().toISOString() };
 }

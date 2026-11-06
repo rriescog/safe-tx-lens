@@ -1,4 +1,6 @@
 {$DOMAIN} {
   encode zstd gzip
-  reverse_proxy app:4173
+  reverse_proxy app:4173 {
+    header_up X-Client-IP {remote_host}
+  }
 }

@@ -13,6 +13,7 @@ Options:
   --network <auto|eth|gno|pol|arb1|oeth|base|sep|zkevm|bnb|avax>
   --rpc <url>          Verify against the Safe contract; historical simulation
   --simulate           Simulate an inspected transaction with Tenderly
+  --monitor-fallback    Explicitly allow a local Tenderly monitor snapshot if Safe services fail
   --json               Machine-readable output
   --interval <seconds> Watch polling interval (minimum 15)
   --once               Watch one poll and exit
@@ -34,7 +35,7 @@ function args(argv) {
     if (['--network', '--rpc', '--interval', '--port', '--scope', '--safe-address', '--safe-hash', '--origin'].includes(arg)) {
       if (!argv[i + 1]) throw new Error(`Missing value for ${arg}`);
       result[arg.slice(2)] = argv[++i];
-    } else if (['--simulate', '--json', '--once', '--help', '--public'].includes(arg)) result[arg.slice(2)] = true;
+    } else if (['--simulate', '--monitor-fallback', '--json', '--once', '--help', '--public'].includes(arg)) result[arg.slice(2)] = true;
     else if (arg.startsWith('--')) throw new Error(`Unknown option ${arg}`);
     else result._.push(arg);
   }
@@ -118,13 +119,13 @@ try {
   if (!command || flags.help || command === 'help') help();
   else if (command === 'serve') {
     if (flags.simulate) throw new Error('In the UI, open one transaction and select Run simulation');
-    await serve({ port: Number(flags.port ?? 4173), rpcUrl: flags.rpc ?? process.env.RPC_URL, publicMode: flags.public, publicOrigin: flags.origin ?? process.env.PUBLIC_ORIGIN, quotaFile: process.env.PUBLIC_QUOTA_FILE ?? '/data/public-quota.json', dailyLimit: Number(process.env.PUBLIC_DAILY_LIMIT ?? 5) });
+    await serve({ port: Number(flags.port ?? 4173), rpcUrl: flags.rpc ?? process.env.RPC_URL, publicMode: flags.public, communityMode: flags.community, publicOrigin: flags.origin ?? process.env.PUBLIC_ORIGIN, quotaFile: process.env.PUBLIC_QUOTA_FILE ?? '/data/public-quota.json', dailyLimit: Number(process.env.PUBLIC_DAILY_LIMIT ?? 5), communityQuotaFile: process.env.COMMUNITY_QUOTA_FILE ?? '/data/community-quota.json', communityDailyUnits: Number(process.env.COMMUNITY_DAILY_UNITS ?? 600), communityMonthlyUnits: Number(process.env.COMMUNITY_MONTHLY_UNITS ?? 10000), communityClientDailyRequests: Number(process.env.COMMUNITY_CLIENT_DAILY_REQUESTS ?? 20) });
   }
   else if (command === 'inspect' || command === 'watch') {
     if (!flags._[0]) throw new Error(`${command} needs an input`);
     let input = flags._[0];
     if (input.startsWith('@')) input = JSON.parse(await readFile(input.slice(1), 'utf8'));
-    const options = { rpcUrl: flags.rpc ?? process.env.RPC_URL, simulate: flags.simulate, scope: flags.scope, safeAddress: flags['safe-address'], safeHash: flags['safe-hash'] };
+    const options = { rpcUrl: flags.rpc ?? process.env.RPC_URL, simulate: flags.simulate, monitorFallback: flags['monitor-fallback'] === true, scope: flags.scope, safeAddress: flags['safe-address'], safeHash: flags['safe-hash'] };
     if (command === 'inspect') printReport(await resolve(input, flags.network ?? (typeof input === 'string' && /^0x(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(input) ? 'auto' : 'eth'), options), flags.json);
     else await watch(input, flags.network ?? 'eth', options, Number(flags.interval ?? 30), flags.once);
   } else throw new Error(`Unknown command ${command}`);

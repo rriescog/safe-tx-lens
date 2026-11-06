@@ -4,8 +4,13 @@ services:
     restart: unless-stopped
     environment:
       PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN}
-      PUBLIC_DAILY_LIMIT: ${PUBLIC_DAILY_LIMIT:-5}
-      PUBLIC_QUOTA_FILE: /data/public-quota.json
+      SAFE_API_KEY_FILE: /run/secrets/safe_api_key
+      COMMUNITY_QUOTA_FILE: /data/community-quota.json
+      COMMUNITY_DAILY_UNITS: ${COMMUNITY_DAILY_UNITS:-600}
+      COMMUNITY_MONTHLY_UNITS: ${COMMUNITY_MONTHLY_UNITS:-10000}
+      COMMUNITY_CLIENT_DAILY_REQUESTS: ${COMMUNITY_CLIENT_DAILY_REQUESTS:-20}
+    secrets:
+      - safe_api_key
     volumes:
       - quota:/data
     read_only: true
@@ -37,3 +42,6 @@ volumes:
   quota:
   caddy_data:
   caddy_config:
+secrets:
+  safe_api_key:
+    file: ./safe-api-key

@@ -1,0 +1,11 @@
+services:
+  app:
+    environment:
+      TENDERLY_ACCESS_KEY_FILE: /run/secrets/tenderly_access_key
+      TENDERLY_ACCOUNT: ${TENDERLY_ACCOUNT:?Set TENDERLY_ACCOUNT}
+      TENDERLY_PROJECT: ${TENDERLY_PROJECT:?Set TENDERLY_PROJECT}
+    secrets:
+      - tenderly_access_key
+secrets:
+  tenderly_access_key:
+    file: ./tenderly-access-key

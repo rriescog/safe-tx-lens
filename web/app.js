@@ -13,12 +13,20 @@ const submit = document.getElementById('submit');
 const watch = document.getElementById('watch');
 const jsonFile = document.getElementById('json-file');
 const publicMode = document.body.dataset.publicMode === 'true';
-if (publicMode) {
+const communityMode = document.body.dataset.communityMode === 'true';
+const publicFacing = publicMode || communityMode;
+const simulationEnabled = document.body.dataset.simulationEnabled === 'true';
+if (publicFacing) {
+  if (communityMode) document.querySelector('.local-note').textContent = 'Public service: Safe lookups and hosted MCP share a usage budget. Simulation, when configured, runs only on request.';
+  else {
   document.querySelector('.local-note').textContent = 'Public demo: limited requests, no owner API keys or simulation. Use the local tool for full review.';
+  }
   document.querySelector('.watch-control').hidden = true;
+  if (publicMode) {
   const autoOption = document.querySelector('#network option[value="auto"]');
   if (autoOption) autoOption.disabled = true;
   network.value = 'eth';
+  }
 }
 let timer = null;
 let watchInput = null;
@@ -135,7 +143,7 @@ function reportHtml(r) {
   const emptyEffects = r.simulation?.unavailable ? 'Simulation was unavailable, so no state change was measured.' : r.simulation && r.simulation.stateDiffAvailable === false ? 'The simulation provider did not return a storage diff. Absence of a diff is not evidence of no change.' : r.simulation ? 'The simulation returned no storage, balance, or asset changes in its response.' : 'No simulation or execution trace has measured these changes yet.';
   const effects = r.effects.length ? r.effects.map(e => `<div class="item">${pill(e.severity)}<div class="item-content"><strong>${esc(e.kind)} · ${esc(e.label ?? '')}</strong><p class="mono">${esc(e.address)}<br>${esc(short(e.before))} → ${esc(short(e.after))}${e.amount ? `<br>Amount: ${esc(e.amount)}` : ''}</p><details><summary>Full before and after values</summary><div class="raw mono">Before: ${esc(e.before)}<br>After: ${esc(e.after)}</div></details></div></div>`).join('') : `<div class="state-empty"><strong>No measured state change</strong><p>${esc(emptyEffects)}</p></div>`;
   const sim = r.simulation ? r.simulation.unavailable ? `<div class="notice">Simulation unavailable: ${esc(r.simulation.unavailable)}</div>` : `<div class="item">${pill(r.simulation.success === true ? 'pass' : r.simulation.success === false ? 'fail' : 'unavailable')}<div class="item-content"><strong>${r.simulation.success === true ? 'Safe execution succeeded in simulation' : r.simulation.success === false ? 'Safe execution failed in simulation' : 'EVM completed; Safe inner result unverified'}</strong><p>Block: ${esc(r.simulation.blockNumber)}${r.simulation.error ? ` · ${esc(r.simulation.error)}` : ''}${r.simulation.url ? ` · <a href="${esc(r.simulation.url)}" target="_blank" rel="noopener noreferrer">Open Tenderly trace</a>` : ''}</p></div></div>` : '<p class="meta">Simulation has not been run for this transaction.</p>';
-  const simulateAction = publicMode ? '<p class="meta">Simulation is available in the local tool with your own Tenderly credentials.</p>' : `<div class="simulation-action"><button type="button" id="run-simulation">${r.simulation ? 'Run simulation again' : 'Run simulation and inspect state changes'}</button><p>Sends this transaction's calldata and signatures to the configured Tenderly project. The saved simulation covers one chain state and execution path.</p></div>`;
+  const simulateAction = publicMode ? '<p class="meta">Simulation is available in the local tool with your own Tenderly credentials.</p>' : communityMode && !simulationEnabled ? '<p class="meta">Simulation is not configured for this public service. Decode and hash checks remain available.</p>' : `<div class="simulation-action"><button type="button" id="run-simulation">${r.simulation ? 'Run simulation again' : 'Run simulation and inspect state changes'}</button><p>Sends this transaction's calldata and signatures to the configured Tenderly project. The saved simulation covers one chain state and execution path.</p></div>`;
   return `<div class="report-header"><div class="report-heading">${pill(r.status)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(tx.isExecuted ? 'Executed transaction' : 'Pending proposal')} on ${esc(r.network)}</span></div><div class="hash-line mono">${esc(r.hash)}</div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('Where the data comes from · three hash checks', verificationHtml(r))}${section('What this transaction can do', `${riskHtml}${flow}`)}${section('Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('Target bytecode and verified source', targetChecksHtml(r))}${section('State changes measured by simulation or execution', effects)}${section('Checks and simulation', `${checks}${sim}${simulateAction}`)}${section('Independent hash cross-check', crossCheckHtml(r))}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', tx.isExecuted ? (tx.isSuccessful ? 'Executed successfully' : 'Executed, failed') : 'Offchain proposal')}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}<details class="technical"><summary>Technical details: decoded arguments and raw calldata</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`;
 }
 function queueHtml(result) {
@@ -167,7 +175,7 @@ function showTransactionReport(result) {
     inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, verifyTargets: true });
   });
 }
-async function inspect({ silent = false, overrideInput = null, overrideNetwork = null, simulate = false, verifyTargets = !publicMode } = {}) {
+async function inspect({ silent = false, overrideInput = null, overrideNetwork = null, simulate = false, verifyTargets = !publicFacing } = {}) {
   const selectedInput = overrideInput ?? importedJson ?? input.value.trim();
   const priorEvidence = simulate || verifyTargets ? activeReportEvidence : null;
   const priorHash = simulate || verifyTargets ? activeReportInput?.safeTxHash : null;
@@ -213,7 +221,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
         inspect({ overrideInput: result.safe });
       }));
       report.querySelectorAll('.queue-row').forEach(row => {
-        const open = () => { const selected = result.reports[Number(row.dataset.index)]; showTransactionReport(selected); status.textContent = publicMode ? 'Opening selected transaction…' : 'Verifying selected transaction targets…'; inspect({ overrideInput: selected.transaction, overrideNetwork: selected.network, verifyTargets: !publicMode }); };
+        const open = () => { const selected = result.reports[Number(row.dataset.index)]; showTransactionReport(selected); status.textContent = publicFacing ? 'Opening selected transaction…' : 'Verifying selected transaction targets…'; inspect({ overrideInput: selected.transaction, overrideNetwork: selected.network, verifyTargets: !publicFacing }); };
         row.addEventListener('click', open);
         row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
       });
@@ -239,13 +247,13 @@ function inspectSafe(selectedScope) {
 }
 loadPending.addEventListener('click', () => inspectSafe('pending'));
 loadHistory.addEventListener('click', () => inspectSafe('history'));
-watch.addEventListener('change', () => { if (publicMode) { watch.checked = false; return; } clearInterval(timer); timer = null; watchInput = null; if (watch.checked) { scope.value = 'pending'; watchInput = safeAddress.value.trim() || input.value.trim(); inspect({ overrideInput: watchInput }); timer = setInterval(() => inspect({ silent: true, overrideInput: watchInput }), 30000); } });
+watch.addEventListener('change', () => { if (publicFacing) { watch.checked = false; return; } clearInterval(timer); timer = null; watchInput = null; if (watch.checked) { scope.value = 'pending'; watchInput = safeAddress.value.trim() || input.value.trim(); inspect({ overrideInput: watchInput }); timer = setInterval(() => inspect({ silent: true, overrideInput: watchInput }), 30000); } });
 scope.addEventListener('change', () => { if (watch.checked && scope.value !== 'pending') { watch.checked = false; clearInterval(timer); timer = null; } });
 jsonFile.addEventListener('change', async () => {
   const file = jsonFile.files?.[0];
   if (!file) return;
   try {
-    if (file.size > (publicMode ? 262144 : 5000000)) throw new Error(`JSON file exceeds ${publicMode ? '256 KB' : '5 MB'}`);
+    if (file.size > (publicFacing ? 262144 : 5000000)) throw new Error(`JSON file exceeds ${publicFacing ? '256 KB' : '5 MB'}`);
     const parsed = JSON.parse(await file.text());
     importedJson = parsed;
     inputMode.value = 'json';

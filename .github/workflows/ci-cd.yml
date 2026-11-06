@@ -26,6 +26,7 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - name: Check deploy configuration
         run: |
+          touch deploy/safe-api-key
           DOMAIN=example.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml config --quiet
 
   publish:
@@ -71,6 +72,9 @@ jobs:
           DEPLOY_DOMAIN: ${{ vars.DEPLOY_DOMAIN }}
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_TENDERLY_ENABLED: ${{ vars.DEPLOY_TENDERLY_ENABLED }}
+          DEPLOY_TENDERLY_ACCOUNT: ${{ vars.DEPLOY_TENDERLY_ACCOUNT }}
+          DEPLOY_TENDERLY_PROJECT: ${{ vars.DEPLOY_TENDERLY_PROJECT }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
@@ -78,6 +82,11 @@ jobs:
           [[ "$DEPLOY_DOMAIN" =~ ^[a-zA-Z0-9.-]+$ ]]
           [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.:-]+$ ]]
           [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
+          [[ "$DEPLOY_TENDERLY_ENABLED" == true || "$DEPLOY_TENDERLY_ENABLED" == false || -z "$DEPLOY_TENDERLY_ENABLED" ]]
+          if [[ "$DEPLOY_TENDERLY_ENABLED" == true ]]; then
+            [[ "$DEPLOY_TENDERLY_ACCOUNT" =~ ^[a-zA-Z0-9_-]+$ ]]
+            [[ "$DEPLOY_TENDERLY_PROJECT" =~ ^[a-zA-Z0-9_-]+$ ]]
+          fi
           test -n "$DEPLOY_KNOWN_HOSTS"
           test -n "$DEPLOY_SSH_KEY"
           test -n "$GHCR_READ_TOKEN"
@@ -96,20 +105,34 @@ jobs:
           DEPLOY_DOMAIN: ${{ vars.DEPLOY_DOMAIN }}
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_TENDERLY_ENABLED: ${{ vars.DEPLOY_TENDERLY_ENABLED }}
+          DEPLOY_TENDERLY_ACCOUNT: ${{ vars.DEPLOY_TENDERLY_ACCOUNT }}
+          DEPLOY_TENDERLY_PROJECT: ${{ vars.DEPLOY_TENDERLY_PROJECT }}
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
           IMAGE: ${{ needs.publish.outputs.image }}
         run: |
           ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p "$HOME/safe-tx-lens"'
-          scp -o StrictHostKeyChecking=yes deploy/compose.yaml deploy/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:safe-tx-lens/"
+          scp -o StrictHostKeyChecking=yes deploy/compose.yaml deploy/compose.tenderly.yaml deploy/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:safe-tx-lens/"
           printf '%s' "$GHCR_READ_TOKEN" | ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" 'docker login ghcr.io -u web3security --password-stdin >/dev/null'
-          ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- '$DEPLOY_DOMAIN' '$IMAGE'" <<'REMOTE'
+          ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- '$DEPLOY_DOMAIN' '$IMAGE' '$DEPLOY_TENDERLY_ENABLED' '$DEPLOY_TENDERLY_ACCOUNT' '$DEPLOY_TENDERLY_PROJECT'" <<'REMOTE'
           set -euo pipefail
           domain="$1"
           image="$2"
+          tenderly_enabled="$3"
+          tenderly_account="$4"
+          tenderly_project="$5"
           cd "$HOME/safe-tx-lens"
+          test -s safe-api-key || { echo 'Dedicated Safe API key file is missing on the VPS' >&2; exit 1; }
           umask 077
           printf 'DOMAIN=%s\nIMAGE=%s\n' "$domain" "$image" > .env
-          docker compose --env-file .env -f compose.yaml pull
-          docker compose --env-file .env -f compose.yaml up -d --remove-orphans
-          docker compose --env-file .env -f compose.yaml ps
+          compose_files=(-f compose.yaml)
+          if [[ "$tenderly_enabled" == true ]]; then
+            [[ "$tenderly_account" =~ ^[a-zA-Z0-9_-]+$ && "$tenderly_project" =~ ^[a-zA-Z0-9_-]+$ ]]
+            test -s tenderly-access-key || { echo 'Dedicated Tenderly key file is missing on the VPS' >&2; exit 1; }
+            printf 'TENDERLY_ACCOUNT=%s\nTENDERLY_PROJECT=%s\n' "$tenderly_account" "$tenderly_project" >> .env
+            compose_files+=(-f compose.tenderly.yaml)
+          fi
+          docker compose --env-file .env "${compose_files[@]}" pull
+          docker compose --env-file .env "${compose_files[@]}" up -d --remove-orphans
+          docker compose --env-file .env "${compose_files[@]}" ps
           REMOTE

@@ -92,7 +92,7 @@ Example MCP host configuration (replace the path with your checkout):
 }
 ```
 
-The [VPS deployment guide](deploy/README.md) prepares a keyless public demo with a global request budget and CI/CD. It does not host MCP; each user runs the local stdio server with their own credentials.
+The [VPS deployment guide](deploy/README.md) prepares a community service with a dedicated Safe API key, shared web/MCP quota, and CI/CD. Tenderly simulation is optional and requires a separate community project. A VPS and domain have not yet been configured, so this repository is not a live public SaaS.
 
 ## What the report distinguishes
 
@@ -107,6 +107,8 @@ The [VPS deployment guide](deploy/README.md) prepares a keyless public demo with
 Simulation uses the transaction's actual fields and either exact onchain signature bytes or standard 65-byte confirmation signatures. It does **not** override Safe threshold or storage. If there are too few compatible signatures, it reports simulation unavailable. Historical simulations require the real execution sender and an RPC receipt or block number; the tool will not guess a sender because it can change Safe signature checks. Building complex offchain contract signature layouts from confirmations needs further support.
 
 The report names the origin of the transaction fields. For a queued Safe hash, Safe Transaction Service or Client Gateway supplies the fields; local EIP-712 calculation checks that they produce the requested hash. The Safe contract hash check asks the contract through an RPC, independently of the Safe service if that RPC is separately trusted. If the input is only a Safe address, there is no independently supplied reference hash until the reviewer compares the result with the signing device. Imported JSON is not a second source if it was downloaded from the same Safe service. API confirmation labels and signatures are not independently validated by the hash checks.
+
+Normal hash and Safe address lookups never read monitor snapshots. A local CLI can explicitly opt into a snapshot fallback with `--monitor-fallback`; incomplete records are marked unverified. The hosted service never enables this fallback. A Tenderly simulation is a separate, explicit action.
 
 `watch` polls the first 100 pending proposals, reports new proposals and confirmation-count changes, and fetches the final status when a tracked proposal leaves the queue. It is a local process, not a hosted 24/7 monitor. The UI displays up to 20 pending proposals per refresh and marks when a tracked proposal leaves the queue. The interface never submits a transaction or a signature.
 

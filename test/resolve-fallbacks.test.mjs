@@ -42,13 +42,15 @@ async function withSources({ records = {}, safePages = false } = {}, run) {
   }
 }
 
-test('monitor resolves an unknown Safe hash and an address before Safe service lookup', async () => withSources({ records: { multisig_first: monitorRecord() } }, async () => {
-  const report = await resolve(tx.safeTxHash, 'auto', { rpcUrl: '', verifyTargets: false, fetchState: false });
+test('an explicitly enabled monitor can rescue a hash and queue after Safe services fail', async () => withSources({ records: { multisig_first: monitorRecord() } }, async () => {
+  const report = await resolve(tx.safeTxHash, 'auto', { rpcUrl: '', verifyTargets: false, fetchState: false, monitorFallback: true });
   assert.equal(report.network, 'eth');
   assert.equal(report.hash, tx.safeTxHash);
   assert.equal(report.evidence.source, 'tenderly_monitor');
   assert.equal(report.evidence.requestedHash, tx.safeTxHash);
-  const queue = await resolve(tx.safe, 'eth', { rpcUrl: '', verifyTargets: false, fetchState: false });
+  assert.equal(report.status, 'UNVERIFIED');
+  assert.match(report.warnings.join(' '), /Do not sign based on this report alone/);
+  const queue = await resolve(tx.safe, 'eth', { rpcUrl: '', verifyTargets: false, fetchState: false, monitorFallback: true });
   assert.equal(queue.source, 'tenderly_monitor');
   assert.equal(queue.reports.length, 1);
   assert.equal(queue.reports[0].evidence.source, 'tenderly_monitor');
@@ -56,7 +58,33 @@ test('monitor resolves an unknown Safe hash and an address before Safe service l
 }));
 
 test('ambiguous monitor chains never silently choose a network', async () => withSources({ records: { multisig_a: monitorRecord('eth'), multisig_b: monitorRecord('matic') } }, async () => {
-  await assert.rejects(() => resolve(tx.safeTxHash, 'auto', { rpcUrl: '' }), /multiple networks/);
+  await assert.rejects(() => resolve(tx.safeTxHash, 'auto', { rpcUrl: '', monitorFallback: true }), /multiple networks/);
+}));
+
+test('Safe services take priority over a configured Tenderly snapshot and default never reads it', async () => withSources({ records: { multisig_first: monitorRecord() }, safePages: true }, async () => {
+  const original = globalThis.fetch;
+  let monitorCalls = 0;
+  globalThis.fetch = async (...args) => { if (String(args[0]).includes('api.tenderly.co')) monitorCalls++; return original(...args); };
+  try {
+    const options = { rpcUrl: '', verifyTargets: false, fetchState: false, monitorFallback: true };
+    const report = await resolve(tx.safeTxHash, 'eth', options);
+    assert.equal(report.evidence.source, 'safe_api');
+    assert.equal(report.checks[0].status, 'pass');
+    const queue = await resolve(tx.safe, 'eth', options);
+    assert.equal(queue.source, 'safe_api');
+    assert.equal(queue.reports[0].checks[0].status, 'pass');
+    assert.equal(monitorCalls, 0);
+  } finally { globalThis.fetch = original; }
+}));
+
+test('ordinary hash inspection never reads Tenderly even when Safe services fail', async () => withSources({ records: { multisig_first: monitorRecord() } }, async () => {
+  const original = globalThis.fetch;
+  let monitorCalls = 0;
+  globalThis.fetch = async (...args) => { if (String(args[0]).includes('api.tenderly.co')) monitorCalls++; return original(...args); };
+  try {
+    await assert.rejects(() => resolve(tx.safeTxHash, 'eth', { rpcUrl: '', verifyTargets: false }), /Safe API 503/);
+    assert.equal(monitorCalls, 0);
+  } finally { globalThis.fetch = original; }
 }));
 
 test('Safe address can fetch both queue and history with source attribution', async () => withSources({ safePages: true }, async () => {
@@ -125,11 +153,11 @@ test('a live onchain execution removes a stale proposal from the monitor queue',
     call: async () => state.encodeFunctionResult('nonce', [tx.nonce]),
     getBlock: async () => ({ timestamp: 1700000000 }),
   };
-  const queue = await resolve(tx.safe, 'eth', { scope: 'pending', rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
+  const queue = await resolve(tx.safe, 'eth', { scope: 'pending', rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false, monitorFallback: true });
   assert.equal(queue.source, 'tenderly_monitor');
   assert.equal(queue.reports.length, 0);
   assert.match(queue.warnings.join(' '), /snapshot is stale/);
-  const fromMonitorHash = await resolve(tx.safeTxHash, 'eth', { rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
+  const fromMonitorHash = await resolve(tx.safeTxHash, 'eth', { rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false, monitorFallback: true });
   assert.equal(fromMonitorHash.evidence.source, 'onchain_execution');
   assert.equal(fromMonitorHash.evidence.requestedHash, tx.safeTxHash);
   const fromExecutionHash = await resolve(executionHash, 'eth', { rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
@@ -142,7 +170,7 @@ test('quota errors identify an unavailable offchain hash without guessing its Sa
     ? (() => { throw new Error('Safe anonymous monthly quota exhausted'); })()
     : original(url, options);
   try {
-    await assert.rejects(() => resolve(tx.safeTxHash, 'eth', { rpcUrl: '', verifyTargets: false }), /Hash not found in the configured Tenderly monitor snapshot.*quota is exhausted/);
+    await assert.rejects(() => resolve(tx.safeTxHash, 'eth', { rpcUrl: '', verifyTargets: false, monitorFallback: true }), /Hash not found in the explicitly enabled Tenderly monitor snapshot.*quota is exhausted/);
   } finally { globalThis.fetch = original; }
 }));
 

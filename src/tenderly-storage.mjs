@@ -20,7 +20,11 @@ export async function localCredentials() {
   const monitorEnv = config.TENDERLY_MONITOR_ENV_FILE
     ? parseEnv(await readFile(config.TENDERLY_MONITOR_ENV_FILE, 'utf8'))
     : {};
-  return { ...monitorEnv, ...Object.fromEntries(Object.entries(config).filter(([, value]) => value !== '')) };
+  const credentials = { ...monitorEnv, ...Object.fromEntries(Object.entries(config).filter(([, value]) => value !== '')) };
+  for (const name of ['SAFE_API_KEY', 'TENDERLY_ACCESS_KEY']) {
+    if (credentials[`${name}_FILE`]) credentials[name] = (await readFile(credentials[`${name}_FILE`], 'utf8')).trim();
+  }
+  return credentials;
 }
 
 export async function monitorConfig() {

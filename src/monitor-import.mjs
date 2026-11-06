@@ -43,7 +43,7 @@ async function monitorTransaction(id, record, network) {
   const findings = classifyIntent(call);
   const checks = [{ name: 'Safe hash from Tenderly monitor', status: 'unverified', detail: 'Monitor storage omits Safe gas fields; this hash cannot be recalculated from the stored payload.' }];
   const risk = assessRisk({ call, actions, findings, effects: [], checks, simulation: null, transaction });
-  return { network, chainId: chainId(network), hash, calculatedHash: null, status: findings.some(f => f.severity === 'critical') ? 'REVIEW' : 'INSPECT', risk, checks, transaction, safeState: null, call, actions, findings, simulation: null, effects: [], warnings: ['Imported from Tenderly monitor storage. Calldata is decoded locally, but this record lacks fields needed to verify its Safe hash independently.'], reviewedAt: new Date().toISOString() };
+  return { network, chainId: chainId(network), hash, calculatedHash: null, status: findings.some(f => f.severity === 'critical') ? 'REVIEW' : 'UNVERIFIED', risk, checks, transaction, safeState: null, call, actions, findings, simulation: null, effects: [], warnings: ['Tenderly monitor storage supplied an incomplete record. Its calldata is decoded locally, but the Safe transaction hash cannot be recalculated from this record. Do not sign based on this report alone.'], reviewedAt: new Date().toISOString() };
 }
 
 export async function analyzeMonitorStorage(value, network, options = {}) {
