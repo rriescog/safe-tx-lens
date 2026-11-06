@@ -69,7 +69,9 @@ async function detectNetwork(parsed) {
 
 async function monitorReports(network, options) {
   const snapshot = await fetchMonitorStorage();
-  return snapshot ? analyzeMonitorStorage(snapshot, network, options) : null;
+  if (!snapshot) return null;
+  const result = await analyzeMonitorStorage(snapshot, network, options);
+  return { ...result, reports: result.reports.map(report => ({ ...report, evidence: { source: 'tenderly_monitor', retrievedAt: new Date().toISOString(), ...(options.safeHash ? { requestedHash: options.safeHash } : {}) } })) };
 }
 
 export async function resolve(input, network = 'eth', options = {}) {
@@ -98,7 +100,7 @@ export async function resolve(input, network = 'eth', options = {}) {
         if (settings.rpcUrl) {
           try {
             const executed = await findRecentExecutionBySafeHash(report.transaction.safe, report.hash, parsed.network, settings);
-            if (executed) return executed;
+            if (executed) return { ...executed, evidence: { ...executed.evidence, requestedHash: parsed.hash } };
           } catch { /* Keep the monitor report with its source warning. */ }
         }
         return report;
@@ -112,7 +114,7 @@ export async function resolve(input, network = 'eth', options = {}) {
         if (parsed.expectedSafe && indexed.safe.toLowerCase() !== parsed.expectedSafe.toLowerCase()) throw new Error('Indexed Safe address differs from the supplied Safe URL');
         const executed = await analyzeExecutionHash(indexed.executionHash, parsed.network, settings);
         if (executed.hash.toLowerCase() !== parsed.hash.toLowerCase() || executed.transaction.safe.toLowerCase() !== indexed.safe.toLowerCase()) throw new Error('Indexed execution does not match the requested Safe hash and address');
-        return { ...executed, evidence: { ...executed.evidence, discoveredBy: 'etherscan_index' } };
+        return { ...executed, evidence: { ...executed.evidence, discoveredBy: 'etherscan_index', requestedHash: parsed.hash } };
       }
     } catch (error) {
       if (/differs|does not match/.test(error.message)) throw error;

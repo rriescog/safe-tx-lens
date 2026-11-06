@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { getAddress } from 'ethers';
 import { readFile } from 'node:fs/promises';
 import { safeGet, fetchTransaction, fetchSafeTransactions, fetchQueue } from '../src/safe-api.mjs';
+import { analyzeHash } from '../src/analyze.mjs';
 
 const SAFE = '0x1111111111111111111111111111111111111111';
 const HASH = `0x${'ab'.repeat(32)}`;
@@ -44,6 +45,19 @@ test('a hash lookup records the live source and queue pages preserve their cover
   assert.equal(queue.transactions[0].safeTxHash, HASH);
   assert.equal(queue.truncated, true);
 }));
+
+test('hash-only inspection records the exact user reference separately from the Safe API payload', async () => {
+  const tx = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
+  await withFetch(async url => {
+    assert.match(String(url), new RegExp(`/multisig-transactions/${tx.safeTxHash}/`));
+    return new Response(JSON.stringify(tx), { status: 200 });
+  }, async () => {
+    const report = await analyzeHash(tx.safeTxHash, 'eth', { fetchState: false, verifyTargets: false });
+    assert.equal(report.evidence.source, 'safe_api');
+    assert.equal(report.evidence.requestedHash, tx.safeTxHash);
+    assert.equal(report.checks[0].status, 'pass');
+  });
+});
 
 test('an API failure does not silently turn an unavailable queue into an empty one', async () => withFetch(async () => new Response('failure', { status: 503 }), async () => {
   await assert.rejects(() => fetchSafeTransactions(SAFE, 'eth', 'pending', 1), /Safe API 503.*Safe Client Gateway 503/);

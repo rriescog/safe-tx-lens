@@ -39,6 +39,77 @@ test('public UI disables wallet monitoring and labels its owner-key limitations'
   assert.doesNotMatch(page.evaluate('targetChecksHtml({})'), /id="verify-targets"/);
 });
 
+test('verification panel distinguishes supplied data, a user hash, local calculation, and RPC', async () => {
+  const page = ui();
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const report = await analyze(tx, 'eth', { fetchState: false });
+  report.evidence = { source: 'safe_api', requestedHash: report.hash };
+  report.checks[0].status = 'pass';
+  report.checks.push({ name: 'Safe contract hash', status: 'pass', detail: report.hash });
+  page.context.sample = report;
+  const html = page.evaluate('verificationHtml(sample)');
+  assert.match(html, /Transaction Service/);
+  assert.match(html, /Hash supplied by you/);
+  assert.match(html, /Local EIP-712 calculation/);
+  assert.match(html, /Safe contract calculation by RPC/);
+  assert.match(html, /consistency, not an independent source/);
+  assert.match(html, /API confirmations are not independently verified/);
+  page.context.sample = { ...report, safeState: { source: 'safe_api' } };
+  assert.match(page.evaluate('verificationHtml(sample)'), /does not independently validate every API confirmation/);
+  page.context.sample = { ...report, evidence: undefined, checks: [report.checks[0]], safeState: null };
+  assert.match(page.evaluate('verificationHtml(sample)'), /No separate Safe transaction hash was supplied/);
+  assert.match(page.evaluate('verificationHtml(sample)'), /No contract hash result is available/);
+  assert.match(page.evaluate('crossCheckHtml(sample)'), /not the data source/);
+});
+
+test('public report opens without requesting bulk target verification', async () => {
+  const page = ui({ publicMode: true });
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const review = await analyze(tx, 'eth', { fetchState: false });
+  page.elements.get('input').value = review.hash;
+  page.elements.get('safe-address').value = tx.safe;
+  page.elements.get('safe-hash').value = `0x${'ff'.repeat(32)}`;
+  let requested;
+  page.context.fetch = async (_url, options) => { requested = JSON.parse(options.body); return { ok: true, json: async () => review }; };
+  await page.evaluate('inspect()');
+  assert.equal(requested.verifyTargets, false);
+  assert.equal(requested.safeAddress, undefined);
+  assert.equal(requested.safeHash, undefined);
+  assert.match(page.elements.get('report').innerHTML, /Where the data comes from/);
+  assert.doesNotMatch(page.elements.get('report').innerHTML, /id="verify-targets"/);
+});
+
+test('input wizard shows only the fields for the selected input and auto-detects pasted values', () => {
+  const page = ui();
+  const mode = page.elements.get('input-mode');
+  const input = page.elements.get('input');
+  mode.value = 'safe';
+  mode.on_change();
+  assert.equal(page.elements.get('scope-group').hidden, false);
+  assert.equal(page.elements.get('safe-actions').hidden, false);
+  assert.equal(page.elements.get('json-options').hidden, true);
+  mode.value = 'json';
+  mode.on_change();
+  assert.equal(page.elements.get('json-import').hidden, false);
+  assert.equal(page.elements.get('json-options').hidden, false);
+  assert.equal(page.elements.get('scope-group').hidden, true);
+  assert.match(page.elements.get('network-help').textContent, /chain for this export/);
+  mode.value = 'url';
+  mode.on_change();
+  assert.equal(page.elements.get('network-group').hidden, true);
+  mode.value = 'auto';
+  input.value = '0x1111111111111111111111111111111111111111';
+  input.on_input();
+  assert.equal(page.elements.get('safe-actions').hidden, false);
+  input.value = `0x${'ab'.repeat(32)}`;
+  input.on_input();
+  assert.equal(page.elements.get('scope-group').hidden, true);
+  assert.match(page.elements.get('mode-help').textContent, /recalculates the Safe hash/);
+  input.value = '{"chainId":"1"}';
+  input.on_input();
+  assert.equal(page.elements.get('json-import').hidden, false);
+});
+
 test('argument summaries keep large bytes collapsed and render structured arguments', () => {
   const page = ui();
   page.context.sample = { children: [{}] };

@@ -15,7 +15,7 @@ npm install
 node bin/safe-tx-lens.mjs serve
 ```
 
-Open <http://127.0.0.1:4173>. The UI binds only to localhost and never requests a wallet connection or signature.
+Open <http://127.0.0.1:4173>. Choose hash, Safe address, Safe URL, or JSON in the guided form; it also recognizes pasted inputs automatically. The report distinguishes transaction fields fetched from Safe services from its local hash calculation and contract hash check via RPC. The UI binds only to localhost and never requests a wallet connection or signature.
 
 ```sh
 # The Safe transaction hash is enough when the Safe API is available.
@@ -98,7 +98,7 @@ The [VPS deployment guide](deploy/README.md) prepares a keyless public demo with
 
 | Layer | Evidence | Limit |
 | --- | --- | --- |
-| Hash | Local EIP-712 recomputation; optional onchain `getTransactionHash` | Protects against mismatched fields, not malicious target code |
+| Hash | The user's supplied hash when available; local EIP-712 recomputation; onchain Safe `getTransactionHash` through an RPC when available | A pass confirms agreement about the supplied fields, not malicious target code or valid signer approvals |
 | Decoded action and risk | Built-in ABI for common transfers, approvals, Safe authority changes, upgrades, timelock calls, governance forwarding, validator calls, and recursive MultiSend; action-based impact and review priority | A matching selector does not verify the target bytecode or prove the action will execute; unknown selectors stay unknown |
 | Target code | Chain-checked RPC bytecode hash compared with Sourcify's verified runtime; ABI selector check; ERC-1967 implementation inspection | Matching source does not prove safe behavior; unverified source or archive state is reported; other proxy patterns need manual review |
 | Observed effect | Storage, native balance, and asset changes reported by a simulation, with Safe singleton slot 0 highlighted | Only available when simulation succeeds and the provider returns changes |
@@ -106,11 +106,13 @@ The [VPS deployment guide](deploy/README.md) prepares a keyless public demo with
 
 Simulation uses the transaction's actual fields and either exact onchain signature bytes or standard 65-byte confirmation signatures. It does **not** override Safe threshold or storage. If there are too few compatible signatures, it reports simulation unavailable. Historical simulations require the real execution sender and an RPC receipt or block number; the tool will not guess a sender because it can change Safe signature checks. Building complex offchain contract signature layouts from confirmations needs further support.
 
+The report names the origin of the transaction fields. For a queued Safe hash, Safe Transaction Service or Client Gateway supplies the fields; local EIP-712 calculation checks that they produce the requested hash. The Safe contract hash check asks the contract through an RPC, independently of the Safe service if that RPC is separately trusted. If the input is only a Safe address, there is no independently supplied reference hash until the reviewer compares the result with the signing device. Imported JSON is not a second source if it was downloaded from the same Safe service. API confirmation labels and signatures are not independently validated by the hash checks.
+
 `watch` polls the first 100 pending proposals, reports new proposals and confirmation-count changes, and fetches the final status when a tracked proposal leaves the queue. It is a local process, not a hosted 24/7 monitor. The UI displays up to 20 pending proposals per refresh and marks when a tracked proposal leaves the queue. The interface never submits a transaction or a signature.
 
 ## Prior work and design choices
 
-This project builds on ideas from [pcaversaccio's Safe transaction hash utility](https://github.com/pcaversaccio/safe-tx-hashes-util), the independent [Cyfrin fork](https://github.com/Cyfrin/safe-tx-hashes), and [OpenZeppelin Safe Utils](https://github.com/OpenZeppelin/safe-utils). The report shows its EIP-712 domain and message hashes and a command for pcaversaccio's separate verifier, so reviewers can compare results. That AGPL-licensed script is not bundled or run by this MIT project. The workflow follows [SEAL's secure multisig verification guidance](https://github.com/security-alliance/frameworks/blob/develop/docs/pages/wallet-security/signing-and-verification/secure-multisig-safe-verification.mdx). Safe's [Transaction Service](https://docs.safe.global/core-api/api-safe-transaction-service) supplies offchain proposals; Tenderly supplies optional execution traces. No code was copied from those projects.
+This project builds on ideas from [pcaversaccio's Safe transaction hash utility](https://github.com/pcaversaccio/safe-tx-hashes-util), the [Cyfrin fork](https://github.com/Cyfrin/safe-tx-hashes), and [OpenZeppelin Safe Utils](https://github.com/OpenZeppelin/safe-utils). The report shows its EIP-712 domain and message hashes and a command for pcaversaccio's separate implementation. Its standard mode also retrieves the fields from Safe Transaction Service, so agreement is a calculation cross-check, not independent evidence for the fields; its interactive mode can use manually supplied fields. That AGPL-licensed script is not bundled or run by this MIT project. The workflow follows [SEAL's secure multisig verification guidance](https://github.com/security-alliance/frameworks/blob/develop/docs/pages/wallet-security/signing-and-verification/secure-multisig-safe-verification.mdx). Safe's [Transaction Service](https://docs.safe.global/core-api/api-safe-transaction-service) supplies offchain proposals; Tenderly supplies optional execution traces. No code was copied from those projects.
 
 The added focus is a single input surface for hash, URL, JSON, and offchain queue; one report that keeps declared intent separate from simulated effects; and an explicit distinction between verified, unavailable, and failed checks.
 

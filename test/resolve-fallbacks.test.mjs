@@ -46,9 +46,12 @@ test('monitor resolves an unknown Safe hash and an address before Safe service l
   const report = await resolve(tx.safeTxHash, 'auto', { rpcUrl: '', verifyTargets: false, fetchState: false });
   assert.equal(report.network, 'eth');
   assert.equal(report.hash, tx.safeTxHash);
+  assert.equal(report.evidence.source, 'tenderly_monitor');
+  assert.equal(report.evidence.requestedHash, tx.safeTxHash);
   const queue = await resolve(tx.safe, 'eth', { rpcUrl: '', verifyTargets: false, fetchState: false });
   assert.equal(queue.source, 'tenderly_monitor');
   assert.equal(queue.reports.length, 1);
+  assert.equal(queue.reports[0].evidence.source, 'tenderly_monitor');
   assert.match(queue.warnings.join(' '), /snapshot/);
 }));
 
@@ -128,6 +131,7 @@ test('a live onchain execution removes a stale proposal from the monitor queue',
   assert.match(queue.warnings.join(' '), /snapshot is stale/);
   const fromMonitorHash = await resolve(tx.safeTxHash, 'eth', { rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
   assert.equal(fromMonitorHash.evidence.source, 'onchain_execution');
+  assert.equal(fromMonitorHash.evidence.requestedHash, tx.safeTxHash);
   const fromExecutionHash = await resolve(executionHash, 'eth', { rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
   assert.equal(fromExecutionHash.hash, tx.safeTxHash);
 }));
@@ -172,6 +176,7 @@ test('indexed execution is accepted only after onchain Safe hash reconstruction'
     const report = await resolve(gno.safeTxHash, 'pol', { rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
     assert.equal(report.hash, gno.safeTxHash);
     assert.equal(report.evidence.discoveredBy, 'etherscan_index');
+    assert.equal(report.evidence.requestedHash, gno.safeTxHash);
     assert.equal(report.checks[0].status, 'pass');
   } finally { globalThis.fetch = original; }
 }));

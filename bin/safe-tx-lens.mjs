@@ -59,12 +59,13 @@ function printReport(result, json) {
   for (const report of reports) {
     console.log(`\n${report.status} ${report.hash} (${report.network})`);
     if (report.evidence?.source) console.log(`  SOURCE ${report.evidence.source}${report.evidence.retrievedAt ? ` · retrieved ${report.evidence.retrievedAt}` : ''}`);
+    if (report.evidence?.requestedHash) console.log(`  INPUT HASH ${report.evidence.requestedHash} · matched the returned Safe transaction identifier`);
     console.log(`  RISK ${report.risk.reviewPriority.toUpperCase()} review priority · ${report.risk.impactLevel.toUpperCase()} potential impact (${report.risk.basis})`);
     for (const action of report.risk.actionRatings) console.log(`  ${action.stage === 'schedule' ? 'SCHEDULE' : 'CALL'} [${action.level.toUpperCase()}] ${action.label} → ${action.to}`);
     for (const reason of report.risk.reasons.filter(item => !/^(Called|Scheduled):/.test(item.message))) console.log(`  RISK REASON ${reason.message}`);
     console.log(`  ${report.transaction.operation === 1 ? 'DELEGATECALL' : 'CALL'} ${report.transaction.to} · ${report.transaction.value} wei · nonce ${report.transaction.nonce}`);
     console.log(`  ${report.call.method ?? report.call.selector}${report.call.children.length ? ` · ${report.call.children.length} inner calls` : ''}`);
-    for (const check of report.checks) console.log(`  ${check.status.toUpperCase()} ${check.name}: ${check.detail}`);
+    for (const check of report.checks) console.log(`  ${check.status.toUpperCase()} ${check.name}${check.method ? ` [${check.method}]` : ''}: ${check.detail}`);
     for (const finding of report.findings) console.log(`  ${finding.severity.toUpperCase()} ${finding.code} ${finding.path}: ${finding.message}`);
     for (const effect of report.effects) console.log(`  EFFECT ${effect.kind} ${effect.address} ${effect.label ?? ''}: ${effect.before} → ${effect.after}${effect.amount ? ` amount ${effect.amount}` : ''}`);
     if (report.simulation) console.log(`  Simulation: ${report.simulation.unavailable ?? (report.simulation.success === true ? 'Safe execution succeeded' : report.simulation.success === false ? 'Safe execution failed' : 'EVM completed; Safe inner result unverified')}${report.simulation.url ? ` ${report.simulation.url}` : ''}`);

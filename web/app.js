@@ -1,4 +1,5 @@
 const form = document.getElementById('inspect-form');
+const inputMode = document.getElementById('input-mode');
 const input = document.getElementById('input');
 const network = document.getElementById('network');
 const scope = document.getElementById('scope');
@@ -27,6 +28,37 @@ let activeReportInput = null;
 let activeReportNetwork = null;
 let activeReportEvidence = null;
 let activeReportTargetChecks = null;
+
+function selectedInputMode() {
+  if (inputMode.value && inputMode.value !== 'auto') return inputMode.value;
+  const value = input.value.trim();
+  if (importedJson || value.startsWith('{')) return 'json';
+  if (/^0x[0-9a-fA-F]{64}$/.test(value)) return 'hash';
+  if (/^0x[0-9a-fA-F]{40}$/.test(value)) return 'safe';
+  if (value.startsWith('https://app.safe.global/')) return 'url';
+  return 'auto';
+}
+function updateWizard() {
+  const mode = selectedInputMode();
+  const isSafe = mode === 'safe' || mode === 'url';
+  document.getElementById('json-import').hidden = mode !== 'json';
+  document.getElementById('json-options').hidden = mode !== 'json';
+  document.getElementById('network-group').hidden = mode === 'url';
+  document.getElementById('scope-group').hidden = !isSafe;
+  document.getElementById('safe-actions').hidden = !isSafe;
+  const guidance = {
+    auto: ['2 · Paste it here', 'Paste what you have; the tool will identify a hash, Safe address, URL, or JSON.'],
+    hash: ['2 · Paste the transaction hash', 'The tool looks up its full transaction fields, then recalculates the Safe hash.'],
+    safe: ['2 · Paste the Safe address', 'Choose pending proposals or executed history, then select a transaction to review.'],
+    url: ['2 · Paste the Safe URL', 'The URL supplies the network and Safe address. A transaction URL also identifies its hash.'],
+    json: ['2 · Paste or upload JSON', 'Inspect the encoded calls offline. Compare its hash with an independently obtained reference.'],
+  };
+  document.getElementById('input-label').textContent = guidance[mode][0];
+  document.getElementById('mode-help').textContent = guidance[mode][1];
+  document.getElementById('network-help').textContent = mode === 'json' ? 'Select the chain for this export. Auto-detect works when the JSON includes a supported chain ID.' : mode === 'safe' ? 'A Safe address can exist on several chains. Local auto-detect checks available sources.' : 'A hash alone does not identify its chain. Local auto-detect searches available sources.';
+}
+inputMode.addEventListener('change', updateWizard);
+updateWizard();
 
 function esc(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]); }
 function pill(value) { return `<span class="pill ${esc(String(value).toLowerCase())}">${esc(value)}</span>`; }
@@ -58,7 +90,22 @@ function crossCheckHtml(r) {
   const names = { eth: 'ethereum', gno: 'gnosis', pol: 'polygon', arb1: 'arbitrum', oeth: 'optimism', base: 'base', sep: 'sepolia', bnb: 'bsc', avax: 'avalanche' };
   const command = names[r.network] ? `./safe_hashes.sh --network ${names[r.network]} --address ${r.transaction.safe} --nonce ${r.transaction.nonce}` : null;
   const hashes = r.hashComponents ? `<div class="field-grid">${field('Domain hash', r.hashComponents.domainHash)}${field('Message hash', r.hashComponents.messageHash)}${field('Safe transaction hash', r.calculatedHash)}</div>` : '<p class="meta">Complete Safe transaction fields are required to calculate hash components.</p>';
-  return `<p class="meta">Compare these locally calculated values with <a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">pcaversaccio's independent verifier</a>. This app does not run or bundle that separate AGPL tool.</p>${hashes}${command ? `<p class="meta">Run in a separate checkout of that project:</p><code class="cross-check-command">${esc(command)}</code>` : ''}`;
+  return `<p class="meta">Compare these locally calculated values with <a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">pcaversaccio's separate hash calculator</a>. Its standard mode also retrieves transaction fields from Safe Transaction Service, so this checks the calculation with another implementation, not the data source. Its interactive mode accepts manually supplied fields. This app does not run or bundle that separate AGPL tool.</p>${hashes}${command ? `<p class="meta">Run in a separate checkout of that project:</p><code class="cross-check-command">${esc(command)}</code>` : ''}`;
+}
+function verificationHtml(r) {
+  const sources = { safe_api: 'Safe Transaction Service', safe_gateway: 'Safe Client Gateway', onchain_execution: 'Onchain execution via RPC', tenderly_monitor: 'Tenderly monitor snapshot', tenderly_storage: 'Imported monitor JSON' };
+  const source = sources[r.evidence?.source] ?? (r.transaction?.lookupSource ? 'External transaction source' : 'Supplied JSON');
+  const local = r.checks.find(check => check.name === 'Local EIP-712 hash');
+  const contract = r.checks.find(check => check.name.startsWith('Safe contract hash'));
+  const requested = r.evidence?.requestedHash;
+  const step = (number, label, state, detail) => `<div class="item">${pill(state)}<div class="item-content"><strong>${number}. ${esc(label)}</strong><p>${esc(detail)}</p></div></div>`;
+  const requestStep = requested
+    ? step(1, 'Hash supplied by you', requested.toLowerCase() === r.hash?.toLowerCase() ? 'pass' : 'fail', 'The returned Safe transaction identifier matches the exact hash entered. Trust in that original hash depends on where you obtained it.')
+    : step(1, 'Independent reference hash', 'unverified', 'No separate Safe transaction hash was supplied. Compare the calculated hash with the one displayed on your signing device.');
+  const localStep = step(2, 'Local EIP-712 calculation', local?.status ?? 'unavailable', 'Calculated locally from the transaction fields. If those fields and the embedded hash both came from Safe, a pass proves consistency, not an independent source of the fields.');
+  const contractStep = step(3, 'Safe contract calculation by RPC', contract?.status ?? 'unavailable', contract ? 'Called getTransactionHash on the Safe contract through the selected RPC. This is independent of Safe Transaction Service if the RPC is separately trusted.' : 'No contract hash result is available. The transaction has only the local calculation and any supplied reference hash.');
+  const stateSource = r.safeState?.source ? `Signer and threshold state came from ${r.safeState.source === 'safe_api' ? 'Safe Transaction Service' : esc(r.safeState.source)}; this report does not independently validate every API confirmation.` : 'Signer and threshold state was not available; API confirmations are not independently verified here.';
+  return `<p class="meta"><strong>Transaction fields:</strong> ${esc(source)}. ${stateSource}</p>${requestStep}${localStep}${contractStep}<p class="meta">A matching hash does not prove the target code, signer approvals, or execution outcome. Review the decoded calls and target bytecode before signing.</p>`;
 }
 function targetChecksHtml(r) {
   const checks = r.targetChecks ?? [];
@@ -89,7 +136,7 @@ function reportHtml(r) {
   const effects = r.effects.length ? r.effects.map(e => `<div class="item">${pill(e.severity)}<div class="item-content"><strong>${esc(e.kind)} · ${esc(e.label ?? '')}</strong><p class="mono">${esc(e.address)}<br>${esc(short(e.before))} → ${esc(short(e.after))}${e.amount ? `<br>Amount: ${esc(e.amount)}` : ''}</p><details><summary>Full before and after values</summary><div class="raw mono">Before: ${esc(e.before)}<br>After: ${esc(e.after)}</div></details></div></div>`).join('') : `<div class="state-empty"><strong>No measured state change</strong><p>${esc(emptyEffects)}</p></div>`;
   const sim = r.simulation ? r.simulation.unavailable ? `<div class="notice">Simulation unavailable: ${esc(r.simulation.unavailable)}</div>` : `<div class="item">${pill(r.simulation.success === true ? 'pass' : r.simulation.success === false ? 'fail' : 'unavailable')}<div class="item-content"><strong>${r.simulation.success === true ? 'Safe execution succeeded in simulation' : r.simulation.success === false ? 'Safe execution failed in simulation' : 'EVM completed; Safe inner result unverified'}</strong><p>Block: ${esc(r.simulation.blockNumber)}${r.simulation.error ? ` · ${esc(r.simulation.error)}` : ''}${r.simulation.url ? ` · <a href="${esc(r.simulation.url)}" target="_blank" rel="noopener noreferrer">Open Tenderly trace</a>` : ''}</p></div></div>` : '<p class="meta">Simulation has not been run for this transaction.</p>';
   const simulateAction = publicMode ? '<p class="meta">Simulation is available in the local tool with your own Tenderly credentials.</p>' : `<div class="simulation-action"><button type="button" id="run-simulation">${r.simulation ? 'Run simulation again' : 'Run simulation and inspect state changes'}</button><p>Sends this transaction's calldata and signatures to the configured Tenderly project. The saved simulation covers one chain state and execution path.</p></div>`;
-  return `<div class="report-header"><div class="report-heading">${pill(r.status)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(tx.isExecuted ? 'Executed transaction' : 'Pending proposal')} on ${esc(r.network)}</span></div><div class="hash-line mono">${esc(r.hash)}</div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('What this transaction can do', `${riskHtml}${flow}`)}${section('Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('Target bytecode and verified source', targetChecksHtml(r))}${section('State changes measured by simulation or execution', effects)}${section('Checks and simulation', `${checks}${sim}${simulateAction}`)}${section('Independent hash cross-check', crossCheckHtml(r))}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', tx.isExecuted ? (tx.isSuccessful ? 'Executed successfully' : 'Executed, failed') : 'Offchain proposal')}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}<details class="technical"><summary>Technical details: decoded arguments and raw calldata</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`;
+  return `<div class="report-header"><div class="report-heading">${pill(r.status)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(tx.isExecuted ? 'Executed transaction' : 'Pending proposal')} on ${esc(r.network)}</span></div><div class="hash-line mono">${esc(r.hash)}</div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('Where the data comes from · three hash checks', verificationHtml(r))}${section('What this transaction can do', `${riskHtml}${flow}`)}${section('Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('Target bytecode and verified source', targetChecksHtml(r))}${section('State changes measured by simulation or execution', effects)}${section('Checks and simulation', `${checks}${sim}${simulateAction}`)}${section('Independent hash cross-check', crossCheckHtml(r))}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', tx.isExecuted ? (tx.isSuccessful ? 'Executed successfully' : 'Executed, failed') : 'Offchain proposal')}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}<details class="technical"><summary>Technical details: decoded arguments and raw calldata</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`;
 }
 function queueHtml(result) {
   const title = result.scope === 'history' ? 'Executed history' : result.scope === 'both' ? 'Pending and executed' : 'Pending proposals';
@@ -115,12 +162,12 @@ function showTransactionReport(result) {
     event.currentTarget.disabled = true;
     inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, simulate: true });
   });
-  report.querySelector('#verify-targets').addEventListener('click', event => {
+  report.querySelector('#verify-targets')?.addEventListener('click', event => {
     event.currentTarget.disabled = true;
     inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, verifyTargets: true });
   });
 }
-async function inspect({ silent = false, overrideInput = null, overrideNetwork = null, simulate = false, verifyTargets = true } = {}) {
+async function inspect({ silent = false, overrideInput = null, overrideNetwork = null, simulate = false, verifyTargets = !publicMode } = {}) {
   const selectedInput = overrideInput ?? importedJson ?? input.value.trim();
   const priorEvidence = simulate || verifyTargets ? activeReportEvidence : null;
   const priorHash = simulate || verifyTargets ? activeReportInput?.safeTxHash : null;
@@ -128,7 +175,8 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
   if (!selectedInput) return;
   if (!silent) { submit.disabled = true; status.textContent = simulate ? 'Simulating Safe execution and measuring state changes…' : 'Inspecting Safe data and recalculating hashes…'; }
   try {
-    const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? network.value, scope: scope.value, simulate, verifyTargets, safeAddress: safeAddress.value.trim() || undefined, safeHash: safeHash.value.trim() || undefined }) });
+    const isJson = selectedInputMode() === 'json';
+    const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? network.value, scope: scope.value, simulate, verifyTargets, safeAddress: isJson ? safeAddress.value.trim() || undefined : undefined, safeHash: isJson ? safeHash.value.trim() || undefined : undefined }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error ?? 'Inspection failed');
     report.classList.remove('empty');
@@ -165,7 +213,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
         inspect({ overrideInput: result.safe });
       }));
       report.querySelectorAll('.queue-row').forEach(row => {
-        const open = () => { const selected = result.reports[Number(row.dataset.index)]; showTransactionReport(selected); status.textContent = 'Verifying selected transaction targets…'; inspect({ overrideInput: selected.transaction, overrideNetwork: selected.network, verifyTargets: true }); };
+        const open = () => { const selected = result.reports[Number(row.dataset.index)]; showTransactionReport(selected); status.textContent = publicMode ? 'Opening selected transaction…' : 'Verifying selected transaction targets…'; inspect({ overrideInput: selected.transaction, overrideNetwork: selected.network, verifyTargets: !publicMode }); };
         row.addEventListener('click', open);
         row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
       });
@@ -174,7 +222,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
   finally { submit.disabled = false; }
 }
 form.addEventListener('submit', event => { event.preventDefault(); inspect(); });
-input.addEventListener('input', () => { importedJson = null; });
+input.addEventListener('input', () => { importedJson = null; updateWizard(); });
 function inspectSafe(selectedScope) {
   const primary = input.value.trim();
   let address = /^0x[0-9a-fA-F]{40}$/.test(primary) || primary.startsWith('https://app.safe.global/') ? primary : safeAddress.value.trim();
@@ -200,7 +248,9 @@ jsonFile.addEventListener('change', async () => {
     if (file.size > (publicMode ? 262144 : 5000000)) throw new Error(`JSON file exceeds ${publicMode ? '256 KB' : '5 MB'}`);
     const parsed = JSON.parse(await file.text());
     importedJson = parsed;
+    inputMode.value = 'json';
     input.value = `Imported ${file.name}`;
+    updateWizard();
     if (!safeAddress.value && parsed.meta?.createdFromSafeAddress) safeAddress.value = parsed.meta.createdFromSafeAddress;
     status.textContent = `Imported ${file.name}. Decoding…`;
     await inspect();

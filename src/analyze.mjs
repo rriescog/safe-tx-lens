@@ -210,14 +210,14 @@ export async function analyze(raw, network = 'eth', options = {}) {
   const calculatedHash = calculateHash(tx, network);
   const hashComponents = calculateHashComponents(tx, network);
   const warnings = [];
-  const checks = [{ name: 'Local EIP-712 hash', status: tx.safeTxHash ? calculatedHash.toLowerCase() === tx.safeTxHash.toLowerCase() ? 'pass' : 'fail' : 'unverified', detail: calculatedHash }];
+  const checks = [{ name: 'Local EIP-712 hash', method: 'local_eip712', status: tx.safeTxHash ? calculatedHash.toLowerCase() === tx.safeTxHash.toLowerCase() ? 'pass' : 'fail' : 'unverified', detail: calculatedHash }];
   if (checks[0].status === 'fail') warnings.push('The API or JSON safeTxHash does not match the transaction fields. Do not sign.');
   if (options.rpcUrl) {
     try {
       const chain = await onchainHash(tx, options.rpcUrl);
-      checks.push({ name: tx.isExecuted && tx.blockNumber ? 'Safe contract hash at pre-execution block' : 'Safe contract hash', status: chain.chainId === chainId(network) && chain.hash.toLowerCase() === calculatedHash.toLowerCase() ? 'pass' : 'fail', detail: chain.hash });
+      checks.push({ name: tx.isExecuted && tx.blockNumber ? 'Safe contract hash at pre-execution block' : 'Safe contract hash', method: 'onchain_rpc', status: chain.chainId === chainId(network) && chain.hash.toLowerCase() === calculatedHash.toLowerCase() ? 'pass' : 'fail', detail: chain.hash });
       if (checks.at(-1).status === 'fail') warnings.push('The Safe contract hash or RPC chain differs from the locally calculated hash. Do not sign.');
-    } catch (error) { checks.push({ name: tx.isExecuted && tx.blockNumber ? 'Safe contract hash at pre-execution block' : 'Safe contract hash', status: 'unavailable', detail: String(error.shortMessage ?? error.message).slice(0, 240) }); }
+    } catch (error) { checks.push({ name: tx.isExecuted && tx.blockNumber ? 'Safe contract hash at pre-execution block' : 'Safe contract hash', method: 'onchain_rpc', status: 'unavailable', detail: String(error.shortMessage ?? error.message).slice(0, 240) }); }
   }
   const call = decodeCall(tx);
   const actions = summarizeCalls(call);
@@ -268,5 +268,5 @@ export async function analyzeHash(hash, network, options = {}) {
   if (raw.safeTxHash?.toLowerCase() !== hash.toLowerCase()) throw new Error('Safe API returned a different hash');
   if (options.expectedSafe && raw.safe?.toLowerCase() !== options.expectedSafe.toLowerCase()) throw new Error('Safe URL address does not match transaction');
   const report = await analyze(raw, network, options);
-  return { ...report, evidence: { source: raw.lookupSource, retrievedAt: new Date().toISOString() } };
+  return { ...report, evidence: { source: raw.lookupSource, retrievedAt: new Date().toISOString(), requestedHash: hash } };
 }

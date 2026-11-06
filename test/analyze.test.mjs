@@ -17,6 +17,7 @@ test('an offline transaction reports its computed hash without claiming remote v
   const report = await analyze(tx, 'eth', { fetchState: false });
   assert.match(report.calculatedHash, /^0x[0-9a-f]{64}$/);
   assert.equal(report.checks[0].status, 'unverified');
+  assert.equal(report.checks[0].method, 'local_eip712');
   assert.equal(report.simulation, null);
 });
 
