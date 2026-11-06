@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve } from '../src/resolve.mjs';
 import { calculateHash, normalizeTransaction } from '../src/analyze.mjs';
+import { Interface, id } from 'ethers';
 
 const tx = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
 const monitorRecord = (prefix = 'eth') => ({
@@ -74,6 +75,10 @@ test('failed queue sources are unavailable, while JSON chain detection stays off
   await assert.rejects(() => resolve({ ...builder, chainId: '999999' }, 'auto'), /does not reveal its network/);
 }));
 
+test('an unindexed offchain hash reports source failure instead of fabricating transaction fields', async () => withSources({}, async () => {
+  await assert.rejects(() => resolve(tx.safeTxHash, 'eth', { rpcUrl: '', verifyTargets: false }), /For an offchain proposal without Safe API access/);
+}));
+
 test('an unseen hash can discover its network through the authenticated Safe Transaction Service', async () => withSources({}, async () => {
   const gno = { ...tx, safeTxHash: calculateHash(normalizeTransaction(tx), 'gno') };
   const original = globalThis.fetch;
@@ -89,6 +94,10 @@ test('an unseen hash can discover its network through the authenticated Safe Tra
   } finally { globalThis.fetch = original; }
 }));
 
+test('auto discovery declines a hash absent from every supported indexed and proposal source', async () => withSources({}, async () => {
+  await assert.rejects(() => resolve(`0x${'fe'.repeat(32)}`, 'auto', { rpcUrl: '' }), /does not reveal its network/);
+}));
+
 test('executed history explicitly reports the bounded RPC fallback after API outage', async () => withSources({}, async () => {
   const provider = {
     getNetwork: async () => ({ chainId: 1n }), getBlockNumber: async () => 10000,
@@ -98,4 +107,71 @@ test('executed history explicitly reports the bounded RPC fallback after API out
   assert.equal(history.source, 'recent_rpc');
   assert.equal(history.truncated, true);
   assert.match(history.warnings.join(' '), /RPC scanned blocks/);
+}));
+
+test('a live onchain execution removes a stale proposal from the monitor queue', async () => withSources({ records: { multisig_stale: monitorRecord() } }, async () => {
+  const executionHash = `0x${'ab'.repeat(32)}`;
+  const iface = new Interface(['function execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes) returns (bool)']);
+  const state = new Interface(['function nonce() view returns (uint256)']);
+  const outer = { from: tx.safe, to: tx.safe, data: iface.encodeFunctionData('execTransaction', [tx.to, tx.value, tx.data, tx.operation, tx.safeTxGas, tx.baseGas, tx.gasPrice, tx.gasToken, tx.refundReceiver, '0x']) };
+  const log = { address: tx.safe, topics: [id('ExecutionSuccess(bytes32,uint256)'), tx.safeTxHash], transactionHash: executionHash, data: '0x' };
+  const provider = {
+    getNetwork: async () => ({ chainId: 1n }), getBlockNumber: async () => 1000,
+    getLogs: async () => [log], getTransaction: async () => outer,
+    getTransactionReceipt: async () => ({ blockNumber: 999, logs: [log] }),
+    call: async () => state.encodeFunctionResult('nonce', [tx.nonce]),
+    getBlock: async () => ({ timestamp: 1700000000 }),
+  };
+  const queue = await resolve(tx.safe, 'eth', { scope: 'pending', rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
+  assert.equal(queue.source, 'tenderly_monitor');
+  assert.equal(queue.reports.length, 0);
+  assert.match(queue.warnings.join(' '), /snapshot is stale/);
+  const fromMonitorHash = await resolve(tx.safeTxHash, 'eth', { rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
+  assert.equal(fromMonitorHash.evidence.source, 'onchain_execution');
+  const fromExecutionHash = await resolve(executionHash, 'eth', { rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
+  assert.equal(fromExecutionHash.hash, tx.safeTxHash);
+}));
+
+test('quota errors identify an unavailable offchain hash without guessing its Safe', async () => withSources({}, async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, options) => String(url).includes('safe-client.safe.global')
+    ? (() => { throw new Error('Safe anonymous monthly quota exhausted'); })()
+    : original(url, options);
+  try {
+    await assert.rejects(() => resolve(tx.safeTxHash, 'eth', { rpcUrl: '', verifyTargets: false }), /Hash not found in the configured Tenderly monitor snapshot.*quota is exhausted/);
+  } finally { globalThis.fetch = original; }
+}));
+
+test('an indexed event cannot override the Safe address in a supplied Safe URL', async () => withSources({}, async () => {
+  const hash = `0x${'ee'.repeat(32)}`;
+  const safe = '0x3333333333333333333333333333333333333333';
+  const expectedSafe = '0x1111111111111111111111111111111111111111';
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, options) => String(url).includes('api.etherscan.io')
+    ? new Response(JSON.stringify({ status: '1', result: [{ address: safe, transactionHash: `0x${'dd'.repeat(32)}`, blockNumber: '0x10', topics: [id('ExecutionSuccess(bytes32,uint256)'), hash] }] }), { status: 200 })
+    : original(url, options);
+  try {
+    const safeUrl = `https://app.safe.global/transactions/tx?safe=eth:${expectedSafe}&id=multisig_${expectedSafe}_${hash}`;
+    await assert.rejects(() => resolve(safeUrl, 'eth', { rpcUrl: '' }), /Indexed Safe address differs/);
+  } finally { globalThis.fetch = original; }
+}));
+
+test('indexed execution is accepted only after onchain Safe hash reconstruction', async () => withSources({}, async () => {
+  const gno = { ...tx, safeTxHash: calculateHash(normalizeTransaction(tx), 'pol') };
+  const executionHash = `0x${'cc'.repeat(32)}`;
+  const iface = new Interface(['function execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes) returns (bool)']);
+  const state = new Interface(['function nonce() view returns (uint256)']);
+  const outer = { from: gno.safe, to: gno.safe, data: iface.encodeFunctionData('execTransaction', [gno.to, gno.value, gno.data, gno.operation, gno.safeTxGas, gno.baseGas, gno.gasPrice, gno.gasToken, gno.refundReceiver, '0x']) };
+  const log = { address: gno.safe, topics: [id('ExecutionSuccess(bytes32,uint256)'), gno.safeTxHash], transactionHash: executionHash, data: '0x' };
+  const provider = { getNetwork: async () => ({ chainId: 137n }), getTransaction: async () => outer, getTransactionReceipt: async () => ({ blockNumber: 999, logs: [log] }), call: async () => state.encodeFunctionResult('nonce', [gno.nonce]), getBlock: async () => ({ timestamp: 1700000000 }) };
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, options) => String(url).includes('api.etherscan.io')
+    ? new Response(JSON.stringify({ status: '1', result: [{ address: gno.safe, transactionHash: executionHash, blockNumber: '0x3e7', topics: log.topics }] }), { status: 200 })
+    : original(url, options);
+  try {
+    const report = await resolve(gno.safeTxHash, 'pol', { rpcUrl: 'https://unused.invalid', provider, verifyTargets: false, fetchState: false });
+    assert.equal(report.hash, gno.safeTxHash);
+    assert.equal(report.evidence.discoveredBy, 'etherscan_index');
+    assert.equal(report.checks[0].status, 'pass');
+  } finally { globalThis.fetch = original; }
 }));

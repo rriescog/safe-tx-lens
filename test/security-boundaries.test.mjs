@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Interface, concat, getAddress, keccak256 } from 'ethers';
-import { analyze, calculateHashComponents, normalizeTransaction } from '../src/analyze.mjs';
+import { analyze, calculateHashComponents, classifyEffects, normalizeTransaction } from '../src/analyze.mjs';
 import { decodeCall, unpackMultiSend } from '../src/decode.mjs';
 import { parseInput } from '../src/inputs.mjs';
 import { analyzeBuilderExport, compareCalls } from '../src/builder.mjs';
@@ -22,6 +22,12 @@ test('domain and message hashes recombine to the final Safe EIP-712 hash', async
   assert.deepEqual(report.hashComponents, { domainHash, messageHash });
   const otherNetwork = await analyze(transaction, 'gno', { fetchState: false });
   assert.notEqual(otherNetwork.calculatedHash, report.calculatedHash);
+});
+
+test('measured native balance deltas remain distinct from asset transfers', () => {
+  const effects = classifyEffects({ balanceDiffs: [{ address: SAFE, from: '10', to: '8' }], assetChanges: [{ token: TARGET, type: 'ERC20', from: SAFE, to: OTHER, amount: '2' }] }, SAFE);
+  assert.deepEqual(effects.map(effect => effect.kind), ['native_balance', 'asset_transfer']);
+  assert.equal(effects[0].severity, 'warning');
 });
 
 test('invalid Safe fields fail before decoding or simulation', () => {

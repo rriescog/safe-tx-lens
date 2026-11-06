@@ -49,3 +49,22 @@ test('CLI prints one transaction, a Safe queue, and one watch poll from a stubbe
   assert.equal(watch.status, 0, watch.stderr);
   assert.match(watch.stdout, /"hash"/);
 });
+
+test('CLI watch reports execution and nonce supersession after a proposal leaves the queue', () => {
+  const safe = '0xFa7D2a996aC6350f4b56C043112Da0366a59b74c';
+  for (const outcome of ['executed', 'superseded']) {
+    const result = spawnSync(process.execPath, ['--import', resolve('test/support/watch-flow.mjs'), 'bin/safe-tx-lens.mjs', 'watch', safe, '--network', 'eth', '--interval', '15'], {
+      encoding: 'utf8', timeout: 10000, env: { ...process.env, TEST_WATCH_OUTCOME: outcome, SAFE_API_KEY: 'test-only-key', RPC_URL: '' },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, outcome === 'executed' ? /"isExecuted":\s*true/ : /"event":"superseded"/);
+  }
+});
+
+test('CLI serve starts the local UI on a random port', () => {
+  const result = spawnSync(process.execPath, ['--import', resolve('test/support/exit-after-start.mjs'), 'bin/safe-tx-lens.mjs', 'serve', '--port', '0'], {
+    encoding: 'utf8', timeout: 3000, env: { ...process.env, RPC_URL: '' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Safe Tx Lens: http:\/\/127\.0\.0\.1:/);
+});

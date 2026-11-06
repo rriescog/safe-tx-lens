@@ -18,8 +18,10 @@ async function withRpc(run, overrides = {}) {
     for await (const chunk of request) body += chunk;
     const reply = item => {
       requests.push(item);
+      if (overrides.failArchive && item.method === 'eth_call' && item.params[1] !== 'latest') return { jsonrpc: '2.0', id: item.id, error: { code: -32000, message: 'archive state unavailable' } };
       let result = '0x';
       if (item.method === 'eth_chainId') result = overrides.chainId ?? '0x1';
+      else if (item.method === 'eth_getTransactionReceipt') result = null;
       else if (item.method === 'eth_call') {
         const selector = item.params[0].data.slice(0, 10);
         if (selector === hashInterface.getFunction('getTransactionHash').selector) result = hashInterface.encodeFunctionResult('getTransactionHash', [hash]);
@@ -62,3 +64,20 @@ test('Safe state from an RPC on the wrong chain is rejected', async () => withRp
     assert.match(report.warnings.join(' '), /RPC chain does not match/);
   } finally { globalThis.fetch = original; }
 }, { chainId: '0x89' }));
+
+test('executed Safe state falls back to current RPC state when archive storage is unavailable', async () => withRpc(async rpcUrl => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, options) => String(url).includes('api.safe.global') ? new Response('unavailable', { status: 503 }) : original(url, options);
+  try {
+    const report = await analyze({ ...tx, isExecuted: true, blockNumber: 500, transactionHash: `0x${'aa'.repeat(32)}` }, 'eth', { rpcUrl, verifyTargets: false });
+    assert.equal(report.safeState.source, 'rpc_current_fallback');
+    assert.match(report.warnings.join(' '), /historical owners and threshold were not independently recovered/);
+  } finally { globalThis.fetch = original; }
+}, { failArchive: true }));
+
+test('historical simulation refuses to invent a preceding block without receipt or block number', async () => withRpc(async rpcUrl => {
+  const report = await analyze({ ...tx, isExecuted: true, executor: TARGET, transactionHash: `0x${'aa'.repeat(32)}`, signatures: `0x${'11'.repeat(65)}` }, 'eth', {
+    rpcUrl, verifyTargets: false, simulate: true, safeInfo: { nonce: '7', threshold: 1, owners: [SAFE], source: 'safe_api' },
+  });
+  assert.match(report.simulation.unavailable, /Historical execution receipt unavailable/);
+}));

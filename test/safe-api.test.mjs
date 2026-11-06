@@ -103,3 +103,13 @@ test('fetchQueue uses the pending scope and anonymous quota fails closed', async
     assert.equal(requests, 1);
   } finally { globalThis.fetch = original; }
 });
+
+test('without a configured Safe key, Gateway is tried before the Transaction Service', async () => withFetch(async url => {
+  assert.match(String(url), /safe-client\.safe\.global/);
+  const zero = '0x0000000000000000000000000000000000000000';
+  return new Response(JSON.stringify({ safeAddress: SAFE, txData: { to: { value: SAFE }, value: '0', hexData: '0x', operation: 0 }, detailedExecutionInfo: { safeTxHash: HASH, nonce: 0, safeTxGas: '0', baseGas: '0', gasPrice: '0', gasToken: zero, refundReceiver: { value: zero } } }), { status: 200 });
+}, async () => {
+  process.env.SAFE_API_KEY = '';
+  const tx = await fetchTransaction(HASH, 'eth');
+  assert.equal(tx.lookupSource, 'safe_gateway');
+}));

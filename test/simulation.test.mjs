@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyze } from '../src/analyze.mjs';
+import { createServer } from 'node:http';
+import { id } from 'ethers';
 
 const SAFE = '0x1111111111111111111111111111111111111111';
 const TARGET = '0x2222222222222222222222222222222222222222';
@@ -69,8 +71,43 @@ test('insufficient signatures and a failed hash prevent simulation requests', as
   assert.equal(requests.length, 0);
 }));
 
+test('simulation assembles unique EOA confirmations in deterministic owner order', async () => withTenderlyStub({ transaction: { status: true, output: outputTrue, transaction_info: { state_diff: [] } } }, async requests => {
+  const ownerA = '0x3333333333333333333333333333333333333333';
+  const ownerB = '0x4444444444444444444444444444444444444444';
+  const sigA = `0x${'aa'.repeat(65)}`;
+  const sigB = `0x${'bb'.repeat(65)}`;
+  const report = await analyze({ ...transaction, signatures: null, confirmations: [
+    { owner: ownerB, signature: sigB }, { owner: ownerA, signature: sigA }, { owner: ownerA, signature: sigA },
+  ] }, 'eth', { safeInfo: { ...safeInfo, threshold: 2 }, simulate: true });
+  assert.equal(report.simulation.success, true);
+  const iface = new (await import('ethers')).Interface(['function execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes) returns (bool)']);
+  const decoded = iface.parseTransaction({ data: JSON.parse(requests[0].init.body).input });
+  assert.equal(decoded.args[9], `0x${sigA.slice(2)}${sigB.slice(2)}`);
+}));
+
 test('historical simulation refuses to guess the transaction sender', async () => withTenderlyStub({}, async requests => {
   const report = await analyze({ ...transaction, isExecuted: true, transactionHash: `0x${'aa'.repeat(32)}` }, 'eth', { safeInfo, simulate: true });
   assert.match(report.simulation.unavailable, /Historical executor unknown/);
   assert.equal(requests.length, 0);
 }));
+
+test('historical simulation flags a recorded success that emits Safe ExecutionFailure', async () => {
+  const rpc = createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    const handle = item => ({ jsonrpc: '2.0', id: item.id, result: item.method === 'eth_chainId' ? '0x1' : item.method === 'eth_getTransactionReceipt' ? null : '0x' });
+    const parsed = JSON.parse(body);
+    response.setHeader('content-type', 'application/json');
+    response.end(JSON.stringify(Array.isArray(parsed) ? parsed.map(handle) : handle(parsed)));
+  });
+  await new Promise(resolve => rpc.listen(0, '127.0.0.1', resolve));
+  try {
+    await withTenderlyStub({ transaction: { status: true, transaction_info: { state_diff: [], logs: [{ address: SAFE, topics: [id('ExecutionFailure(bytes32,uint256)')] }] } } }, async requests => {
+      const report = await analyze({ ...transaction, isExecuted: true, isSuccessful: true, executor: TARGET, transactionHash: `0x${'aa'.repeat(32)}`, blockNumber: 500 }, 'eth', { safeInfo, simulate: true, rpcUrl: `http://127.0.0.1:${rpc.address().port}` });
+      assert.equal(report.simulation.success, false);
+      assert.equal(report.simulation.blockNumber, 499);
+      assert.ok(report.findings.some(finding => finding.code === 'EXECUTION_MISMATCH'));
+      assert.equal(JSON.parse(requests[0].init.body).block_number, 499);
+    });
+  } finally { await new Promise(resolve => rpc.close(resolve)); }
+});

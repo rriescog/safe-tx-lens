@@ -17,5 +17,8 @@ test('MCP exposes read-only tools and inspects an offchain rejection without key
     const report = result.structuredContent ?? JSON.parse(result.content[0].text);
     assert.equal(report.checks[0].status, 'pass');
     assert.ok(report.findings.some(finding => finding.code === 'SAFE_REJECTION'));
+    const invalid = await client.callTool({ name: 'inspect_json', arguments: { transaction: { unexpected: true } } });
+    assert.equal(invalid.isError, true);
+    assert.match(invalid.content[0].text, /valid safe and to addresses/);
   } finally { await client.close(); }
 });
