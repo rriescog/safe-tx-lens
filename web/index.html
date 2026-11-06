@@ -13,7 +13,7 @@
     <span class="edition">Independent transaction review</span>
   </header>
   <main>
-    <section class="intro"><div><p class="kicker">Before you sign. Before it executes.</p><h1>See what a Safe transaction can actually do.</h1><p>Paste a Safe hash, onchain execution hash, Safe URL, address, or transaction JSON. Pending offchain hashes need a proposal source.</p></div><div class="trust-note"><strong>Read-only by design</strong><span>This app never asks for a wallet connection, private key, or signature. A successful simulation does not prove a transaction is safe.</span></div></section>
+    <section class="intro"><div><p class="kicker">Before you sign. Before it executes.</p><h1>See what a Safe transaction can actually do.</h1><p>Paste a Safe hash, onchain execution hash, Safe URL, address, or transaction JSON. For a pending transaction hash, the tool looks up its full details in Safe Transaction Service; the hash alone does not contain them.</p></div><div class="trust-note"><strong>Read-only by design</strong><span>This app never asks for a wallet connection, private key, or signature. A successful simulation does not prove a transaction is safe.</span></div></section>
     <section class="workspace">
       <aside class="input-panel">
         <h2>Inspect</h2>
@@ -36,8 +36,8 @@
         </form>
         <button id="load-pending" class="secondary-button" type="button">Read queued for this Safe</button>
         <button id="load-history" class="secondary-button" type="button">Read historical for this Safe</button>
-        <div class="watch-control"><label class="switch"><input id="watch" type="checkbox"><span>Watch this Safe every 30 seconds</span></label><p>Available for a Safe address or Safe URL. New and newly confirmed proposals appear here.</p></div>
-        <p class="local-note">Runs on your computer at 127.0.0.1. API keys stay in the server environment.</p>
+        <div class="watch-control"><label class="switch"><input id="watch" type="checkbox"><span>Watch this Safe every 30 seconds (local only)</span></label><p>Available for a Safe address or Safe URL. New and newly confirmed proposals appear here.</p></div>
+        <p class="local-note">Local-only mode. API keys stay on this computer.</p>
       </aside>
       <section class="results" aria-live="polite"><div id="status" class="status">Ready to inspect</div><div id="report" class="empty"><div class="empty-icon" aria-hidden="true">⌕</div><h2>Start with anything you have</h2><p>Onchain execution hashes and exported JSON work without a Safe API key. A pending Safe hash needs access to the proposal data.</p></div></section>
     </section>

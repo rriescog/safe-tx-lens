@@ -13,9 +13,10 @@ const watch = document.getElementById('watch');
 const jsonFile = document.getElementById('json-file');
 const publicMode = document.body.dataset.publicMode === 'true';
 if (publicMode) {
-  document.querySelector('.local-note').textContent = 'Public demo: no owner API keys or simulation. Run the CLI or local UI for unrestricted review with your own credentials.';
+  document.querySelector('.local-note').textContent = 'Public demo: limited requests, no owner API keys or simulation. Use the local tool for full review.';
   document.querySelector('.watch-control').hidden = true;
-  document.querySelector('#network option[value="auto"]').disabled = true;
+  const autoOption = document.querySelector('#network option[value="auto"]');
+  if (autoOption) autoOption.disabled = true;
   network.value = 'eth';
 }
 let timer = null;
@@ -67,7 +68,8 @@ function targetChecksHtml(r) {
     return `<div class="item">${pill(check.status)}<div class="item-content"><strong class="mono">${esc(check.address)}</strong><p>${esc(check.reason)} · block ${esc(check.blockTag)}${check.bytecodeHash ? `<br>Runtime bytecode: <span class="mono">${esc(check.bytecodeHash)}</span>` : ''}${check.source ? `<br><a href="${esc(check.source)}" target="_blank" rel="noopener noreferrer">Inspect verified source</a>` : ''}</p>${abi}${proxy}</div></div>`;
   }).join('');
   const complete = checks.length > 0 && checks.every(check => ['verified', 'verified_current'].includes(check.status) && (!check.proxy || ['verified', 'verified_current'].includes(check.proxy.implementationCode?.status)));
-  return `<div class="notice">${checks.length ? complete ? 'Matching verified runtime bytecode was found for every inspected target. This does not prove the code is safe.' : 'Source verification is incomplete. Inspect every unverified target before signing.' : 'Target code has not been checked yet.'}</div>${rows}<div class="simulation-action"><button type="button" id="verify-targets">Verify all target bytecode</button><p>Uses this network’s RPC and Sourcify. ERC-1967 implementations are inspected separately. Other proxy patterns and code changes during execution need manual review.</p></div>`;
+  const action = publicMode ? '<p class="meta">Run the local tool to verify target bytecode with your own provider.</p>' : '<div class="simulation-action"><button type="button" id="verify-targets">Verify all target bytecode</button><p>Uses this network’s RPC and Sourcify. ERC-1967 implementations are inspected separately. Other proxy patterns and code changes during execution need manual review.</p></div>';
+  return `<div class="notice">${checks.length ? complete ? 'Matching verified runtime bytecode was found for every inspected target. This does not prove the code is safe.' : 'Source verification is incomplete. Inspect every unverified target before signing.' : 'Target code has not been checked yet.'}</div>${rows}${action}`;
 }
 function reportHtml(r) {
   const tx = r.transaction;
@@ -189,13 +191,13 @@ function inspectSafe(selectedScope) {
 }
 loadPending.addEventListener('click', () => inspectSafe('pending'));
 loadHistory.addEventListener('click', () => inspectSafe('history'));
-watch.addEventListener('change', () => { clearInterval(timer); timer = null; watchInput = null; if (watch.checked) { scope.value = 'pending'; watchInput = safeAddress.value.trim() || input.value.trim(); inspect({ overrideInput: watchInput }); timer = setInterval(() => inspect({ silent: true, overrideInput: watchInput }), 30000); } });
+watch.addEventListener('change', () => { if (publicMode) { watch.checked = false; return; } clearInterval(timer); timer = null; watchInput = null; if (watch.checked) { scope.value = 'pending'; watchInput = safeAddress.value.trim() || input.value.trim(); inspect({ overrideInput: watchInput }); timer = setInterval(() => inspect({ silent: true, overrideInput: watchInput }), 30000); } });
 scope.addEventListener('change', () => { if (watch.checked && scope.value !== 'pending') { watch.checked = false; clearInterval(timer); timer = null; } });
 jsonFile.addEventListener('change', async () => {
   const file = jsonFile.files?.[0];
   if (!file) return;
   try {
-    if (file.size > 5000000) throw new Error('JSON file exceeds 5 MB');
+    if (file.size > (publicMode ? 262144 : 5000000)) throw new Error(`JSON file exceeds ${publicMode ? '256 KB' : '5 MB'}`);
     const parsed = JSON.parse(await file.text());
     importedJson = parsed;
     input.value = `Imported ${file.name}`;

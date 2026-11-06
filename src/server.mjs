@@ -24,7 +24,15 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, publicOri
     if (Object.entries(credentials).some(([name, value]) => value && (['SAFE_API_KEY', 'ETHERSCAN_API_KEY', 'TENDERLY_ACCESS_KEY', 'TENDERLY_MONITOR_ENV_FILE', 'RPC_URL'].includes(name) || name.startsWith('RPC_URL_')))) throw new Error('Public mode refuses owner API credentials');
   }
   const quota = publicMode ? publicQuota({ file: quotaFile, dailyLimit }) : null;
-  const html = (await readFile(htmlPath, 'utf8')).replace('<body>', `<body data-public-mode="${publicMode}">`);
+  let html = (await readFile(htmlPath, 'utf8')).replace('<body>', `<body data-public-mode="${publicMode}">`);
+  if (publicMode) {
+    // Remove local-only controls and environment details from the HTML itself.
+    // Hiding them after load still exposes them in page source and before JS runs.
+    html = html.replace(/<div class="watch-control">[\s\S]*?<\/div>/, '<div class="watch-control" hidden><input id="watch" type="checkbox" disabled></div>');
+    html = html.replace(/<p class="local-note">[\s\S]*?<\/p>/, '<p class="local-note">Public read-only demo. Requests are limited.</p>');
+    html = html.replace('<option value="auto">Auto-detect across supported networks</option>', '');
+    html = html.replace('<option value="both">Both (20 of each)</option>', '');
+  }
   const server = createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') return reply(res, 200, { ok: true });
     if (req.method === 'GET' && req.url === '/') return reply(res, 200, html, 'text/html');
@@ -37,9 +45,12 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, publicOri
         if (origin && origin !== (publicMode ? publicOrigin : localOrigin)) return reply(res, 403, { error: 'Cross-origin requests are disabled' });
         if (!req.headers['content-type']?.startsWith('application/json')) return reply(res, 415, { error: 'Expected application/json' });
         let body = '';
+        const maxBodyBytes = publicMode ? 262144 : 5000000;
+        let bodyBytes = 0;
         for await (const chunk of req) {
+          bodyBytes += chunk.length;
+          if (bodyBytes > maxBodyBytes) throw new Error('Input too large');
           body += chunk.toString();
-          if (body.length > 5000000) throw new Error('Input too large');
         }
         const payload = JSON.parse(body);
         const inputKind = parseInput(payload.input, payload.network ?? 'eth').kind;
@@ -48,10 +59,12 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, publicOri
         if (publicMode) {
           if (!origin || origin !== publicOrigin) return reply(res, 403, { error: 'Public requests require the configured origin' });
           if (payload.network === 'auto' && ['safe', 'hash'].includes(inputKind)) return reply(res, 400, { error: 'Select a network on the public demo to limit upstream requests' });
+          if (payload.scope === 'both') return reply(res, 400, { error: 'Select pending or history on the public demo' });
+          if (payload.verifyTargets === true) return reply(res, 403, { error: 'Bulk target verification is available in the local tool' });
           const ticket = quota.take();
           if (!ticket.allowed) return reply(res, 429, { error: ticket.reason === 'busy' ? 'Public demo is busy; retry shortly' : 'Public demo daily request budget reached; use the CLI locally' });
           try {
-            return reply(res, 200, await resolve(payload.input, payload.network ?? 'eth', { simulate: false, fetchState: false, verifyTargets: payload.verifyTargets === true, limit: 20, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash }));
+            return reply(res, 200, await resolve(payload.input, payload.network ?? 'eth', { simulate: false, fetchState: false, verifyTargets: false, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash }));
           } finally { quota.release(); }
         }
         // Simulation is an explicit UI action. The ordinary inspection path stays

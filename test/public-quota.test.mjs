@@ -42,6 +42,9 @@ test('public server rejects owner keys and enforces origin, explicit network, si
     assert.equal((await fetch(url, { method: 'POST', headers: { origin: options.publicOrigin, 'content-type': 'application/json' }, body: '{' })).status, 400);
     assert.equal((await post({ input: safe, network: 'auto' })).status, 400);
     assert.equal((await post({ input: safe, simulate: true })).status, 403);
+    assert.equal((await post({ input: safe, scope: 'both' })).status, 400);
+    assert.equal((await post({ input: safe, verifyTargets: true })).status, 403);
+    assert.equal((await fetch(url, { method: 'POST', headers: { origin: options.publicOrigin, 'content-type': 'application/json' }, body: JSON.stringify({ input: 'x'.repeat(262145) }) })).status, 400);
     const plan = { chainId: '1', meta: {}, transactions: [{ to: safe, value: '0', data: '0x' }] };
     assert.equal((await post({ input: plan, network: 'eth' })).status, 200);
     assert.equal((await post({ input: plan, network: 'eth' })).status, 429);
@@ -50,6 +53,8 @@ test('public server rejects owner keys and enforces origin, explicit network, si
     const html = await (await fetch(url.replace('/api/inspect', '/'))).text();
     assert.match(html, /data-public-mode="true"/);
     assert.doesNotMatch(html, /test-only-key/);
+    assert.doesNotMatch(html, /Watch this Safe every 30 seconds|127\.0\.0\.1|Auto-detect across supported networks|Both \(20 of each\)/);
+    assert.match(html, /id="watch" type="checkbox" disabled/);
   } finally {
     await new Promise(resolve => server.close(resolve));
     await rm(directory, { recursive: true, force: true });

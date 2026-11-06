@@ -33,6 +33,10 @@ test('public UI disables wallet monitoring and labels its owner-key limitations'
   assert.equal(page.selectors.get('.watch-control').hidden, true);
   assert.match(page.selectors.get('.local-note').textContent, /no owner API keys/);
   assert.equal(page.selectors.get('#network option[value="auto"]').disabled, true);
+  page.elements.get('watch').checked = true;
+  page.elements.get('watch').on_change();
+  assert.equal(page.elements.get('watch').checked, false);
+  assert.doesNotMatch(page.evaluate('targetChecksHtml({})'), /id="verify-targets"/);
 });
 
 test('argument summaries keep large bytes collapsed and render structured arguments', () => {
