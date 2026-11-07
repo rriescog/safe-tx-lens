@@ -45,7 +45,7 @@ function denied(res, ticket) {
 
 function inspectionFailure(res, error) {
   const message = String(error.message ?? 'Inspection failed').slice(0, 600);
-  const upstreamLimited = /Safe API 429|Safe Client Gateway 429|Safe API rate limit or quota is cooling down|monthly quota exhausted/i.test(message);
+  const upstreamLimited = /Safe API 429|Safe Client Gateway 429|Safe API rate limit or quota is cooling down|Safe API quota is exhausted|monthly quota exhausted/i.test(message);
   const upstreamFailed = /Safe API 5\d\d|Safe Client Gateway 5\d\d|Safe Client Gateway 403|Safe API 403/i.test(message);
   return reply(res, upstreamLimited || upstreamFailed ? 503 : 400, { error: message, code: upstreamLimited ? 'UPSTREAM_LIMITED' : upstreamFailed ? 'UPSTREAM_UNAVAILABLE' : 'INSPECTION_FAILED' });
 }
