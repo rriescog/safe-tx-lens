@@ -60,10 +60,10 @@ test('every HTTP input field rejects instruction-like invalid values structurall
   assert.equal(validateInspectionRequest({ input: { safe: SAFE, to: VAULT }, network: 'eth' }).network, 'eth');
 });
 
-test('donation destinations are explicit EVM addresses and do not include Bitcoin yet', () => {
+test('donation destinations are absent until explicitly configured', () => {
   const config = publicSupportConfig();
-  assert.equal(config.wallets.length, 9);
-  assert.equal(config.wallets.find(wallet => wallet.network === 'pol').address.toLowerCase(), '0x36560ad123164440a5187243783614237d783e98');
+  assert.equal(config.wallets.length, 0);
+  assert.equal(publicSupportConfig(JSON.stringify([{ network: 'pol', address: SAFE }])).wallets[0].address, SAFE);
   assert.throws(() => publicSupportConfig('[{"network":"eth","address":"<script>"}]'));
 });
 
