@@ -1,6 +1,7 @@
 import { Interface, JsonRpcProvider, TypedDataEncoder, getAddress, id, isAddress } from 'ethers';
 import { chainId } from './chains.mjs';
-import { decodeCall, summarizeCalls } from './decode.mjs';
+import { decodeCall, enrichVerifiedCalls, summarizeCalls } from './decode.mjs';
+import { assessConfidence } from './confidence.mjs';
 import { assessRisk } from './risk.mjs';
 import { fetchTransaction, safeGet } from './safe-api.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
@@ -220,11 +221,12 @@ export async function analyze(raw, network = 'eth', options = {}) {
     } catch (error) { checks.push({ name: tx.isExecuted && tx.blockNumber ? 'Safe contract hash at pre-execution block' : 'Safe contract hash', method: 'onchain_rpc', status: 'unavailable', detail: String(error.shortMessage ?? error.message).slice(0, 240) }); }
   }
   const call = decodeCall(tx);
-  const actions = summarizeCalls(call);
-  const findings = classifyIntent(call);
   // A selector is only a decoding hypothesis. Pin every resolved target to
   // bytecode on the selected chain and compare Sourcify's verified runtime.
   const targetChecks = options.verifyTargets ? await inspectTargetCode(call, network, { rpcUrl: options.rpcUrl, provider: options.targetProvider, blockTag: tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest', sourceLookup: options.sourceLookup }) : [];
+  enrichVerifiedCalls(call, targetChecks);
+  const actions = summarizeCalls(call);
+  const findings = classifyIntent(call);
   for (const target of targetChecks) {
     if (target.status === 'mismatch') findings.push({ severity: 'critical', code: 'TARGET_CODE_MISMATCH', path: target.address, message: target.reason });
     // A plain value transfer to an EOA has no runtime code by design.
@@ -259,8 +261,9 @@ export async function analyze(raw, network = 'eth', options = {}) {
   }
   const effects = classifyEffects(simulation?.unavailable ? null : simulation, tx.safe);
   const risk = assessRisk({ call, actions, findings, effects, checks, simulation, transaction: tx });
+  const confidence = assessConfidence({ call, checks, targetChecks, simulation, transaction: tx });
   const status = checks.some(c => c.status === 'fail') ? 'BLOCK' : findings.some(f => f.severity === 'critical') || effects.some(e => e.severity === 'critical') ? 'REVIEW' : 'INSPECT';
-  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, risk, checks, targetChecks, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
+  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, risk, confidence, checks, targetChecks, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
 }
 
 export async function analyzeHash(hash, network, options = {}) {

@@ -16,6 +16,22 @@ const publicMode = document.body.dataset.publicMode === 'true';
 const communityMode = document.body.dataset.communityMode === 'true';
 const publicFacing = publicMode || communityMode;
 const simulationEnabled = document.body.dataset.simulationEnabled === 'true';
+// Wallet addresses come only from validated server configuration. Build the
+// DOM with text nodes so addresses and labels cannot become HTML instructions.
+fetch('/api/public-config').then(response => response.ok ? response.json() : null).then(config => {
+  if (!config?.wallets?.length) return;
+  const host = document.getElementById('donation-wallets');
+  host.replaceChildren();
+  const names = Object.fromEntries([...document.querySelector('#network').options].filter(option => option.value !== 'auto').map(option => [option.value, option.textContent]));
+  for (const wallet of config.wallets) {
+    const row = document.createElement('div'); row.className = 'donation-wallet';
+    const label = document.createElement('strong'); label.textContent = names[wallet.network] ?? wallet.network;
+    const address = document.createElement('code'); address.textContent = wallet.address;
+    const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'Copy address';
+    copy.addEventListener('click', async () => { await navigator.clipboard.writeText(wallet.address); copy.textContent = 'Copied — thank you for your support'; });
+    row.append(label, address, copy); host.append(row);
+  }
+}).catch(() => {});
 if (publicFacing) {
   if (communityMode) document.querySelector('.local-note').textContent = 'Public service: Safe lookups and hosted MCP share a usage budget. Simulation, when configured, runs only on request.';
   else {
@@ -84,7 +100,7 @@ function callHtml(call) {
   const title = call.method ?? (call.data === '0x' ? 'Native transfer or nonce-only call' : `Unknown ${call.selector}`);
   const args = call.args?.length ? `<div>${call.args.map(arg => `<div class="arg"><span>${esc(arg.name)}</span><span>${esc(argValue(arg, call))}</span></div>`).join('')}</div>` : '';
   const children = call.children?.length ? `<div class="call-children">${call.children.map(callHtml).join('')}</div>` : '';
-  return `<div class="call"><div class="call-title">${esc(title)} ${call.operation === 1 ? pill('DELEGATECALL') : ''} ${call.stage === 'schedule' ? pill('scheduled') : ''}</div><div class="call-detail mono">${call.via ? `${esc(call.via)} · ` : ''}To ${esc(call.to)} · ${esc(call.value)} wei</div>${args}${call.decodeError ? `<p class="notice danger">Decode error: ${esc(call.decodeError)}</p>` : ''}${children}<details><summary>Raw calldata</summary><div class="raw">${esc(call.data)}</div></details></div>`;
+  return `<div class="call"><div class="call-title">${esc(title)} ${call.operation === 1 ? pill('DELEGATECALL') : ''} ${call.stage === 'schedule' ? pill('scheduled') : ''}</div><div class="call-detail mono">${call.via ? `${esc(call.via)} · ` : ''}To ${esc(call.to)} · ${esc(call.value)} wei</div>${call.decodeSource ? `<div class="decode-source">ABI from ${esc(call.decodeSource)}${call.decodeSourceUrl ? ` · <a href="${esc(call.decodeSourceUrl)}" target="_blank" rel="noopener noreferrer">source</a>` : ''}. Function name does not prove behavior.</div>` : ''}${args}${call.decodeError ? `<p class="notice danger">Decode error: ${esc(call.decodeError)}</p>` : ''}${children}<details><summary>Raw calldata</summary><div class="raw">${esc(call.data)}</div></details></div>`;
 }
 function section(title, body) { return `<section class="report-section"><h3>${esc(title)}</h3>${body}</section>`; }
 function flowHtml(node, path, labels) {
@@ -92,7 +108,7 @@ function flowHtml(node, path, labels) {
   const title = labels.get(path) ?? method;
   const kind = /^schedule/.test(method) || node.stage === 'schedule' ? 'Schedule' : /^execute/.test(method) ? 'Execute' : node.operation === 1 ? 'Delegatecall' : 'Call';
   const children = node.children?.length ? `<ul class="flow-children">${node.children.map((child, i) => flowHtml(child, `${path}.${i + 1}`, labels)).join('')}</ul>` : '';
-  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong>${esc(title)}</strong><span class="flow-address mono">${esc(node.to)}</span></div></div>${children}</li>`;
+  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong>${esc(title)}</strong><span class="flow-address mono">${esc(node.to)}</span>${node.decodeSource ? `<span class="flow-evidence">Verified ABI · ${esc(node.decodeSource)}</span>` : ''}</div></div>${children}</li>`;
 }
 function crossCheckHtml(r) {
   const names = { eth: 'ethereum', gno: 'gnosis', pol: 'polygon', arb1: 'arbitrum', oeth: 'optimism', base: 'base', sep: 'sepolia', bnb: 'bsc', avax: 'avalanche' };
@@ -137,7 +153,8 @@ function reportHtml(r) {
   const flow = `<div class="flow-map"><div class="flow-origin"><span class="flow-kind">Safe transaction</span><strong>Nonce ${esc(tx.nonce)}</strong><span class="mono">${esc(tx.safe)}</span></div><ul class="flow-root">${flowHtml(r.call, '1', actionLabels)}</ul></div>`;
   const actionSummary = r.risk.actionRatings.map(action => `<div class="planned-action">${pill(action.level)}<div><span class="action-stage">${esc(action.stage === 'schedule' ? 'Encoded to schedule' : 'Encoded to call')}</span><strong>${esc(action.label)}</strong><p>${esc(action.reason)}</p></div></div>`).join('');
   const riskReasons = r.risk.reasons.filter(reason => !/^(Called|Scheduled):/.test(reason.message)).map(reason => `<div class="semantic-reason">${pill(reason.level)}<span>${esc(reason.message)}</span></div>`).join('');
-  const riskHtml = `<div class="risk-summary"><div>${pill(r.risk.level)}<strong>${esc(r.risk.reviewPriority)} review priority</strong><span>${esc(r.risk.impactLevel)} potential impact</span></div><p>Priority reflects the possible impact of the decoded calls. It does not say the transaction is malicious or prove what will happen onchain.</p></div>${riskReasons}`;
+  const confidence = r.confidence ? `<div class="confidence confidence-${esc(r.confidence.color)}"><span class="confidence-number">${esc(r.confidence.score)}<small>/10</small></span><div><strong>Evidence confidence</strong><p>How much of this report could be checked. This is not a safety score.</p><details><summary>How this was scored</summary><ul>${r.confidence.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details></div></div>` : '';
+  const riskHtml = `${confidence}<div class="risk-summary"><div>${pill(r.risk.level)}<strong>${esc(r.risk.reviewPriority)} review priority</strong><span>${esc(r.risk.impactLevel)} potential impact</span></div><p>Priority reflects the possible impact of the decoded calls. It does not say the transaction is malicious or prove what will happen onchain.</p></div>${riskReasons}`;
   const checks = r.checks.map(c => `<div class="item">${pill(c.status)}<div class="item-content"><strong>${esc(c.name)}</strong><p class="mono">${esc(c.detail)}</p></div></div>`).join('');
   const findings = r.findings.length ? r.findings.map(f => `<div class="item">${pill(f.severity)}<div class="item-content"><strong>${esc(f.code)} · call ${esc(f.path)}</strong><p>${esc(f.message)}</p></div></div>`).join('') : '<p class="meta">No known intent pattern matched. This does not establish safety.</p>';
   const emptyEffects = r.simulation?.unavailable ? 'Simulation was unavailable, so no state change was measured.' : r.simulation && r.simulation.stateDiffAvailable === false ? 'The simulation provider did not return a storage diff. Absence of a diff is not evidence of no change.' : r.simulation ? 'The simulation returned no storage, balance, or asset changes in its response.' : 'No simulation or execution trace has measured these changes yet.';
@@ -175,7 +192,7 @@ function showTransactionReport(result) {
     inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, verifyTargets: true });
   });
 }
-async function inspect({ silent = false, overrideInput = null, overrideNetwork = null, simulate = false, verifyTargets = !publicFacing } = {}) {
+async function inspect({ silent = false, overrideInput = null, overrideNetwork = null, simulate = false, verifyTargets = !publicMode && (!communityMode || ['hash', 'json'].includes(selectedInputMode())) } = {}) {
   const selectedInput = overrideInput ?? importedJson ?? input.value.trim();
   const priorEvidence = simulate || verifyTargets ? activeReportEvidence : null;
   const priorHash = simulate || verifyTargets ? activeReportInput?.safeTxHash : null;
@@ -221,7 +238,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
         inspect({ overrideInput: result.safe });
       }));
       report.querySelectorAll('.queue-row').forEach(row => {
-        const open = () => { const selected = result.reports[Number(row.dataset.index)]; showTransactionReport(selected); status.textContent = publicFacing ? 'Opening selected transaction…' : 'Verifying selected transaction targets…'; inspect({ overrideInput: selected.transaction, overrideNetwork: selected.network, verifyTargets: !publicFacing }); };
+        const open = () => { const selected = result.reports[Number(row.dataset.index)]; showTransactionReport(selected); status.textContent = publicMode ? 'Opening selected transaction…' : 'Verifying selected transaction targets…'; inspect({ overrideInput: selected.transaction, overrideNetwork: selected.network, verifyTargets: !publicMode }); };
         row.addEventListener('click', open);
         row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
       });

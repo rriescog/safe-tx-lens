@@ -8,12 +8,15 @@ import { publicQuota } from './public-quota.mjs';
 import { communityQuota } from './community-quota.mjs';
 import { communityMcpHandler } from './community-mcp.mjs';
 import { isIP } from 'node:net';
+import { validateInspectionRequest } from './input-boundary.mjs';
+import { CHAINS } from './chains.mjs';
+import { publicSupportConfig } from './support.mjs';
 
 const htmlPath = fileURLToPath(new URL('../web/index.html', import.meta.url));
 
 function reply(res, status, data, type = 'application/json', extraHeaders = {}) {
   res.writeHead(status, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'", ...extraHeaders });
-  res.end(typeof data === 'string' ? data : JSON.stringify(data));
+  res.end(typeof data === 'string' || Buffer.isBuffer(data) ? data : JSON.stringify(data));
 }
 
 async function readBody(req, maxBodyBytes) {
@@ -44,6 +47,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid port');
   if (publicMode && communityMode) throw new Error('Choose public demo or community mode');
   const publicFacing = publicMode || communityMode;
+  const supportConfig = publicSupportConfig();
   let simulationEnabled = false;
   if (publicFacing) {
     let origin;
@@ -72,16 +76,19 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
   }
   const server = createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') return reply(res, 200, { ok: true });
+    if (req.method === 'GET' && req.url === '/api/public-config') return reply(res, 200, supportConfig);
     if (req.method === 'GET' && req.url === '/') return reply(res, 200, html, 'text/html');
     if (req.method === 'GET' && req.url === '/web/app.js') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/app.js', import.meta.url)), 'utf8'), 'text/javascript');
     if (req.method === 'GET' && req.url === '/web/style.css') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/style.css', import.meta.url)), 'utf8'), 'text/css');
+    const icon = req.method === 'GET' ? /^\/web\/assets\/chains\/([a-z0-9]+)\.png$/.exec(req.url ?? '') : null;
+    if (icon && Object.hasOwn(CHAINS, icon[1])) return reply(res, 200, await readFile(fileURLToPath(new URL(`../web/assets/chains/${icon[1]}.png`, import.meta.url))), 'image/png');
     if (req.method === 'POST' && req.url === '/api/inspect') {
       try {
         const origin = req.headers.origin;
         const localOrigin = `http://127.0.0.1:${server.address().port}`;
         if (origin && origin !== (publicFacing ? publicOrigin : localOrigin)) return reply(res, 403, { error: 'Cross-origin requests are disabled' });
         if (!req.headers['content-type']?.startsWith('application/json')) return reply(res, 415, { error: 'Expected application/json' });
-        const payload = JSON.parse(await readBody(req, publicFacing ? 262144 : 5000000));
+        const payload = validateInspectionRequest(JSON.parse(await readBody(req, publicFacing ? 262144 : 5000000)));
         const inputKind = parseInput(payload.input, payload.network ?? 'eth').kind;
         if (publicMode && payload.simulate) return reply(res, 403, { error: 'Simulation is unavailable on the public demo; run the tool locally with your own credentials' });
         if (payload.simulate === true && inputKind === 'safe') throw new Error('Select one transaction before running a simulation');
@@ -101,6 +108,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           const clientIp = req.headers['x-client-ip'];
           if (typeof clientIp !== 'string' || !isIP(clientIp)) return reply(res, 403, { error: 'Trusted client identity unavailable' });
           if (payload.simulate && !simulationEnabled) return reply(res, 503, { error: 'Tenderly simulation is not configured for this service' });
+          if (inputKind === 'safe' && payload.verifyTargets === true) return reply(res, 400, { error: 'Select one transaction before verifying target code' });
           const cost = communityCost(payload.input, payload.network ?? 'auto', payload.scope ?? 'pending', payload);
           const ticket = community.take(clientIp, cost, { simulation: payload.simulate === true });
           if (!ticket.allowed) return denied(res, ticket);
@@ -125,7 +133,10 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
         if (Array.isArray(message) || !message || typeof message !== 'object') return reply(res, 400, { error: 'One MCP message per request' });
         const allowedMethods = ['initialize', 'notifications/initialized', 'ping', 'tools/list', 'tools/call'];
         if (!allowedMethods.includes(message.method)) return reply(res, 405, { error: 'MCP method unavailable' });
-        const cost = message.method === 'tools/call' ? communityCost(message.params?.arguments?.input ?? message.params?.arguments?.safe ?? message.params?.arguments?.transaction, message.params?.arguments?.network ?? 'auto', message.params?.name === 'list_history' ? 'history' : 'pending') : 1;
+        const mcpInput = message.params?.arguments?.input ?? message.params?.arguments?.safe ?? message.params?.arguments?.transaction;
+        const mcpNetwork = message.params?.arguments?.network ?? 'auto';
+        const deepReview = message.params?.name === 'inspect_json' || (message.params?.name === 'inspect' && parseInput(mcpInput, mcpNetwork).kind !== 'safe');
+        const cost = message.method === 'tools/call' ? communityCost(mcpInput, mcpNetwork, message.params?.name === 'list_history' ? 'history' : 'pending', { verifyTargets: deepReview }) : 1;
         const ticket = community.take(clientIp, cost);
         if (!ticket.allowed) return denied(res, ticket);
         try {

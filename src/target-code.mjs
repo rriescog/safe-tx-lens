@@ -60,11 +60,23 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
         result.status = base.historicalUnavailable ? 'verified_current' : 'verified';
         result.reason = `Sourcify ${source.runtimeMatch ?? source.match}; runtime bytecode matches ${base.historicalUnavailable ? 'current RPC only (historical state unavailable)' : 'RPC at the inspected block'}`;
         result.source = `https://repo.sourcify.dev/${chainId(network)}/${entry.address}`;
-        if (Array.isArray(source.abi) && entry.selectors.size) {
+        if (Array.isArray(source.abi) && entry.selectors.size && source.abi.length > 512) {
+          result.abiWarning = 'Verified ABI is too large to decode within the review limit';
+        } else if (Array.isArray(source.abi) && entry.selectors.size) {
           try {
             const iface = new Interface(source.abi);
             if (source.abi.length && iface.fragments.length === 0) result.abiWarning = 'Verified ABI could not be parsed';
-            else result.abiSelectors = [...entry.selectors].map(selector => ({ selector, present: Boolean(iface.getFunction(selector)) }));
+            else {
+              result.abiSelectors = [...entry.selectors].map(selector => ({ selector, present: Boolean(iface.getFunction(selector)) }));
+              // Keep only functions actually called by this report. The ABI is
+              // trusted for decoding only after its runtime matched RPC code.
+              result.verifiedFunctions = [...entry.selectors].flatMap(selector => {
+                const fragment = iface.getFunction(selector);
+                if (!fragment) return [];
+                const abi = fragment.format('json');
+                return abi.length <= 4096 ? [{ selector, signature: fragment.format('sighash'), abi }] : [];
+              });
+            }
           } catch (error) { result.abiWarning = `Verified ABI could not be parsed: ${error.message}`; }
         }
       }

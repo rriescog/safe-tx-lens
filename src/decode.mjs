@@ -98,6 +98,34 @@ export function decodeCall(tx, depth = 0, budget = { count: 0 }) {
   return result;
 }
 
+export function enrichVerifiedCalls(root, targetChecks) {
+  const byAddress = new Map(targetChecks.map(check => [check.address.toLowerCase(), check]));
+  const visit = node => {
+    if (!node.method && node.data !== '0x') {
+      const target = byAddress.get(node.to.toLowerCase());
+      const source = target?.proxy?.implementationCode ?? target;
+      if (source && ['verified', 'verified_current'].includes(source.status)) {
+        const functionInfo = source.verifiedFunctions?.find(item => item.selector === node.selector.toLowerCase());
+        if (functionInfo) {
+          try {
+            const iface = new Interface([typeof functionInfo.abi === 'string' && functionInfo.abi.startsWith('{') ? JSON.parse(functionInfo.abi) : functionInfo.abi]);
+            const parsed = iface.parseTransaction({ data: node.data, value: node.value });
+            if (parsed) {
+              node.method = parsed.signature;
+              node.args = parsed.fragment.inputs.map((input, index) => ({ name: input.name || `arg${index}`, value: clean(parsed.args[index]) }));
+              node.decodeSource = source.status === 'verified_current' ? 'verified current bytecode (historical code unavailable)' : 'verified bytecode at inspected block';
+              node.decodeSourceUrl = source.source;
+            }
+          } catch (error) { node.decodeError = `Verified ABI could not decode calldata: ${error.message}`; }
+        }
+      }
+    }
+    node.children.forEach(visit);
+  };
+  visit(root);
+  return root;
+}
+
 export function summarizeCalls(root) {
   const actions = [];
   const visit = (node, path) => {

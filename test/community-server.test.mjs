@@ -9,9 +9,9 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 const origin = 'https://lens.example.org';
 const plan = { chainId: '1', meta: {}, transactions: [{ to: '0x1111111111111111111111111111111111111111', value: '0', data: '0x' }] };
 
-test('community web and hosted MCP share the same IP and global quota', async () => {
+test('community web and hosted MCP share the same IP quota while deep review has higher cost', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'safe-community-server-'));
-  const server = await serve({ port: 0, publicOrigin: origin, communityMode: true, communityQuotaFile: join(directory, 'quota.json'), communityDailyUnits: 4, communityMonthlyUnits: 4, communityClientDailyRequests: 2, credentialReader: async () => ({ SAFE_API_KEY: 'test-key' }) });
+  const server = await serve({ port: 0, publicOrigin: origin, communityMode: true, communityQuotaFile: join(directory, 'quota.json'), communityDailyUnits: 25, communityMonthlyUnits: 25, communityClientDailyRequests: 2, credentialReader: async () => ({ SAFE_API_KEY: 'test-key' }) });
   const base = `http://127.0.0.1:${server.address().port}`;
   const post = (path, data, headers = {}) => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', origin, 'x-client-ip': '203.0.113.1', ...headers }, body: JSON.stringify(data) });
   try {
@@ -36,7 +36,7 @@ test('community web and hosted MCP share the same IP and global quota', async ()
     const mcpCall = await post('/mcp', { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'inspect_json', arguments: { transaction: plan, network: 'eth' } } }, { 'x-client-ip': '203.0.113.3' });
     assert.equal(mcpCall.status, 200);
     assert.match(await mcpCall.text(), /"kind".*"builder"|\\"kind\\":\\"builder\\"/);
-    const exhausted = await post('/mcp', { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }, { 'x-client-ip': '203.0.113.4' });
+    const exhausted = await post('/mcp', { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'inspect_json', arguments: { transaction: plan, network: 'eth' } } }, { 'x-client-ip': '203.0.113.4' });
     assert.equal(exhausted.status, 429);
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

@@ -1,6 +1,7 @@
 import { McpServer, createMcpHandler } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { resolve } from './resolve.mjs';
+import { parseInput } from './inputs.mjs';
 
 const network = z.enum(['auto', 'eth', 'gno', 'pol', 'arb1', 'oeth', 'base', 'sep', 'zkevm', 'bnb', 'avax']).default('auto');
 const annotations = { readOnlyHint: true, destructiveHint: false };
@@ -20,10 +21,10 @@ export function communityMcpHandler() {
         return { isError: true, content: [{ type: 'text', text: error.message }] };
       }
     });
-    register('inspect', 'Inspect a Safe hash, execution hash, URL, or address on supported networks.', { input: z.string().min(1), network }, ({ input, network }) => resolve(input, network, { limit: 5, verifyTargets: false, fetchState: false }));
-    register('inspect_json', 'Decode a supplied Safe transaction or Builder export.', { transaction: z.record(z.string(), z.unknown()), network }, ({ transaction, network }) => resolve(transaction, network === 'auto' ? 'eth' : network, { limit: 5, verifyTargets: false, fetchState: false }));
-    register('list_pending', 'List up to five queued proposals for a Safe.', { safe: z.string().min(1), network }, ({ safe, network }) => resolve(safe, network, { scope: 'pending', limit: 5, verifyTargets: false, fetchState: false }));
-    register('list_history', 'List up to five executed transactions for a Safe.', { safe: z.string().min(1), network }, ({ safe, network }) => resolve(safe, network, { scope: 'history', limit: 5, verifyTargets: false, fetchState: false }));
+    register('inspect', 'Inspect a Safe hash, execution hash, URL, or address on supported networks.', { input: z.string().min(1).max(262144), network }, ({ input, network }) => resolve(input, network, { limit: 5, verifyTargets: parseInput(input, network).kind !== 'safe', fetchState: false }));
+    register('inspect_json', 'Decode a supplied Safe transaction or Builder export.', { transaction: z.record(z.string(), z.unknown()), network }, ({ transaction, network }) => resolve(transaction, network === 'auto' ? 'eth' : network, { limit: 5, verifyTargets: true, fetchState: false }));
+    register('list_pending', 'List up to five queued proposals for a Safe.', { safe: z.string().min(1).max(512), network }, ({ safe, network }) => resolve(safe, network, { scope: 'pending', limit: 5, verifyTargets: false, fetchState: false }));
+    register('list_history', 'List up to five executed transactions for a Safe.', { safe: z.string().min(1).max(512), network }, ({ safe, network }) => resolve(safe, network, { scope: 'history', limit: 5, verifyTargets: false, fetchState: false }));
     return server;
   }, { responseMode: 'json', legacy: 'stateless', maxRequestBodySize: 262144 });
 }
