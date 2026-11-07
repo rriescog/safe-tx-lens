@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Interface } from 'ethers';
-import { decodeCall, summarizeCalls } from '../src/decode.mjs';
+import { decodeCall, enrichVerifiedCalls, summarizeCalls } from '../src/decode.mjs';
 import { enrichTokenCalls } from '../src/token-metadata.mjs';
 
 const token = '0x2222222222222222222222222222222222222222';
@@ -30,4 +30,29 @@ test('wrong-chain or malformed token metadata cannot create a token identity', a
   const malformed = call();
   await enrichTokenCalls(malformed, 'eth', { provider: { getNetwork: async () => ({ chainId: 1n }), call: async request => request.data === erc20.encodeFunctionData('symbol', []) ? erc20.encodeFunctionResult('symbol', ['<script>']) : erc20.encodeFunctionResult('decimals', [6]) } });
   assert.equal(malformed.token, undefined);
+});
+
+test('unnamed verified ERC-20 ABI retains recipient and raw amount at the execution block', async () => {
+  const node = call();
+  enrichVerifiedCalls(node, [{ address: token, status: 'verified', source: 'verified source', verifiedFunctions: [{ selector: node.selector, abi: 'function transfer(address,uint256)' }] }]);
+  assert.deepEqual(node.args.map(arg => arg.name), ['to', 'amount']);
+  const requests = [];
+  const provider = { getNetwork: async () => ({ chainId: 1n }), call: async request => {
+    requests.push(request);
+    return request.data === erc20.encodeFunctionData('symbol', []) ? erc20.encodeFunctionResult('symbol', ['DAI']) : erc20.encodeFunctionResult('decimals', [6]);
+  } };
+  await enrichTokenCalls(node, 'eth', { provider, blockTag: 123 });
+  assert.deepEqual(requests.map(request => request.blockTag), [123, 123]);
+  assert.equal(node.token.amount, '1.234567');
+  assert.match(summarizeCalls(node)[0].label, /Transfer 1.234567 DAI to 0x3333/);
+});
+
+test('DAI-style dst and wad ABI names still identify the recipient and amount', async () => {
+  const node = call();
+  enrichVerifiedCalls(node, [{ address: token, status: 'verified', source: 'verified source', verifiedFunctions: [{ selector: node.selector, abi: 'function transfer(address dst,uint256 wad)' }] }]);
+  assert.deepEqual(node.args.map(arg => arg.name), ['dst', 'wad']);
+  const provider = { getNetwork: async () => ({ chainId: 1n }), call: async request => request.data === erc20.encodeFunctionData('symbol', []) ? erc20.encodeFunctionResult('symbol', ['DAI']) : erc20.encodeFunctionResult('decimals', [6]) };
+  await enrichTokenCalls(node, 'eth', { provider });
+  assert.equal(node.token.amount, '1.234567');
+  assert.match(summarizeCalls(node)[0].label, /Transfer 1.234567 DAI to 0x3333/);
 });

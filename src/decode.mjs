@@ -125,7 +125,11 @@ export function enrichVerifiedCalls(root, targetChecks) {
                 node.decodeError = 'Verified ABI differs from the built-in nested decoder; its old child calls were discarded.';
               }
               node.method = parsed.signature;
-              node.args = parsed.fragment.inputs.map((input, index) => ({ name: input.name || `arg${index}`, value: clean(parsed.args[index]) }));
+              // Verified ABIs can omit parameter names. Recover names only
+              // when the known signature is identical; positional values are
+              // still authoritative even when no name is available.
+              const known = IFACE.getFunction(node.selector);
+              node.args = parsed.fragment.inputs.map((input, index) => ({ name: input.name || (known?.format('sighash') === parsed.signature ? known.inputs[index]?.name : null) || `arg${index}`, value: clean(parsed.args[index]) }));
               const inferredRoute = target.proxy?.standard === 'implementation() fallback' && source === implementation;
               node.decodeBasis = inferredRoute ? 'proxy_candidate_abi' : 'verified_abi';
               node.decodeSource = inferredRoute ? 'verified implementation ABI; proxy forwarding inferred from its getters and fallback, not independently proven' : source.status === 'verified_current' ? 'verified current bytecode (historical code unavailable)' : 'verified bytecode at inspected block';
@@ -200,7 +204,8 @@ export function summarizeCalls(root) {
   const actions = [];
   const visit = (node, path) => {
     const method = node.method?.split('(')[0] ?? null;
-    const argument = name => node.args?.find(item => item.name === name)?.value;
+    const positions = { transfer: { to: 0, amount: 1 }, transferFrom: { from: 0, to: 1, amount: 2 }, approve: { spender: 0, amount: 1 } };
+    const argument = name => node.args?.find(item => item.name === name)?.value ?? node.args?.[positions[method]?.[name]]?.value;
     let label;
     if (method === 'upgradeAndCall') label = `Upgrade proxy ${argument('proxy')} to implementation ${argument('implementation')}${node.children.length ? ' and call initializer' : ''}`;
     else if (method === 'upgradeToAndCall') label = `Upgrade proxy ${node.to} to implementation ${argument('implementation')}${node.children.length ? ' and call initializer' : ''}`;

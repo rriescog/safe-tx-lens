@@ -78,6 +78,27 @@ test('verified fallback proxy follows its implementation getter before judging t
   assert.ok(assessConfidence({ call: review.call, checks: [], targetChecks: review.targetChecks, transaction: review.transaction }).gaps.some(gap => gap.kind === 'proxy'));
 });
 
+test('historical proxy getter resolves the implementation from before execution', async () => {
+  const getter = new Interface(['function implementation() view returns (address)']);
+  const currentLogic = '0x4444444444444444444444444444444444444444';
+  const calls = [];
+  const rpc = {
+    getNetwork: async () => ({ chainId: 1n }),
+    getCode: async () => '0x60016000',
+    getStorage: async () => '0x',
+    call: async request => {
+      calls.push(request);
+      return getter.encodeFunctionResult('implementation', [request.blockTag === 99 ? LOGIC : currentLogic]);
+    },
+  };
+  const proxyAbi = ['function implementation() view returns (address)', 'function proxyType() view returns (uint256)', { type: 'fallback', stateMutability: 'payable' }];
+  const lookup = async (_network, address) => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: '0x60016000' }, abi: address.toLowerCase() === TARGET.toLowerCase() ? proxyAbi : abi });
+  const [target] = await inspectTargetCode(call, 'eth', { provider: rpc, sourceLookup: lookup, blockTag: 99 });
+  assert.equal(calls[0].blockTag, 99);
+  assert.equal(target.proxy.implementation, LOGIC);
+  assert.equal(target.proxy.implementationCode.blockTag, 99);
+});
+
 test('a proxy administration selector is valid in the outer ABI even when absent from its implementation ABI', async () => {
   const update = new Interface(['function updateImplementation(address newImplementation)']).encodeFunctionData('updateImplementation', [LOGIC]);
   const getter = new Interface(['function implementation() view returns (address)']);

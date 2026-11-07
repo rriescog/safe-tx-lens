@@ -117,7 +117,9 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
     if (!result.proxy && result.getterProxyCandidate) {
       try {
         const iface = new Interface(['function implementation() view returns (address)']);
-        const data = await provider.call({ to: entry.address, data: iface.encodeFunctionData('implementation') }, effectiveBlockTag);
+        // ethers v6 reads blockTag from the transaction request; a second
+        // argument is ignored and would silently query the current proxy.
+        const data = await provider.call({ to: entry.address, data: iface.encodeFunctionData('implementation'), blockTag: effectiveBlockTag });
         const implementation = iface.decodeFunctionResult('implementation', data)[0];
         if (isAddress(implementation) && implementation.toLowerCase() !== entry.address.toLowerCase() && !/^0x0{40}$/i.test(implementation)) {
           result.proxy = { standard: 'implementation() fallback', implementation: getAddress(implementation) };

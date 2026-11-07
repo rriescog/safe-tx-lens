@@ -293,7 +293,7 @@ export async function analyze(raw, network = 'eth', options = {}) {
       target.plannedImplementationCode = planned;
     }
   }
-  if (options.enrichTokens) await enrichTokenCalls(call, network, { rpcUrl: options.rpcUrl, provider: options.tokenProvider });
+  if (options.enrichTokens) await enrichTokenCalls(call, network, { rpcUrl: options.rpcUrl, provider: options.tokenProvider, blockTag: tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest' });
   const actions = summarizeCalls(call);
   const findings = classifyIntent(call);
   for (const target of targetChecks) {
