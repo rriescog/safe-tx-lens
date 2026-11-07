@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { getAddress } from 'ethers';
 import { readFile } from 'node:fs/promises';
 import { safeGet, fetchTransaction, fetchSafeTransactions, fetchQueue } from '../src/safe-api.mjs';
-import { analyzeHash } from '../src/analyze.mjs';
+import { analyze, analyzeHash, calculateHash, normalizeTransaction } from '../src/analyze.mjs';
 
 const SAFE = '0x1111111111111111111111111111111111111111';
 const HASH = `0x${'ab'.repeat(32)}`;
@@ -55,6 +55,29 @@ test('a hash lookup records the live source and queue pages preserve their cover
   assert.equal(queue.transactions[0].safeTxHash, HASH);
   assert.equal(queue.truncated, true);
 }));
+
+test('an empty 1/1 queue checks unsigned records without presenting them as trusted', async () => {
+  const raw = { safe: SAFE, to: SAFE, value: '0', data: '0x', operation: 0, nonce: 8, safeTxGas: '0', baseGas: '0', gasPrice: '0', gasToken: '0x0000000000000000000000000000000000000000', refundReceiver: '0x0000000000000000000000000000000000000000' };
+  const safeTxHash = calculateHash(normalizeTransaction(raw), 'eth');
+  const paths = [];
+  await withFetch(async url => {
+    const path = String(url);
+    paths.push(path);
+    if (path.endsWith(`/safes/${SAFE}/`)) return new Response(JSON.stringify({ address: SAFE, nonce: 8, threshold: 1, owners: [SAFE] }), { status: 200 });
+    if (path.includes('trusted=false')) return new Response(JSON.stringify({ count: 1, next: null, results: [{ ...raw, safeTxHash, trusted: false, isExecuted: false, confirmations: [] }] }), { status: 200 });
+    if (path.includes('/multisig-transactions/?')) return new Response(JSON.stringify({ count: 0, next: null, results: [] }), { status: 200 });
+    throw new Error(`Unexpected request: ${path}`);
+  }, async () => {
+    const queue = await fetchSafeTransactions(SAFE, 'eth', 'pending', 20);
+    assert.equal(queue.source, 'safe_api_untrusted');
+    assert.equal(queue.unsignedLookup, 'found');
+    assert.equal(queue.transactions.length, 1);
+    const report = await analyze(queue.transactions[0], 'eth', { safeInfo: queue.safe, fetchState: false, verifyTargets: false });
+    assert.equal(report.checks[0].status, 'pass');
+    assert.equal(report.hash, safeTxHash);
+  });
+  assert.equal(paths.filter(path => path.includes('trusted=false')).length, 1);
+});
 
 test('hash-only inspection records the exact user reference separately from the Safe API payload', async () => {
   const tx = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));

@@ -133,6 +133,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
     // root page available for /?hash=... and even an empty trailing ?.
     if (req.method === 'GET' && new URL(req.url ?? '/', 'http://localhost').pathname === '/') return reply(res, 200, html, 'text/html');
     if (req.method === 'GET' && req.url === '/web/app.js') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/app.js', import.meta.url)), 'utf8'), 'text/javascript');
+    if (req.method === 'GET' && req.url === '/web/vendor/cytoscape.min.js') return reply(res, 200, await readFile(fileURLToPath(new URL('../node_modules/cytoscape/dist/cytoscape.min.js', import.meta.url)), 'utf8'), 'text/javascript');
     if (req.method === 'GET' && req.url === '/web/style.css') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/style.css', import.meta.url)), 'utf8'), 'text/css');
     const icon = req.method === 'GET' ? /^\/web\/assets\/chains\/([a-z0-9]+)\.png$/.exec(req.url ?? '') : null;
     if (icon && Object.hasOwn(CHAINS, icon[1])) return reply(res, 200, await readFile(fileURLToPath(new URL(`../web/assets/chains/${icon[1]}.png`, import.meta.url))), 'image/png');

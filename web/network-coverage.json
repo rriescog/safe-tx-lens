@@ -1,6 +1,6 @@
 {
   "checkedAt": "2026-11-07T12:14:49Z",
-  "method": "Named networks checked with authenticated Safe indexing, pending and history endpoints using an empty address, plus public RPC eth_chainId; Katana and X Layer checked separately at 12:14 UTC.",
+  "method": "Named networks checked with authenticated Safe indexing, pending and history endpoints using an empty address, plus public RPC eth_chainId; Katana and X Layer checked separately at 12:14 UTC. Amoy was added afterward and has not passed the same probe.",
   "networks": [
     {
       "network": "eth",
@@ -88,6 +88,22 @@
       "indexing": "available",
       "pending": "available",
       "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "amoy",
+      "chainId": 80002,
+      "indexing": "not_tested",
+      "pending": "not_tested",
+      "history": "not_tested",
+      "rpc": "unavailable"
+    },
+    {
+      "network": "imx",
+      "chainId": 13371,
+      "indexing": "not_tested",
+      "pending": "not_tested",
+      "history": "not_tested",
       "rpc": "available"
     }
   ]

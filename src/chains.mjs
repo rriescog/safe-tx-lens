@@ -1,12 +1,12 @@
 export const CHAINS = Object.freeze({
   eth: 1, gno: 100, pol: 137, arb1: 42161, oeth: 10, base: 8453,
-  sep: 11155111, bnb: 56, avax: 43114,
-  kat: 747474, xlayer: 196,
+  sep: 11155111, amoy: 80002, bnb: 56, avax: 43114,
+  kat: 747474, xlayer: 196, imx: 13371,
 });
 
 // Product-facing names and Safe Transaction Service URL aliases differ for
 // some Agglayer networks. Keep chain IDs as the source of EIP-712 truth.
-export const SAFE_SERVICE_ALIAS = Object.freeze({ kat: 'katana', xlayer: 'okb' });
+export const SAFE_SERVICE_ALIAS = Object.freeze({ kat: 'katana', xlayer: 'okb', amoy: 'pol-amoy' });
 export function safeServiceAlias(network) { return SAFE_SERVICE_ALIAS[network] ?? network; }
 export function internalNetwork(alias) { return Object.keys(SAFE_SERVICE_ALIAS).find(network => SAFE_SERVICE_ALIAS[network] === alias) ?? alias; }
 

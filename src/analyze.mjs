@@ -6,6 +6,7 @@ import { assessRisk } from './risk.mjs';
 import { fetchTransaction, safeGet } from './safe-api.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
 import { inspectTargetCode } from './target-code.mjs';
+import { enrichTokenCalls } from './token-metadata.mjs';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 const SAFE_TYPES = { SafeTx: [
@@ -153,8 +154,31 @@ async function simulate(tx, network, safeInfo, options) {
   const project = options.tenderlyProject ?? credentials.TENDERLY_PROJECT;
   if (!key || !account || !project) return { unavailable: 'Tenderly credentials not configured' };
   const required = Number(tx.isExecuted && tx.confirmationsRequired ? tx.confirmationsRequired : safeInfo.threshold);
-  const signatures = tx.signatures ?? collectSignatures(tx, required);
-  if (!signatures) return { unavailable: 'Insufficient standard EOA signatures for faithful execTransaction simulation' };
+  let signatures = tx.signatures ?? collectSignatures(tx, required);
+  let conditional = false;
+  let conditionalOwner = null;
+  if (!signatures) {
+    const unusable = () => ({ unavailable: `A faithful Safe execution needs ${required} signatures. This proposal has too few usable signatures, and a conditional preview could not be checked against current Safe storage.` });
+    if (tx.isExecuted || !(options.rpcUrl ?? options.simulationRpcUrl) || BigInt(tx.nonce) !== BigInt(safeInfo.nonce ?? -1)) return unusable();
+    const owner = safeInfo.owners?.find(isAddress);
+    if (!owner) return unusable();
+    try {
+      const provider = options.simulationProvider ?? new JsonRpcProvider(options.rpcUrl ?? options.simulationRpcUrl);
+      if (Number((await provider.getNetwork()).chainId) !== chainId(network)) return unusable();
+      // Standard Safe versions store threshold at slot 4. Confirm it before
+      // creating a *hypothetical* override; never alter live chain state.
+      const slot = await provider.getStorage(tx.safe, 4);
+      if (BigInt(slot) !== BigInt(required)) return unusable();
+      const ownerIface = new Interface(['function isOwner(address) view returns (bool)']);
+      const answer = await provider.call({ to: tx.safe, data: ownerIface.encodeFunctionData('isOwner', [owner]) });
+      if (!ownerIface.decodeFunctionResult('isOwner', answer)[0]) return unusable();
+      conditional = true;
+      conditionalOwner = getAddress(owner);
+      // Safe approved-hash signature: owner in r, zero s, v=1. It is valid
+      // only because the simulated outer sender is that same owner.
+      signatures = `0x${conditionalOwner.slice(2).padStart(64, '0')}${'0'.repeat(64)}01`;
+    } catch { return unusable(); }
+  }
   const input = EXEC_IFACE.encodeFunctionData('execTransaction', [tx.to, tx.value, tx.data, tx.operation, tx.safeTxGas, tx.baseGas, tx.gasPrice, tx.gasToken, tx.refundReceiver, signatures]);
   let blockNumber;
   if (tx.isExecuted) {
@@ -168,10 +192,11 @@ async function simulate(tx, network, safeInfo, options) {
   const endpoint = `https://api.tenderly.co/api/v1/account/${encodeURIComponent(account)}/project/${encodeURIComponent(project)}/simulate`;
   // For an executed Safe transaction msg.sender must equal the real outer
   // transaction sender; approved-hash signatures can depend on that context.
-  const executor = tx.executor ?? tx.confirmations.find(c => c.signatureType === 'APPROVED_HASH' && c.owner)?.owner ?? safeInfo.owners?.[0] ?? tx.safe;
+  const executor = conditionalOwner ?? tx.executor ?? tx.confirmations.find(c => c.signatureType === 'APPROVED_HASH' && c.owner)?.owner ?? safeInfo.owners?.[0] ?? tx.safe;
+  const stateObjects = conditional ? { [tx.safe]: { storage: { [`0x${'0'.repeat(63)}4`]: `0x${'0'.repeat(63)}1` } } } : undefined;
   const response = await fetch(endpoint, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Access-Key': key },
-    body: JSON.stringify({ network_id: String(chainId(network)), from: executor, to: tx.safe, input, gas: 8000000, gas_price: '0', save: true, save_if_fails: true, simulation_type: 'full', ...(blockNumber !== undefined ? { block_number: blockNumber } : {}) }),
+    body: JSON.stringify({ network_id: String(chainId(network)), from: executor, to: tx.safe, input, gas: 8000000, gas_price: '0', save: true, save_if_fails: true, simulation_type: 'full', ...(stateObjects ? { state_objects: stateObjects } : {}), ...(blockNumber !== undefined ? { block_number: blockNumber } : {}) }),
     signal: AbortSignal.timeout(30000),
   });
   if (!response.ok) return { unavailable: `Tenderly API returned ${response.status}` };
@@ -218,7 +243,7 @@ async function simulate(tx, network, safeInfo, options) {
     if (log.address?.toLowerCase() === tx.safe.toLowerCase() && topic === EXEC_SUCCESS_TOPIC) safeExecutionSuccess = true;
     if (log.address?.toLowerCase() === tx.safe.toLowerCase() && topic === EXEC_FAILURE_TOPIC) safeExecutionSuccess = false;
   }
-  return { evmSuccess: transaction.status === true, safeExecutionSuccess, success: transaction.status === true && safeExecutionSuccess === true ? true : transaction.status === false || safeExecutionSuccess === false ? false : null, url: result.simulation?.id ? `https://dashboard.tenderly.co/${encodeURIComponent(account)}/${encodeURIComponent(project)}/simulator/${result.simulation.id}` : null, stateDiffAvailable: Array.isArray(info.state_diff), storageDiffs, balanceDiffs, balanceDataIncompleteCount, assetChanges, error: transaction.error_message ?? null, blockNumber: blockNumber ?? 'latest' };
+  return { mode: conditional ? 'conditional_threshold_override' : 'faithful', conditionalOwner, evmSuccess: transaction.status === true, safeExecutionSuccess, success: transaction.status === true && safeExecutionSuccess === true ? true : transaction.status === false || safeExecutionSuccess === false ? false : null, url: result.simulation?.id ? `https://dashboard.tenderly.co/${encodeURIComponent(account)}/${encodeURIComponent(project)}/simulator/${result.simulation.id}` : null, stateDiffAvailable: Array.isArray(info.state_diff), storageDiffs, balanceDiffs, balanceDataIncompleteCount, assetChanges, error: transaction.error_message ?? null, blockNumber: blockNumber ?? 'latest' };
 }
 
 export async function analyze(raw, network = 'eth', options = {}) {
@@ -241,13 +266,17 @@ export async function analyze(raw, network = 'eth', options = {}) {
   // bytecode on the selected chain and compare Sourcify's verified runtime.
   const targetChecks = options.verifyTargets ? await inspectTargetCode(call, network, { rpcUrl: options.rpcUrl, provider: options.targetProvider, blockTag: tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest', sourceLookup: options.sourceLookup }) : [];
   enrichVerifiedCalls(call, targetChecks);
+  if (options.enrichTokens) await enrichTokenCalls(call, network, { rpcUrl: options.rpcUrl, provider: options.tokenProvider });
   const actions = summarizeCalls(call);
   const findings = classifyIntent(call);
   for (const target of targetChecks) {
     if (target.status === 'mismatch') findings.push({ severity: 'critical', code: 'TARGET_CODE_MISMATCH', path: target.address, message: target.reason });
     // A plain value transfer to an EOA has no runtime code by design.
     if (target.status === 'no_code' && target.selectors.length) findings.push({ severity: 'warning', code: 'TARGET_NO_CODE', path: target.address, message: target.reason });
-    if (target.abiSelectors?.some(selector => !selector.present) || target.proxy?.implementationCode?.abiSelectors?.some(selector => !selector.present)) findings.push({ severity: 'warning', code: 'TARGET_ABI_MISMATCH', path: target.address, message: 'The locally decoded selector is absent from the matching verified source ABI; the function label may be wrong.' });
+    // Proxy ABI describes dispatch, not the functions that run through it.
+    // A missing selector is meaningful only after checking the implementation.
+    const effectiveTarget = target.proxy ? target.proxy.implementationCode : target;
+    if (effectiveTarget?.abiSelectors?.some(selector => !selector.present)) findings.push({ severity: 'warning', code: 'TARGET_ABI_MISMATCH', path: target.address, message: `The locally decoded selector is absent from the matching verified ${target.proxy ? 'implementation' : 'target'} ABI; the function label may be wrong.` });
   }
   if (options.verifyTargets && targetChecks.some(target => !['verified', 'verified_current'].includes(target.status) || (target.proxy && !['verified', 'verified_current'].includes(target.proxy.implementationCode?.status)))) warnings.push('At least one called target or ERC-1967 implementation lacks matching verified runtime bytecode. A decoded selector is only a hypothesis about behavior.');
   if (tx.to.toLowerCase() === tx.safe.toLowerCase() && tx.data === '0x' && tx.value === '0' && tx.operation === 0) {

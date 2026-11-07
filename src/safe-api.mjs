@@ -92,6 +92,21 @@ export async function fetchSafeTransactions(address, network, scope = 'pending',
   // The Transaction Service rejects lowercase EVM addresses with HTTP 422.
   // Inventories commonly store lowercase addresses, so normalize at the API boundary.
   address = getAddress(address);
+  const unsignedOneOfOne = async result => {
+    // Safe's list endpoint defaults to trusted transactions. A 1/1 proposal
+    // can exist in the service before its first signature, yet be absent from
+    // the normal queue. Make one bounded extra read only for an empty 1/1
+    // queue, and never describe that record as an owner-approved proposal.
+    if (scope !== 'pending' || Number(result.safe.threshold) !== 1 || result.transactions.length) return result;
+    if (!(await localCredentials()).SAFE_API_KEY) return { ...result, unsignedLookup: 'unavailable' };
+    try {
+      const page = await safeGet(network, `/safes/${address}/multisig-transactions/?executed=false&trusted=false&limit=${limit}&ordering=-nonce`);
+      if (!page || !Array.isArray(page.results) || !Number.isInteger(page.count)) throw new Error('Invalid unsigned transaction list');
+      const transactions = page.results.filter(tx => tx?.trusted === false && tx.safe?.toLowerCase() === address.toLowerCase() && /^0x[0-9a-fA-F]{64}$/.test(tx.safeTxHash ?? '') && tx.isExecuted !== true);
+      if (!transactions.length) return { ...result, unsignedLookup: 'empty' };
+      return { ...result, transactions, truncated: Boolean(page.next), source: 'safe_api_untrusted', unsignedLookup: 'found' };
+    } catch { return { ...result, unsignedLookup: 'unavailable' }; }
+  };
   const service = async () => {
     const safe = await safeGet(network, `/safes/${address}/`);
     const page = await safeGet(network, `/safes/${address}/multisig-transactions/?executed=${scope === 'history'}&limit=${limit}&ordering=-nonce`);
@@ -110,7 +125,7 @@ export async function fetchSafeTransactions(address, network, scope = 'pending',
   };
   const errors = [];
   for (const source of (await localCredentials()).SAFE_API_KEY ? [service, gateway] : [gateway, service]) {
-    try { return await source(); } catch (error) { errors.push(error.message); }
+    try { return await unsignedOneOfOne(await source()); } catch (error) { errors.push(error.message); }
   }
   throw new Error(errors.join('; '));
 }

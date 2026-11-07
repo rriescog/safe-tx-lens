@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.4.0",
+    "cytoscape": "^3.34.4",
     "ethers": "^6.16.0",
     "zod": "^4.6.7"
   },

@@ -8,6 +8,7 @@ globalThis.fetch = async url => {
   const path = String(url);
   if (path.includes('api.tenderly.co') && path.endsWith('/storage/all')) return new Response(JSON.stringify([{ key: 'PENDING_TXN_DATA', value: '{}' }]), { status: 200 });
   if (path.endsWith(`/safes/${tx.safe}/`)) return new Response(JSON.stringify({ address: tx.safe, nonce: 244, threshold: 1, owners: [tx.safe] }), { status: 200 });
+  if (path.includes('trusted=false')) return new Response(JSON.stringify({ count: 0, results: [], next: null }), { status: 200 });
   if (path.includes(`/safes/${tx.safe}/multisig-transactions/`)) {
     queueCalls++;
     if (queueCalls >= 3) process.exit(0);

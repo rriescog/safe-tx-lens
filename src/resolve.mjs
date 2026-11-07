@@ -1,12 +1,16 @@
 import { analyze, analyzeHash } from './analyze.mjs';
 import { parseInput } from './inputs.mjs';
 import { fetchSafeTransactions, safeGet } from './safe-api.mjs';
-import { analyzeExecutionHash, discoverExecutionNetworks, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from './onchain.mjs';
+import { analyzeExecutionHash, contractPresence, discoverExecutionNetworks, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from './onchain.mjs';
 import { analyzeBuilderExport, isBuilderExport } from './builder.mjs';
 import { analyzeMonitorStorage, isMonitorStorage } from './monitor-import.mjs';
 import { fetchMonitorStorage, localCredentials } from './tenderly-storage.mjs';
 import { CHAINS, chainId } from './chains.mjs';
 import { findIndexedExecution } from './execution-index.mjs';
+
+// Testnets are available by explicit selection, but automatic hash/address
+// discovery stays on production chains to bound latency and API usage.
+const AUTO_NETWORKS = Object.keys(CHAINS).filter(network => !['sep', 'amoy', 'imx'].includes(network));
 
 async function detectNetwork(parsed, options = {}) {
   // Neither a 32-byte hash nor a 20-byte address contains a chain ID. Every
@@ -40,7 +44,7 @@ async function detectNetwork(parsed, options = {}) {
     if (parsed.kind === 'safe') {
       const networks = new Set(monitoredNetworks);
       if (hasSafeKey) {
-        for (const network of Object.keys(CHAINS)) {
+        for (const network of AUTO_NETWORKS) {
           try {
             const safe = await safeGet(network, `/safes/${parsed.address}/`);
             if (safe.address?.toLowerCase() === parsed.address.toLowerCase()) networks.add(network);
@@ -54,15 +58,15 @@ async function detectNetwork(parsed, options = {}) {
       if (networks.size > 1) return [...networks];
     }
     if (parsed.kind === 'hash') {
-      const executionNetworks = await discoverExecutionNetworks(parsed.hash, Object.keys(CHAINS), options);
+      const executionNetworks = await discoverExecutionNetworks(parsed.hash, AUTO_NETWORKS, options);
       if (executionNetworks.length === 1) return { network: executionNetworks[0], source: 'execution_receipt' };
       if (executionNetworks.length > 1) throw new Error(`Execution hash appeared on multiple networks (${executionNetworks.join(', ')}). Select the network explicitly.`);
-      for (const network of Object.keys(CHAINS)) {
+      for (const network of AUTO_NETWORKS) {
         try { if (await findIndexedExecution(parsed.hash, network)) return network; }
         catch { /* This chain may be unsupported or temporarily unavailable in the index. */ }
       }
       if (hasSafeKey) {
-        for (const network of Object.keys(CHAINS)) {
+        for (const network of AUTO_NETWORKS) {
           try {
             const proposal = await safeGet(network, `/multisig-transactions/${parsed.hash}/`);
             if (proposal.safeTxHash?.toLowerCase() === parsed.hash.toLowerCase()) return network;
@@ -91,7 +95,7 @@ export async function resolve(input, network = 'eth', options = {}) {
       // Safe Transaction Service expects a Safe transaction hash instead, so
       // querying it here wastes quota and can mask a transient RPC failure.
       const rpcProvenance = rpcDetailsFor(detected.network, options.rpcUrl);
-      const settings = { ...options, rpcUrl: rpcProvenance.url, rpcProvenance, verifyTargets: options.verifyTargets ?? true };
+      const settings = { ...options, rpcUrl: rpcProvenance.url, rpcProvenance, verifyTargets: options.verifyTargets ?? true, enrichTokens: options.enrichTokens ?? true };
       for (let attempt = 0; attempt < 2; attempt++) {
         try { return await (options.analyzeExecution ?? analyzeExecutionHash)(parsed.hash, detected.network, settings); }
         catch (error) {
@@ -112,7 +116,7 @@ export async function resolve(input, network = 'eth', options = {}) {
     };
   }
   const rpcProvenance = rpcDetailsFor(parsed.network, options.rpcUrl);
-  const settings = { ...options, rpcUrl: rpcProvenance.url, rpcProvenance, verifyTargets: options.verifyTargets ?? true };
+  const settings = { ...options, rpcUrl: rpcProvenance.url, rpcProvenance, verifyTargets: options.verifyTargets ?? true, enrichTokens: options.enrichTokens ?? true };
   if (parsed.kind === 'hash') {
     let safeError;
     try { return await analyzeHash(parsed.hash, parsed.network, { ...settings, expectedSafe: parsed.expectedSafe }); }
@@ -170,6 +174,7 @@ export async function resolve(input, network = 'eth', options = {}) {
   let truncated = false;
   let source = 'safe_api';
   let sourceAvailable = false;
+  let addressAbsent = false;
   const usedSources = new Set();
   for (const part of scopes) {
     try {
@@ -179,11 +184,18 @@ export async function resolve(input, network = 'eth', options = {}) {
       usedSources.add(page.source);
       sourceAvailable = true;
       truncated ||= page.truncated;
+      if (part === 'pending' && page.source === 'safe_api_untrusted') warnings.push('Showing unsigned 1/1 records from Safe Transaction Service. These records have no trusted owner signature; independently compare the complete fields and Safe hash before signing.');
+      if (part === 'pending' && Number(page.safe?.threshold) === 1 && !page.transactions.length) warnings.push('No published 1/1 proposal was returned. If the first signature has not been submitted, import the complete Safe transaction JSON to review it before signing; a hash alone cannot reveal unindexed calldata.');
       for (const tx of page.transactions) {
-        const report = await analyze(tx, parsed.network, { ...settings, verifyTargets: false, safeInfo: page.safe });
+        const report = await analyze(tx, parsed.network, { ...settings, verifyTargets: false, enrichTokens: false, safeInfo: page.safe });
         reports.push({ ...report, evidence: { source: page.source, retrievedAt: new Date().toISOString() } });
       }
     } catch (error) {
+      if (error.message.includes('Safe API 404') && await contractPresence(parsed.address, parsed.network, { rpcUrl: settings.rpcUrl, fetchImpl: options.fetchImpl }) === 'absent') {
+        addressAbsent = true;
+        warnings.push(`No contract is deployed at ${parsed.address} on ${parsed.network} according to the selected RPC. Check the network in the Safe URL or choose another chain.`);
+        continue;
+      }
       if (part === 'pending' && options.monitorFallback === true) {
         try {
           const monitor = await monitorReports(parsed.network, { ...settings, safeAddress: parsed.address, limit });
@@ -218,5 +230,5 @@ export async function resolve(input, network = 'eth', options = {}) {
       } else warnings.push(`${part} unavailable: ${error.message}`);
     }
   }
-  return { kind: 'queue', scope, source: sourceAvailable ? usedSources.size > 1 ? 'multiple_sources' : source : 'unavailable', availability: sourceAvailable ? 'available' : 'unavailable', network: parsed.network, safe: parsed.address, safeState: safe ? { nonce: safe.nonce, threshold: safe.threshold, owners: safe.owners } : null, truncated, warnings, reports, reviewedAt: new Date().toISOString() };
+  return { kind: 'queue', scope, source: sourceAvailable ? usedSources.size > 1 ? 'multiple_sources' : source : 'unavailable', availability: sourceAvailable ? 'available' : addressAbsent ? 'absent' : 'unavailable', network: parsed.network, safe: parsed.address, safeState: safe ? { nonce: safe.nonce, threshold: safe.threshold, owners: safe.owners } : null, truncated, warnings, reports, reviewedAt: new Date().toISOString() };
 }

@@ -54,7 +54,7 @@ export function assessRisk({ call, actions, findings, effects, checks, simulatio
   if (effects.some(effect => effect.kind === 'asset_transfer')) add(80, 'Simulation shows asset transfers. Review recipients and amounts.');
   const reviewScore = Math.max(impactScore, ...reasons.map(item => item.score), 0);
   const uncertain = findings.some(finding => finding.code === 'UNKNOWN_SELECTOR' || finding.code === 'MULTISEND_TARGET_UNVERIFIED') || actionRatings.some(action => action.method === null && action.selector !== '0x');
-  const basis = simulation?.success === true ? 'decoded calldata and simulated effects' : transaction.isExecuted ? 'onchain execution and decoded calldata' : 'decoded calldata only';
+  const basis = simulation?.mode === 'conditional_threshold_override' ? 'decoded calldata and conditional simulated effects' : simulation?.success === true ? 'decoded calldata and simulated effects' : transaction.isExecuted ? 'onchain execution and decoded calldata' : 'decoded calldata only';
   return {
     level: level(reviewScore), impactLevel: level(impactScore), reviewPriority: level(reviewScore),
     basis, uncertain, actionRatings,

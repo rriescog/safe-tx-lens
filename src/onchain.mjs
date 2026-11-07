@@ -14,9 +14,9 @@ export const PUBLIC_RPC = Object.freeze({
   eth: 'https://eth-mainnet.g.alchemy.com/public', gno: 'https://gnosis.publicnode.com',
   pol: 'https://polygon-bor-rpc.publicnode.com', arb1: 'https://arbitrum-one-rpc.publicnode.com',
   oeth: 'https://optimism-rpc.publicnode.com', base: 'https://base-rpc.publicnode.com',
-  sep: 'https://ethereum-sepolia-rpc.publicnode.com', bnb: 'https://bsc-rpc.publicnode.com',
+  sep: 'https://ethereum-sepolia-rpc.publicnode.com', amoy: 'https://rpc-amoy.polygon.technology', bnb: 'https://bsc-rpc.publicnode.com',
   avax: 'https://avalanche-c-chain-rpc.publicnode.com',
-  kat: 'https://rpc.katana.network', xlayer: 'https://rpc.xlayer.tech',
+  kat: 'https://rpc.katana.network', xlayer: 'https://rpc.xlayer.tech', imx: 'https://rpc.immutable.com',
 });
 
 export async function discoverExecutionNetworks(hash, networks, options = {}) {
@@ -45,11 +45,27 @@ export function rpcDetailsFor(network, override) {
   const configured = process.env[`RPC_URL_${network.toUpperCase()}`];
   if (configured) return { url: configured, kind: 'configured', label: `RPC configured for ${network}` };
   const publicUrl = PUBLIC_RPC[network];
-  return publicUrl ? { url: publicUrl, kind: 'public', label: `${network === 'eth' ? 'Alchemy public' : 'PublicNode'} (${new URL(publicUrl).host})` } : { url: null, kind: 'none', label: 'No RPC configured for this network' };
+  return publicUrl ? { url: publicUrl, kind: 'public', label: `${network === 'eth' ? 'Alchemy public' : network === 'amoy' ? 'Polygon public' : ['kat', 'xlayer'].includes(network) ? 'Network public' : 'PublicNode'} (${new URL(publicUrl).host})` } : { url: null, kind: 'none', label: 'No RPC configured for this network' };
 }
 
 export function rpcFor(network, override) {
   return rpcDetailsFor(network, override).url;
+}
+
+export async function contractPresence(address, network, options = {}) {
+  const rpc = rpcFor(network, options.rpcUrl);
+  if (!rpc) return 'unknown';
+  const request = async (method, params) => {
+    const response = await (options.fetchImpl ?? fetch)(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(4000) });
+    if (!response.ok) throw new Error('RPC unavailable');
+    const body = await response.json();
+    if (body.error || typeof body.result !== 'string') throw new Error('Invalid RPC response');
+    return body.result;
+  };
+  try {
+    if (Number(await request('eth_chainId', [])) !== chainId(network)) return 'unknown';
+    return await request('eth_getCode', [address, 'latest']) === '0x' ? 'absent' : 'present';
+  } catch { return 'unknown'; }
 }
 
 export async function findRecentExecutionBySafeHash(safe, safeHash, network = 'eth', options = {}) {

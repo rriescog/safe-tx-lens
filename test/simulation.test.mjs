@@ -80,11 +80,25 @@ test('simulation reads measured native balances from Tenderly call trace', async
 
 test('insufficient signatures and a failed hash prevent simulation requests', async () => withTenderlyStub({}, async requests => {
   const unsigned = await analyze({ ...transaction, signatures: null }, 'eth', { safeInfo: { ...safeInfo, threshold: 2 }, simulate: true });
-  assert.match(unsigned.simulation.unavailable, /Insufficient standard EOA signatures/);
+  assert.match(unsigned.simulation.unavailable, /faithful Safe execution needs 2 signatures/);
   const badHash = await analyze({ ...transaction, safeTxHash: `0x${'ff'.repeat(32)}` }, 'eth', { safeInfo, simulate: true });
   assert.match(badHash.simulation.unavailable, /hash verification failed/);
   assert.equal(badHash.status, 'BLOCK');
   assert.equal(requests.length, 0);
+}));
+
+test('unsigned pending Safe can receive a labeled conditional Tenderly preview after RPC storage checks', async () => withTenderlyStub({ transaction: { status: true, output: outputTrue, transaction_info: { state_diff: [] } } }, async requests => {
+  const ownerIface = new (await import('ethers')).Interface(['function isOwner(address) view returns (bool)']);
+  const previewProvider = { getNetwork: async () => ({ chainId: 1n }), getStorage: async (_address, slot) => { assert.equal(slot, 4); return `0x${'0'.repeat(63)}2`; }, call: async () => ownerIface.encodeFunctionResult('isOwner', [true]) };
+  const report = await analyze({ ...transaction, signatures: null }, 'eth', { safeInfo: { ...safeInfo, threshold: 2 }, simulate: true, simulationRpcUrl: 'https://example.invalid', simulationProvider: previewProvider });
+  assert.equal(report.simulation.mode, 'conditional_threshold_override');
+  assert.equal(report.simulation.success, true);
+  assert.equal(requests.length, 1);
+  const body = JSON.parse(requests[0].init.body);
+  assert.equal(body.from, SAFE);
+  assert.equal(body.state_objects[SAFE].storage[`0x${'0'.repeat(63)}4`], `0x${'0'.repeat(63)}1`);
+  assert.match(report.risk.basis, /conditional/);
+  assert.match(report.confidence.gaps.at(-1).label, /faithful Safe execution/);
 }));
 
 test('simulation assembles unique EOA confirmations in deterministic owner order', async () => withTenderlyStub({ transaction: { status: true, output: outputTrue, transaction_info: { state_diff: [] } } }, async requests => {

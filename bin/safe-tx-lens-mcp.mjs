@@ -5,9 +5,9 @@ import * as z from 'zod/v4';
 import { resolve } from '../src/resolve.mjs';
 import { analyzeExecutionHash } from '../src/onchain.mjs';
 
-const NETWORK = z.union([z.enum(['eth', 'gno', 'pol', 'arb1', 'oeth', 'base', 'sep', 'kat', 'xlayer', 'bnb', 'avax']), z.string().regex(/^[1-9][0-9]{0,15}$/)]).default('eth');
+const NETWORK = z.union([z.enum(['eth', 'gno', 'pol', 'arb1', 'oeth', 'base', 'sep', 'amoy', 'kat', 'xlayer', 'imx', 'bnb', 'avax']), z.string().regex(/^[1-9][0-9]{0,15}$/)]).default('eth');
 const COMMON = { network: NETWORK, rpcUrl: z.string().url().optional().describe('Optional EVM RPC URL. Ethereum uses a public RPC by default.'), simulate: z.boolean().default(false).describe('Explicitly run a Tenderly simulation when credentials and compatible signatures are available.') };
-const COMMON_AUTO = { ...COMMON, network: z.union([z.enum(['auto', 'eth', 'gno', 'pol', 'arb1', 'oeth', 'base', 'sep', 'kat', 'xlayer', 'bnb', 'avax']), z.string().regex(/^[1-9][0-9]{0,15}$/)]).default('auto') };
+const COMMON_AUTO = { ...COMMON, network: z.union([z.enum(['auto', 'eth', 'gno', 'pol', 'arb1', 'oeth', 'base', 'sep', 'amoy', 'kat', 'xlayer', 'imx', 'bnb', 'avax']), z.string().regex(/^[1-9][0-9]{0,15}$/)]).default('auto') };
 
 function output(work) {
   return async args => {

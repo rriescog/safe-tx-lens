@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Interface, keccak256 } from 'ethers';
 import { inspectTargetCode, sourcifyLookup } from '../src/target-code.mjs';
+import { analyze } from '../src/analyze.mjs';
 
 const TARGET = '0x2222222222222222222222222222222222222222';
 const LOGIC = '0x3333333333333333333333333333333333333333';
@@ -39,6 +40,33 @@ test('ERC-1967 implementation is inspected separately', async () => {
   const [target] = await inspectTargetCode(call, 'eth', { provider: provider({ implementation: slot }), sourceLookup });
   assert.equal(target.proxy.implementation, LOGIC);
   assert.equal(target.proxy.implementationCode.status, 'verified');
+});
+
+test('SafeProxy slot-0 singleton ABI is inspected instead of treating proxy ABI as target ABI', async () => {
+  const slot = `0x${'0'.repeat(24)}${LOGIC.slice(2)}`;
+  const rpc = { ...provider(), getStorage: async (_address, index) => index === 0 ? slot : '0x' };
+  const lookup = async (_network, address) => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: '0x60016000' }, abi: address.toLowerCase() === TARGET.toLowerCase() ? ['function masterCopy() view returns (address)'] : abi });
+  const [target] = await inspectTargetCode(call, 'eth', { provider: rpc, sourceLookup: lookup });
+  assert.equal(target.proxy.standard, 'SafeProxy');
+  assert.equal(target.proxy.implementation, LOGIC);
+  assert.equal(target.abiSelectors[0].present, false);
+  assert.equal(target.proxy.implementationCode.abiSelectors[0].present, true);
+  const review = await analyze({ safe: TARGET, to: TARGET, value: '0', data, operation: 0, nonce: 1 }, 'eth', { fetchState: false, verifyTargets: true, targetProvider: rpc, sourceLookup: lookup });
+  assert.equal(review.findings.some(item => item.code === 'TARGET_ABI_MISMATCH'), false);
+});
+
+test('assembly SafeProxy with constructor and fallback ABI resolves singleton', async () => {
+  const slot = `0x${'0'.repeat(24)}${LOGIC.slice(2)}`;
+  const proxyCode = '0x7fa619486e600054';
+  const rpc = {
+    getNetwork: async () => ({ chainId: 1n }),
+    getCode: async address => address.toLowerCase() === TARGET.toLowerCase() ? proxyCode : '0x60016000',
+    getStorage: async (_address, index) => index === 0 ? slot : '0x',
+  };
+  const lookup = async (_network, address) => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: address.toLowerCase() === TARGET.toLowerCase() ? proxyCode : '0x60016000' }, abi: address.toLowerCase() === TARGET.toLowerCase() ? [{ type: 'constructor', inputs: [{ name: '_singleton', type: 'address' }] }, { type: 'fallback', stateMutability: 'payable' }] : abi });
+  const [target] = await inspectTargetCode(call, 'eth', { provider: rpc, sourceLookup: lookup });
+  assert.equal(target.proxy.standard, 'SafeProxy');
+  assert.equal(target.proxy.implementationCode.abiSelectors[0].present, true);
 });
 
 test('archive RPC failure is disclosed for proxy and implementation alike', async () => {

@@ -23,8 +23,8 @@ export function assessConfidence({ call, checks = [], targetChecks = [], simulat
   const verified = called.filter(target => ['verified', 'verified_current'].includes(target.status) && (!target.proxy || ['verified', 'verified_current'].includes(target.proxy.implementationCode?.status)));
   if (called.length && verified.length === called.length) { score += 2; reasons.push('Every called target with calldata has matching verified runtime bytecode.'); }
   else { reasons.push('Some called target bytecode has not been verified against source.'); gaps.push({ points: 2, label: 'Match every called target and proxy implementation runtime bytecode to verified source at the relevant block.' }); }
-  if (simulation && !simulation.unavailable && simulation.success === true && simulation.stateDiffAvailable) { score += 1; reasons.push('A successful simulation returned a storage diff for one execution path.'); }
-  else { reasons.push('No successful simulation with a storage diff was available.'); gaps.push({ points: 1, label: 'Run a successful simulation that returns a measured storage diff.' }); }
+  if (simulation && !simulation.unavailable && simulation.success === true && simulation.stateDiffAvailable && simulation.mode !== 'conditional_threshold_override') { score += 1; reasons.push('A successful simulation returned a storage diff for one execution path.'); }
+  else { reasons.push(simulation?.mode === 'conditional_threshold_override' ? 'Conditional preview used a temporary threshold override; it does not reproduce owner approval.' : 'No successful simulation with a storage diff was available.'); gaps.push({ points: 1, label: simulation?.mode === 'conditional_threshold_override' ? 'Reinspect after enough owners sign for a faithful Safe execution simulation.' : 'Run a successful simulation that returns a measured storage diff.' }); }
   if (transaction?.isExecuted && called.some(target => target.historicalUnavailable || target.proxy?.implementationCode?.historicalUnavailable)) {
     const beforeCap = score;
     score = Math.min(score, 7);

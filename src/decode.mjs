@@ -141,6 +141,9 @@ export function summarizeCalls(root) {
     else if (method === 'forceUnstakePOL') label = `Force unstake POL validator #${argument('validatorId')}`;
     else if (method === 'reinitializeValidatorState') label = `Reinitialize validator state; expected increase ${argument('expectedIncrease')}`;
     else if (method === 'cleanMapToken') label = `Clean token mapping: root ${argument('rootToken')}, child ${argument('childToken')}`;
+    else if (node.token && method === 'transfer') label = `Transfer ${node.token.amount ?? argument('amount')} ${node.token.symbol} to ${argument('to')}`;
+    else if (node.token && method === 'transferFrom') label = `Transfer ${node.token.amount ?? argument('amount')} ${node.token.symbol} from ${argument('from')} to ${argument('to')}`;
+    else if (node.token && method === 'approve') label = `Approve ${node.token.amount ?? argument('amount')} ${node.token.symbol} for ${argument('spender')}`;
     else if (method) label = `${method}(${(node.args ?? []).filter(arg => typeof arg.value !== 'string' || !arg.value.startsWith('0x') || arg.value.length <= 42).map(arg => String(arg.value)).join(', ')})`;
     else if (node.data === '0x') label = node.value === '0' ? 'Empty call / Safe nonce consumption' : `Native value transfer: ${node.value} wei`;
     else label = `Unknown call ${node.selector}`;

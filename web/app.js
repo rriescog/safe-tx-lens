@@ -13,13 +13,16 @@ const status = document.getElementById('status');
 const submit = document.getElementById('submit');
 const watch = document.getElementById('watch');
 const jsonFile = document.getElementById('json-file');
+const jsonDrop = document.getElementById('json-drop');
+const jsonChoose = document.getElementById('json-choose');
+const jsonDropHint = document.getElementById('json-drop-hint');
 const publicMode = document.body.dataset.publicMode === 'true';
 const communityMode = document.body.dataset.communityMode === 'true';
 const publicFacing = publicMode || communityMode;
+const loopbackHost = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(globalThis.location?.hostname);
 const simulationEnabled = document.body.dataset.simulationEnabled === 'true';
-// Duplicate the visual tracks only. Screen readers see one set of networks and
-// one set of empty sponsorship places; the copies never claim real sponsors.
-for (const id of ['network-track', 'sponsor-track']) {
+// Duplicate the visual strips for a seamless loop. Accessibility sees one set.
+for (const id of ['network-track', 'tier-diamond', 'tier-gold', 'tier-silver', 'tier-bronze']) {
   const track = document.getElementById(id);
   if (track?.children?.length) for (const item of [...track.children]) {
     const clone = item.cloneNode(true);
@@ -75,7 +78,7 @@ fetch('/api/network-coverage').then(response => response.ok ? response.json() : 
     card.append(label);
   }
 }).catch(() => {});
-if (publicFacing) {
+if (publicFacing || !loopbackHost) {
   if (communityMode) document.querySelector('.local-note').textContent = 'Public service: Safe lookups and hosted MCP share a usage budget. Simulation, when configured, runs only on request.';
   else {
   document.querySelector('.local-note').textContent = 'Public demo: limited requests, no owner API keys or simulation. Use the local tool for full review.';
@@ -123,10 +126,10 @@ function updateWizard() {
   document.getElementById('safe-actions').hidden = !isSafe;
   const guidance = {
     auto: ['2 · Paste it here', 'Paste what you have; the tool will identify a hash, Safe address, URL, or JSON.'],
-    hash: ['2 · Paste the transaction hash', 'The tool looks up its full transaction fields, then recalculates the Safe hash.'],
+    hash: ['2 · Paste the transaction hash', 'The tool looks up its full transaction fields, then recalculates the Safe hash. A 1/1 proposal that has not been published may need transaction JSON instead.'],
     safe: ['2 · Paste the Safe address', 'Choose pending proposals or executed history, then select a transaction to review.'],
     url: ['2 · Paste the Safe URL', 'The URL supplies the network and Safe address. A transaction URL also identifies its hash.'],
-    json: ['2 · Paste or upload JSON', 'Inspect the encoded calls offline. Compare its hash with an independently obtained reference.'],
+    json: ['2 · Paste or upload JSON', 'Inspect the encoded calls offline, including an unpublished 1/1 proposal. Compare its hash with an independently obtained reference.'],
   };
   document.getElementById('input-label').textContent = guidance[mode][0];
   document.getElementById('mode-help').textContent = guidance[mode][1];
@@ -186,10 +189,55 @@ function flowHtml(node, path, labels) {
   const title = labels.get(path) ?? method;
   const kind = /^schedule/.test(method) || node.stage === 'schedule' ? 'Schedule' : /^execute/.test(method) ? 'Execute' : node.operation === 1 ? 'Delegatecall' : 'Call';
   const children = node.children?.length ? `<ul class="flow-children">${node.children.map((child, i) => flowHtml(child, `${path}.${i + 1}`, labels)).join('')}</ul>` : '';
-  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong>${esc(title)}</strong><span class="flow-address mono">${esc(node.to)}</span>${node.decodeSource ? `<span class="flow-evidence">Verified ABI · ${esc(node.decodeSource)}</span>` : ''}</div></div>${children}</li>`;
+  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong>${esc(title)}</strong><span class="flow-address mono">${esc(node.to)}</span>${node.token ? `<span class="token-identity">${esc(node.token.amount ?? 'Raw amount unavailable')} ${esc(node.token.symbol)} · ${esc(node.token.address)}<small>Symbol and decimals reported by the contract via RPC; identity unverified.</small></span>` : ''}${node.decodeSource ? `<span class="flow-evidence">Verified ABI · ${esc(node.decodeSource)}</span>` : ''}</div></div>${children}</li>`;
+}
+function graphElements(r) {
+  const elements = [{ data: { id: 'safe', label: `Safe nonce ${r.transaction.nonce}`, detail: `Safe ${r.transaction.safe}`, kind: 'safe' } }];
+  const labels = new Map(r.actions.map(action => [action.path, action.label]));
+  let omitted = 0;
+  function visit(call, path, parent) {
+    if (elements.filter(element => !element.data.source).length >= 80) { omitted++; return; }
+    const method = call.method?.split('(')[0] ?? (call.data === '0x' ? 'Value or empty call' : `Unknown ${call.selector}`);
+    const kind = call.operation === 1 ? 'delegatecall' : call.stage === 'schedule' || /^schedule/.test(method) ? 'schedule' : /^execute/.test(method) ? 'execute' : 'call';
+    const title = labels.get(path) ?? method;
+    const detail = `${title}\n${kind} to ${call.to}\nValue: ${call.value} wei${call.decodeSource ? `\nABI: ${call.decodeSource}` : ''}${call.decodeError ? `\nDecode error: ${call.decodeError}` : ''}`;
+    // Keep canvas labels short; the selected-node panel has the full action.
+    elements.push({ data: { id: path, label: method.length > 27 ? `${method.slice(0, 24)}…` : method, detail, kind } });
+    elements.push({ data: { id: `edge-${path}`, source: parent, target: path } });
+    for (const [index, child] of (call.children ?? []).entries()) visit(child, `${path}.${index + 1}`, path);
+  }
+  visit(r.call, '1', 'safe');
+  return { elements, omitted };
+}
+let activeGraph;
+function showCallGraph(r) {
+  activeGraph?.destroy();
+  activeGraph = null;
+  const shell = report.querySelector('.graph-shell');
+  if (!shell || typeof cytoscape !== 'function') return;
+  const disclosure = report.querySelector('.graph-extra');
+  disclosure.addEventListener('toggle', () => { if (disclosure.open && !activeGraph) renderGraph(); });
+  function renderGraph() {
+  const { elements, omitted } = graphElements(r);
+  const detail = shell.querySelector('.graph-selection');
+  detail.textContent = `Select a call to see its target and decoded intent.${omitted ? ` Showing the first 79 calls; ${omitted} more omitted from the graph. The text path below includes all calls.` : ''}`;
+  activeGraph = cytoscape({
+    container: shell.querySelector('.call-graph'), elements,
+    layout: { name: 'breadthfirst', directed: true, roots: '#safe', padding: 28, spacingFactor: 1.35 },
+    style: [
+      { selector: 'node', style: { 'background-color': '#e8f3f7', 'border-width': 2, 'border-color': '#6ca7bd', label: 'data(label)', color: '#153345', 'font-size': 11, 'font-weight': 700, 'text-wrap': 'wrap', 'text-max-width': 132, 'text-valign': 'center', 'text-halign': 'center', width: 160, height: 58, shape: 'round-rectangle' } },
+      { selector: 'node[kind = "safe"]', style: { 'background-color': '#075477', color: '#ffffff', 'border-color': '#075477' } },
+      { selector: 'node[kind = "delegatecall"]', style: { 'background-color': '#fff0e7', 'border-color': '#bf643b' } },
+      { selector: 'node[kind = "schedule"]', style: { 'background-color': '#fff7e4', 'border-color': '#c99b3f' } },
+      { selector: 'edge', style: { width: 2, 'line-color': '#87adbc', 'target-arrow-shape': 'triangle', 'target-arrow-color': '#87adbc', 'curve-style': 'bezier' } },
+      { selector: ':selected', style: { 'border-width': 4, 'border-color': '#087b95' } },
+    ],
+  });
+  activeGraph.on('tap', 'node', event => { detail.textContent = event.target.data('detail'); });
+  }
 }
 function verificationHtml(r) {
-  const sources = { safe_api: 'Safe Transaction Service', safe_gateway: 'Safe Client Gateway', onchain_execution: 'Onchain execution via RPC', bundled_example: 'Saved public Ethereum example bundled with this app; no live lookup', tenderly_monitor: 'Tenderly monitor snapshot', tenderly_storage: 'Imported monitor JSON' };
+  const sources = { safe_api: 'Safe Transaction Service', safe_api_untrusted: 'Safe Transaction Service (unsigned, untrusted record)', safe_gateway: 'Safe Client Gateway', onchain_execution: 'Onchain execution via RPC', bundled_example: 'Saved public Ethereum example bundled with this app; no live lookup', tenderly_monitor: 'Tenderly monitor snapshot', tenderly_storage: 'Imported monitor JSON' };
   const source = sources[r.evidence?.source] ?? (r.transaction?.lookupSource ? 'External transaction source' : 'Supplied JSON');
   const local = r.checks.find(check => check.name === 'Local EIP-712 hash');
   const contract = r.checks.find(check => check.name.startsWith('Safe contract hash'));
@@ -207,8 +255,9 @@ function verificationHtml(r) {
       : 'This check did not run because no usable RPC was available. Configure a network RPC locally, then rerun the inspection.';
   const contractStep = step(3, 'Safe contract calculation by RPC', contract?.status ?? 'unavailable', contractDetail, contract ? 'RPC read failed' : 'Not run');
   const stateSource = r.safeState?.source ? `Signer and threshold state came from ${r.safeState.source === 'safe_api' ? 'Safe Transaction Service' : esc(r.safeState.source)}; this report does not independently validate every API confirmation.` : 'Signer and threshold state was not available; API confirmations are not independently verified here.';
-  const rpc = r.rpc?.kind === 'public' ? `${r.rpc.label}. This is a shared public endpoint; you did not provide an RPC key.` : r.rpc?.label ?? 'RPC provider not reported by this version.';
-  return `<p class="meta"><strong>Transaction fields:</strong> ${esc(source)}. ${stateSource}</p><p class="meta"><strong>Onchain RPC:</strong> ${esc(rpc)}${r.rpc?.kind === 'none' ? '' : ' Its responses are independent of Safe Transaction Service only if you trust this RPC separately.'}</p>${requestStep}${localStep}${contractStep}<p class="meta">A matching hash does not prove the target code, signer approvals, or execution outcome. Review the decoded calls and target bytecode before signing.</p>`;
+  const rpcKind = r.rpc?.kind === 'public' ? 'Shared public RPC' : r.rpc?.kind === 'custom' ? 'Configured RPC' : 'No RPC used';
+  const rpcDetail = r.rpc?.label ?? 'RPC provider not reported by this version.';
+  return `<p class="meta"><strong>Transaction fields:</strong> ${esc(source)}. ${stateSource}</p><p class="meta"><strong>Onchain check:</strong> ${esc(rpcKind)}.${r.rpc?.kind === 'none' ? '' : ' Its responses add another source only if you trust that RPC separately.'}</p><details class="rpc-details"><summary>Which RPC answered?</summary><p>${esc(rpcDetail)}${r.rpc?.kind === 'public' ? '. Shared endpoint; no personal RPC key was provided.' : ''}</p></details>${requestStep}${localStep}${contractStep}<p class="meta">A matching hash does not prove the target code, signer approvals, or execution outcome. Review the decoded calls and target bytecode before signing.</p>`;
 }
 function targetVerificationSummary(r) {
   const checks = r.targetChecks ?? [];
@@ -216,7 +265,7 @@ function targetVerificationSummary(r) {
   const targets = checks.flatMap(check => check.proxy ? [check, check.proxy.implementationCode ?? { status: 'unavailable' }] : [check]);
   if (!targets.length) return { tone: 'unavailable', label: 'Bytecode check unavailable', detail: 'The check ran but returned no target results.' };
   const matched = targets.filter(target => ['verified', 'verified_current'].includes(target.status)).length;
-  const selectorMismatch = targets.some(target => target.abiSelectors?.some(selector => !selector.present));
+  const selectorMismatch = checks.some(check => (check.proxy ? check.proxy.implementationCode : check)?.abiSelectors?.some(selector => !selector.present));
   if (targets.some(target => target.status === 'mismatch')) return { tone: 'fail', label: `Bytecode mismatch · ${matched}/${targets.length} matched`, detail: 'At least one RPC runtime bytecode differs from the verified source. Review before signing.' };
   if (matched !== targets.length) return { tone: 'warning', label: `Bytecode check incomplete · ${matched}/${targets.length} matched`, detail: 'One or more targets or proxy implementations could not be matched with verified source.' };
   if (selectorMismatch) return { tone: 'warning', label: `Bytecode matched, ABI selector mismatch · ${matched}/${targets.length}`, detail: 'At least one decoded function selector is absent from the matching verified ABI. Treat that function label as unconfirmed.' };
@@ -227,8 +276,9 @@ function targetChecksHtml(r, retryNote = '') {
   const checks = r.targetChecks ?? [];
   const summary = targetVerificationSummary(r);
   const rows = checks.map(check => {
-    const proxy = check.proxy ? `<p>ERC-1967 implementation: <span class="mono">${esc(check.proxy.implementation)}</span> · ${esc(check.proxy.implementationCode?.status ?? 'unavailable')}${check.proxy.implementationCode?.bytecodeHash ? ` · <span class="mono">${esc(check.proxy.implementationCode.bytecodeHash)}</span>` : ''}</p>` : '';
-    const abi = check.abiSelectors?.length ? `<p>Selectors in verified ABI: ${check.abiSelectors.map(item => `${esc(item.selector)} ${item.present ? 'yes' : 'no'}`).join(' · ')}</p>` : check.abiWarning ? `<p>${esc(check.abiWarning)}</p>` : '';
+    const proxy = check.proxy ? `<p>${esc(check.proxy.standard ?? 'ERC-1967')} implementation: <span class="mono">${esc(check.proxy.implementation)}</span> · ${esc(check.proxy.implementationCode?.status ?? 'unavailable')}${check.proxy.implementationCode?.bytecodeHash ? ` · <span class="mono">${esc(check.proxy.implementationCode.bytecodeHash)}</span>` : ''}</p>` : '';
+    const effective = check.proxy ? check.proxy.implementationCode : check;
+    const abi = effective?.abiSelectors?.length ? `<p>Selectors in verified ${check.proxy ? 'implementation' : 'target'} ABI: ${effective.abiSelectors.map(item => `${esc(item.selector)} ${item.present ? 'yes' : 'no'}`).join(' · ')}</p>` : effective?.abiWarning ? `<p>${esc(effective.abiWarning)}</p>` : '';
     const badge = check.status === 'verified_current' ? '<span class="pill verified_current">Current code matched</span>' : pill(check.status);
     const plainResult = check.status === 'verified_current' ? 'Current code matches verified source. Code at execution time was not checked.' : check.status === 'verified' ? 'Code at the inspected block matches verified source.' : check.status === 'mismatch' ? 'Verified source and onchain bytecode differ. Stop and investigate.' : check.reason;
     const technical = `<details><summary>Technical evidence</summary><p>${esc(check.reason)} · block ${esc(check.blockTag)}${check.bytecodeHash ? `<br>Runtime bytecode hash: <span class="mono">${esc(check.bytecodeHash)}</span>` : ''}</p>${abi}${proxy}</details>`;
@@ -257,11 +307,11 @@ function reportHtml(r, retryNote = '') {
     ? `<div class="notice" style="margin:16px 28px 0"><strong>Verified from ${esc(r.network)} onchain execution</strong> · block ${esc(r.evidence.blockNumber)}${r.evidence.blockTime ? ` · ${esc(r.evidence.blockTime)}` : ''}<br>Execution transaction: <span class="mono">${esc(r.evidence.executionHash)}</span>. ${r.evidence.discoveredBy === 'etherscan_index' ? 'Located through an indexed Safe event. ' : ''}The call graph comes from its execTransaction calldata. State changes below require a separate trace or simulation.</div>`
     : r.evidence?.source === 'bundled_example'
       ? `<div class="notice demo-notice"><strong>Saved PoS Council example · decoded locally</strong><br>This is public transaction data bundled with the app, not a fresh RPC or Safe Service result. <a href="https://etherscan.io/tx/${esc(r.evidence.executionHash)}" target="_blank" rel="noopener noreferrer">View the Ethereum execution ↗</a> Use your own hash and a live lookup for an actual review.</div>`
-    : ['safe_api', 'safe_gateway'].includes(r.evidence?.source)
-      ? `<div class="notice" style="margin:16px 28px 0"><strong>Fetched live from ${r.evidence.source === 'safe_api' ? 'Safe Transaction Service' : 'Safe Client Gateway'}</strong> · ${esc(r.evidence.retrievedAt)}<br>The Safe address, nonce, target and calldata came from this source. The EIP-712 hash is recalculated locally; check the RPC result and any limitations below.</div>`
+    : ['safe_api', 'safe_api_untrusted', 'safe_gateway'].includes(r.evidence?.source)
+      ? `<div class="notice" style="margin:16px 28px 0"><strong>Fetched live from ${r.evidence.source === 'safe_api_untrusted' ? 'Safe Transaction Service (unsigned record)' : r.evidence.source === 'safe_api' ? 'Safe Transaction Service' : 'Safe Client Gateway'}</strong> · ${esc(r.evidence.retrievedAt)}<br>The Safe address, nonce, target and calldata came from this source. The EIP-712 hash is recalculated locally; check the RPC result and any limitations below.</div>`
       : '';
   const actionLabels = new Map(r.actions.map(action => [action.path, action.label]));
-  const flow = `<div class="flow-map"><div class="flow-origin"><span class="flow-kind">Safe transaction</span><strong>Nonce ${esc(tx.nonce)}</strong><span class="mono">${esc(tx.safe)}</span></div><ul class="flow-root">${flowHtml(r.call, '1', actionLabels)}</ul></div>`;
+  const flow = `<div class="flow-map"><div class="flow-origin"><span class="flow-kind">Safe transaction</span><strong>Nonce ${esc(tx.nonce)}</strong><span class="mono">${esc(tx.safe)}</span></div><ul class="flow-root">${flowHtml(r.call, '1', actionLabels)}</ul></div><details class="graph-extra"><summary>Explore this call tree as an interactive graph</summary><div class="graph-shell"><div class="graph-top"><strong>Interactive call graph</strong><span>Drag to pan · scroll or pinch to zoom · select a node</span></div><div class="call-graph" role="img" aria-label="Interactive graph of calls encoded in this Safe transaction"></div><div class="graph-selection" aria-live="polite"></div></div></details>`;
   const actionSummary = r.risk.actionRatings.map(action => `<div class="planned-action">${pill(action.level)}<div><span class="action-stage">${esc(action.stage === 'schedule' ? 'Encoded to schedule' : 'Encoded to call')}</span><strong>${esc(action.label)}</strong><p>${esc(action.reason)}</p></div></div>`).join('');
   const riskReasons = r.risk.reasons.filter(reason => !/^(Called|Scheduled):/.test(reason.message)).map(reason => `<div class="semantic-reason">${pill(reason.level)}<span>${esc(reason.message)}</span></div>`).join('');
   const confidence = r.confidence ? `<div class="confidence confidence-${esc(r.confidence.color)}"><span class="confidence-number">${esc(r.confidence.score)}<small>/10</small></span><div><strong>Evidence confidence</strong><p>How much of this report could be checked. This is not a safety score.</p>${r.confidence.gaps?.length ? `<strong>${esc(10 - r.confidence.score)} evidence points still missing</strong><ul>${r.confidence.gaps.map(gap => `<li><strong>−${esc(gap.points)}</strong> ${esc(gap.label)}</li>`).join('')}</ul>` : '<p>All scored checks completed. Review the limitations below.</p>'}<details><summary>How this was scored</summary><ul>${r.confidence.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details></div></div>` : '';
@@ -271,16 +321,32 @@ function reportHtml(r, retryNote = '') {
   const emptyEffects = r.simulation?.unavailable ? 'Simulation was unavailable, so no state change was measured.' : r.simulation && r.simulation.stateDiffAvailable === false ? 'The simulation provider did not return a storage diff. Absence of a diff is not evidence of no change.' : r.simulation ? 'The simulation returned no complete storage, balance, or asset changes in its response.' : 'No simulation or execution trace has measured these changes yet.';
   const incompleteBalances = r.simulation?.balanceDataIncompleteCount ? `<div class="notice">Tenderly returned ${esc(r.simulation.balanceDataIncompleteCount)} balance-change record(s) without complete before/after values. They are omitted here; inspect the Tenderly trace for details.</div>` : '';
   const effects = `${incompleteBalances}${r.effects.length ? r.effects.map(effectHtml).join('') : `<div class="state-empty"><strong>No measured state changes available</strong><p>${esc(emptyEffects)}</p></div>`}`;
-  const sim = r.simulation ? r.simulation.unavailable ? `<div class="notice">Simulation unavailable: ${esc(r.simulation.unavailable)}</div>` : `<div class="item">${pill(r.simulation.success === true ? 'pass' : r.simulation.success === false ? 'fail' : 'unavailable')}<div class="item-content"><strong>${r.simulation.success === true ? 'Safe execution succeeded in simulation' : r.simulation.success === false ? 'Safe execution failed in simulation' : 'EVM completed; Safe inner result unverified'}</strong><p>Block: ${esc(r.simulation.blockNumber)}${r.simulation.error ? ` · ${esc(r.simulation.error)}` : ''}${!publicFacing && r.simulation.url ? ` · <a href="${esc(r.simulation.url)}" target="_blank" rel="noopener noreferrer">Open Tenderly trace (project access required)</a>` : ''}</p><p>The measured effects shown here come from Tenderly’s API response. A dashboard trace saved in the service’s project is not publicly accessible unless its owner enables sharing.</p></div></div>` : '<p class="meta">Simulation has not been run for this transaction.</p>';
+  const sim = r.simulation ? r.simulation.unavailable ? `<div class="notice">Simulation unavailable: ${esc(r.simulation.unavailable)}</div>` : `<div class="item">${pill(r.simulation.mode === 'conditional_threshold_override' ? 'warning' : r.simulation.success === true ? 'pass' : r.simulation.success === false ? 'fail' : 'unavailable')}<div class="item-content"><strong>${r.simulation.mode === 'conditional_threshold_override' ? 'Conditional preview with temporary 1-of-N threshold' : r.simulation.success === true ? 'Safe execution succeeded in simulation' : r.simulation.success === false ? 'Safe execution failed in simulation' : 'EVM completed; Safe inner result unverified'}</strong><p>Block: ${esc(r.simulation.blockNumber)}${r.simulation.error ? ` · ${esc(r.simulation.error)}` : ''}${!publicFacing && r.simulation.url ? ` · <a href="${esc(r.simulation.url)}" target="_blank" rel="noopener noreferrer">Open Tenderly trace (project access required)</a>` : ''}</p><p>${r.simulation.mode === 'conditional_threshold_override' ? 'Tenderly temporarily treated the Safe as 1-of-N and simulated an approved-hash signature from a verified owner. This previews one possible call path, not whether the actual owners will approve or the real Safe execution will pass. The override exists only inside this simulation.' : 'The measured effects shown here come from Tenderly’s API response.'} A dashboard trace saved in the service’s project is not publicly accessible unless its owner enables sharing.</p></div></div>` : '<p class="meta">Simulation has not been run for this transaction.</p>';
   const simulateAction = publicMode ? '<p class="meta">Simulation is available in the local tool with your own Tenderly credentials.</p>' : communityMode && !simulationEnabled ? '<p class="meta">Simulation is not configured for this public service. Decode and hash checks remain available.</p>' : `<div class="simulation-action"><button type="button" id="run-simulation">${r.simulation ? 'Run simulation again' : 'Run simulation and inspect state changes'}</button><p>Sends this transaction's calldata and signatures to the configured Tenderly project. The saved simulation covers one chain state and execution path.</p></div>`;
   const bytecodeStatus = targetVerificationSummary(r);
-  return `<div class="report-header"><div class="safe-identity"><span>SAFE MULTISIG · ${esc(r.network)}</span><a href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${safeUiKnown ? 'Open Safe' : 'Open contract'} ${esc(tx.safe)} on ${safeUiKnown ? 'Safe Global' : 'KatanaScan'}">${esc(tx.safe)} ↗</a><small>${safeUiKnown ? 'Open in Safe' : 'Open in KatanaScan · Safe web UI availability not verified'}</small></div><div class="report-heading">${pill(r.status)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(tx.isExecuted ? 'Executed transaction' : 'Pending proposal')} on ${esc(r.network)}</span></div><div class="hash-line mono">${esc(r.hash)}</div><div class="header-verification">${bytecodeStatus.tone === 'partial' ? '<span class="pill partial">Past code unchecked</span>' : pill(bytecodeStatus.tone)}<span>${esc(bytecodeStatus.label)}</span></div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('1 · Evidence and hash checks', verificationHtml(r))}${section('2 · What this transaction can do', `${riskHtml}${flow}<details class="technical"><summary>Technical details: decoded arguments and raw calldata for this call graph</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`)}${section('3 · Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('4 · Target bytecode and verified source', targetChecksHtml(r, retryNote))}${section('5 · Measured effects and simulation', `${effects}${checks}${sim}${simulateAction}`)}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', tx.isExecuted ? (tx.isSuccessful ? 'Executed successfully' : 'Executed, failed') : 'Offchain proposal')}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}`;
+  const stage = tx.isExecuted ? 'Executed transaction' : r.evidence?.source === 'safe_api_untrusted' ? 'Unsigned record · no approval verified' : 'Pending proposal';
+  return `<div class="report-header"><div class="safe-identity"><span>SAFE MULTISIG · ${esc(r.network)}</span><a href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${safeUiKnown ? 'Open Safe' : 'Open contract'} ${esc(tx.safe)} on ${safeUiKnown ? 'Safe Global' : 'KatanaScan'}">${esc(tx.safe)} ↗</a><small>${safeUiKnown ? 'Open in Safe' : 'Open in KatanaScan · Safe web UI availability not verified'}</small></div><div class="report-heading">${pill(r.status)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(stage)} on ${esc(r.network)}</span></div><div class="hash-line mono">${esc(r.hash)}</div><div class="header-verification">${bytecodeStatus.tone === 'partial' ? '<span class="pill partial">Past code unchecked</span>' : pill(bytecodeStatus.tone)}<span>${esc(bytecodeStatus.label)}</span></div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('1 · Evidence and hash checks', verificationHtml(r))}${section('2 · What this transaction can do', `${riskHtml}${flow}<details class="technical"><summary>Technical details: decoded arguments and raw calldata for this call graph</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`)}${section('3 · Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('4 · Target bytecode and verified source', targetChecksHtml(r, retryNote))}${section('5 · Measured effects and simulation', `${effects}${checks}${sim}${simulateAction}`)}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', tx.isExecuted ? (tx.isSuccessful ? 'Executed successfully' : 'Executed, failed') : r.evidence?.source === 'safe_api_untrusted' ? 'Unsigned record · no approval verified' : 'Offchain proposal')}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}`;
 }
 function queueHtml(result) {
-  const title = result.scope === 'history' ? 'Executed history' : result.scope === 'both' ? 'Pending and executed' : 'Pending proposals';
+  const title = result.availability === 'absent' ? 'No Safe contract on this network' : result.scope === 'history' ? 'Executed history' : result.scope === 'both' ? 'Pending and executed' : 'Queued proposals';
   const notices = (result.warnings ?? []).map(warning => `<div class="notice" style="margin:14px 28px">${esc(warning)}</div>`).join('');
   const choices = result.networks?.length > 1 ? `<div class="network-choices"><strong>Choose a network</strong><div>${result.networks.map(chain => `<button type="button" data-network="${esc(chain)}">${esc(chain)}</button>`).join('')}</div></div>` : '';
-  return `<div class="queue-header"><h2>${title}</h2><div class="meta mono">${esc(result.safe)} · ${esc(result.networks?.join(', ') ?? result.network)} · ${result.reports.length} shown · ${esc(result.source)}${result.truncated ? ' · more may exist' : ''}</div></div>${choices}${notices}${result.reports.length ? result.reports.map((r, i) => `<div class="queue-row" data-index="${i}" role="button" tabindex="0">${pill(r.risk.reviewPriority)}<strong class="mono">${esc(r.hash)}</strong><p>${r.transaction.isExecuted ? 'Executed' : 'Pending'} · ${esc(r.network)} · Safe ${esc(r.transaction.safe)} · Nonce ${esc(r.transaction.nonce)} · ${esc(r.actions.map(action => action.label).join('; ') || r.call.method || r.call.selector)} · ${esc(r.risk.impactLevel)} impact</p></div>`).join('') : result.availability === 'unavailable' ? `<div class="empty"><h2>Queue source unavailable</h2><p>${result.source === 'tenderly_storage' ? 'The monitor JSON did not contain complete transaction details for this filter.' : 'Neither Safe Transaction Service nor Safe Client Gateway returned the offchain proposals. The notice above shows both responses.'}</p></div>` : `<div class="empty"><h2>No ${esc(title.toLowerCase())} in the returned range</h2><p>Check the coverage notice above before interpreting an empty list.</p></div>`}`;
+  const currentNonce = /^\d+$/.test(String(result.safeState?.nonce ?? '')) ? BigInt(result.safeState.nonce) : null;
+  const rows = result.reports.map((report, index) => ({ report, index }));
+  const obsolete = currentNonce == null || result.scope === 'history' ? [] : rows.filter(({ report: r }) => !r.transaction.isExecuted && /^\d+$/.test(String(r.transaction.nonce)) && BigInt(r.transaction.nonce) < currentNonce);
+  const obsoleteIndexes = new Set(obsolete.map(row => row.index));
+  const actionable = rows.filter(row => !obsoleteIndexes.has(row.index));
+  const rowHtml = ({ report: r, index }, stale = false) => {
+    const state = stale ? 'Obsolete nonce · cannot execute now' : r.evidence?.source === 'safe_api_untrusted' ? 'Unsigned and untrusted' : r.transaction.isExecuted ? 'Executed' : 'Unexecuted';
+    const signatures = !r.transaction.isExecuted && result.safeState?.threshold != null ? ` · ${r.transaction.confirmations?.length ?? 0}/${result.safeState.threshold} confirmations reported by service` : '';
+    return `<div class="queue-row${stale ? ' queue-row-obsolete' : ''}" data-index="${index}" role="button" tabindex="0">${pill(r.risk.reviewPriority)}<strong class="mono">${esc(r.hash)}</strong><p>${state} · ${esc(r.network)} · Nonce ${esc(r.transaction.nonce)}${signatures} · ${esc(r.actions.map(action => action.label).join('; ') || r.call.method || r.call.selector)} · ${esc(r.risk.impactLevel)} potential impact</p></div>`;
+  };
+  const count = obsolete.length ? `${actionable.length} at or above reported Safe nonce ${currentNonce} · ${obsolete.length} obsolete in this page` : `${rows.length} shown`;
+  const header = `<div class="queue-header"><h2>${title}</h2><div class="meta mono">${esc(result.safe)} · ${esc(result.networks?.join(', ') ?? result.network)} · ${count} · ${esc(result.source === 'safe_api_untrusted' ? 'Safe Transaction Service · unsigned record' : result.source)}${result.truncated ? ' · more may exist' : ''}</div></div>`;
+  const explanation = rows.length && result.scope !== 'history' ? `<div class="queue-explanation">“Unexecuted” means the source has no execution recorded. A nonce below the reported current Safe nonce cannot execute if that nonce is accurate; confirm it independently onchain. Priority labels describe potential impact if executed, not whether a proposal is malicious.</div>` : '';
+  const empty = result.availability === 'absent' ? `<div class="empty"><h2>No Safe contract on ${esc(result.network)}</h2><p>The selected RPC found no bytecode at this address on this network. Check the chain prefix in your Safe URL; this tool will not silently switch chains.</p></div>` : result.availability === 'unavailable' ? `<div class="empty"><h2>Queue source unavailable</h2><p>${result.source === 'tenderly_storage' ? 'The monitor JSON did not contain complete transaction details for this filter.' : 'Neither Safe Transaction Service nor Safe Client Gateway returned the offchain proposals. The notice above shows both responses.'}</p></div>` : `<div class="empty"><h2>No ${esc(title.toLowerCase())} in the returned range</h2><p>Check the coverage notice above before interpreting an empty list.</p></div>`;
+  const staleSection = obsolete.length ? `<details class="obsolete-list"><summary>${obsolete.length} obsolete proposals in this page · nonce below ${currentNonce}</summary><p>Kept for historical review. They are still marked unexecuted by the service, but their nonce is below the current nonce reported by the same source.</p>${obsolete.map(row => rowHtml(row, true)).join('')}</details>` : '';
+  return `${header}${choices}${notices}${explanation}${actionable.map(row => rowHtml(row)).join('')}${!actionable.length && obsolete.length ? '<div class="queue-explanation">No proposals at or above the current Safe nonce were returned.</div>' : ''}${staleSection}${!rows.length ? empty : ''}`;
 }
 function builderHtml(r) {
   const actions = r.risk.actionRatings.map(action => `<div class="semantic-action">${pill(action.level)}<div><strong>${action.stage === 'schedule' ? 'Would schedule' : 'Would execute'}: ${esc(action.label)}</strong><p>${esc(action.reason)}<br><span class="mono">${esc(action.to)}</span></p></div></div>`).join('');
@@ -296,6 +362,7 @@ function showTransactionReport(result, retryNote = '') {
   activeReportEvidence = result.evidence ?? null;
   activeReportTargetChecks = result.targetChecks ?? null;
   report.innerHTML = reportHtml(result, retryNote);
+  showCallGraph(result);
   report.querySelector('#run-simulation')?.addEventListener('click', event => {
     event.currentTarget.disabled = true;
     inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, simulate: true });
@@ -327,7 +394,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
     document.body.classList.add('has-report');
     if (result.kind === 'builder') { report.innerHTML = builderHtml(result); status.textContent = 'Builder JSON decoded'; }
     else if (result.kind === 'queue') {
-      if (result.availability === 'unavailable') { report.innerHTML = queueHtml(result); status.textContent = 'Queue source unavailable'; return; }
+      if (result.availability === 'unavailable' || result.availability === 'absent') { report.innerHTML = queueHtml(result); status.textContent = result.availability === 'absent' ? 'No Safe contract on selected network' : 'Queue source unavailable'; return; }
       let exitNotice = '';
       if (silent) {
         const current = new Map(result.reports.map(r => [r.hash, `${r.transaction.confirmations?.length ?? 0}:${r.status}`]));
@@ -387,20 +454,33 @@ function inspectSafe(selectedScope) {
 }
 loadPending.addEventListener('click', () => inspectSafe('pending'));
 loadHistory.addEventListener('click', () => inspectSafe('history'));
-watch.addEventListener('change', () => { if (publicFacing) { watch.checked = false; return; } clearInterval(timer); timer = null; watchInput = null; if (watch.checked) { scope.value = 'pending'; watchInput = safeAddress.value.trim() || input.value.trim(); inspect({ overrideInput: watchInput }); timer = setInterval(() => inspect({ silent: true, overrideInput: watchInput }), 30000); } });
+watch.addEventListener('change', () => { if (publicFacing || !loopbackHost) { watch.checked = false; return; } clearInterval(timer); timer = null; watchInput = null; if (watch.checked) { scope.value = 'pending'; watchInput = safeAddress.value.trim() || input.value.trim(); inspect({ overrideInput: watchInput }); timer = setInterval(() => inspect({ silent: true, overrideInput: watchInput }), 30000); } });
 scope.addEventListener('change', () => { if (watch.checked && scope.value !== 'pending') { watch.checked = false; clearInterval(timer); timer = null; } });
-jsonFile.addEventListener('change', async () => {
-  const file = jsonFile.files?.[0];
+jsonChoose.addEventListener('click', () => jsonFile.click());
+async function importJsonFile(file) {
   if (!file) return;
   try {
-    if (file.size > (publicFacing ? 262144 : 5000000)) throw new Error(`JSON file exceeds ${publicFacing ? '256 KB' : '5 MB'}`);
-    const parsed = JSON.parse(await file.text());
+    const limit = publicFacing ? 262144 : 5000000;
+    if (file.size > limit) throw new Error(`JSON file exceeds ${publicFacing ? '256 KB' : '5 MB'}`);
+    const contents = await file.text();
+    if (new TextEncoder().encode(contents).length > limit) throw new Error(`JSON file exceeds ${publicFacing ? '256 KB' : '5 MB'}`);
+    const parsed = JSON.parse(contents);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Expected a JSON object');
     importedJson = parsed;
     inputMode.value = 'json';
-    input.value = `Imported ${file.name}`;
+    input.value = `Imported ${file.name.slice(0, 120)}`;
+    jsonDropHint.textContent = file.name.slice(0, 120);
     updateWizard();
     if (!safeAddress.value && parsed.meta?.createdFromSafeAddress) safeAddress.value = parsed.meta.createdFromSafeAddress;
-    status.textContent = `Imported ${file.name}. Decoding…`;
+    status.textContent = `Imported ${file.name.slice(0, 120)}. Decoding…`;
     await inspect();
   } catch (error) { status.textContent = `Could not import JSON: ${error.message}`; }
+}
+jsonFile.addEventListener('change', () => importJsonFile(jsonFile.files?.[0]));
+for (const name of ['dragenter', 'dragover']) jsonDrop.addEventListener(name, event => { event.preventDefault(); event.stopPropagation(); jsonDrop.classList.add('dragging'); });
+jsonDrop.addEventListener('dragleave', event => { event.preventDefault(); event.stopPropagation(); jsonDrop.classList.remove('dragging'); });
+jsonDrop.addEventListener('drop', event => {
+  event.preventDefault(); event.stopPropagation(); jsonDrop.classList.remove('dragging');
+  if (event.dataTransfer?.files?.length !== 1) { status.textContent = 'Choose exactly one JSON file'; return; }
+  importJsonFile(event.dataTransfer.files[0]);
 });

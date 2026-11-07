@@ -2,7 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Interface, id } from 'ethers';
 import { calculateHash, normalizeTransaction } from '../src/analyze.mjs';
-import { analyzeExecutionHash, discoverExecutionNetworks, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from '../src/onchain.mjs';
+import { analyzeExecutionHash, contractPresence, discoverExecutionNetworks, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from '../src/onchain.mjs';
+
+test('a selected chain distinguishes an absent Safe contract from an unavailable RPC', async () => {
+  const request = async (_url, options) => {
+    const method = JSON.parse(options.body).method;
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: method === 'eth_chainId' ? '0xb67d2' : '0x' }), { status: 200 });
+  };
+  assert.equal(await contractPresence('0x1111111111111111111111111111111111111111', 'kat', { fetchImpl: request }), 'absent');
+  assert.equal(await contractPresence('0x1111111111111111111111111111111111111111', 'eth', { fetchImpl: request }), 'unknown');
+});
 
 test('RPC provenance names public defaults but never exposes a configured key', () => {
   const previous = process.env.RPC_URL_ETH;

@@ -31,7 +31,7 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
     const coverage = await fetch(`http://127.0.0.1:${server.address().port}/api/network-coverage`);
     assert.equal(coverage.status, 200);
     const snapshot = await coverage.json();
-    assert.equal(snapshot.networks.length, 11);
+    assert.equal(snapshot.networks.length, 13);
     assert.equal(snapshot.networks.some(row => row.network === 'zkevm'), false);
     assert.equal(snapshot.networks.find(row => row.network === 'kat').pending, 'available');
     assert.equal(snapshot.networks.find(row => row.network === 'xlayer').rpc, 'available');
@@ -45,6 +45,10 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
     const worker = await (await fetch(`${origin}/sw.js`)).text();
     assert.match(worker, /event\.request\.mode !== 'navigate'/);
     assert.match(worker, /fetch\(event\.request\)/);
+    const graphLibrary = await fetch(`${origin}/web/vendor/cytoscape.min.js`);
+    assert.equal(graphLibrary.status, 200);
+    assert.match(graphLibrary.headers.get('content-type'), /text\/javascript/);
+    assert.match((await graphLibrary.text()).slice(0, 1000), /cytoscape/i);
     const offline = await (await fetch(`${origin}/web/offline.html`)).text();
     assert.match(offline, /No transaction report was stored/);
     for (const size of [192, 512]) {

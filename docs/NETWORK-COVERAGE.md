@@ -29,10 +29,12 @@ One separate end-to-end sample used the public [Polygon PoS Council Safe](https:
 
 For another EVM chain ID, the tool can ask Safe Client Gateway for the selected chain and recompute the Safe hash if complete transaction fields are returned. Such chains are **not** part of this probe or auto-discovery and must not be shown as covered until tested.
 
-Run the bounded probe again with the current eleven-network list (at most 33 Safe requests) with:
+Run the bounded probe again with the current thirteen-network list (at most 39 Safe requests) with the command below. Some of those networks are only configured for onchain or JSON inspection; a failed Safe endpoint must remain marked unavailable rather than counted as covered.
 
 ```sh
 npm run check:networks -- --live --snapshot web/network-coverage.json
 ```
 
 Safe counts [one API unit per HTTP request](https://docs.safe.global/core-api/api-authentication). The probe reads `X-RateLimit-Remaining`, never retries a 429, and does not write credentials to the snapshot.
+
+Immutable zkEVM (chain 13371) was added as an explicit onchain/JSON integration after an `eth_chainId` response of `0x343b` from its official public RPC on 2026-11-07. Safe proposal indexing and queue/history endpoints were not verified for this chain; do not treat it as full Safe Transaction Service coverage. Polygon Amoy remains JSON/configurable-RPC only until a working service and RPC probe succeeds.

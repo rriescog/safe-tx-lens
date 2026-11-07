@@ -65,6 +65,12 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
         } else if (Array.isArray(source.abi) && entry.selectors.size) {
           try {
             const iface = new Interface(source.abi);
+            // SafeProxy forwards calls through its singleton in storage slot 0.
+            // Its own verified ABI contains masterCopy(), not Safe functions.
+            // Some verified SafeProxy builds expose only constructor+fallback
+            // in their ABI, while implementing masterCopy() in assembly.
+            const safeProxyFallback = source.abi.some(item => item?.type === 'constructor' && item.inputs?.some(input => input.name === '_singleton')) && source.abi.some(item => item?.type === 'fallback');
+            result.safeProxyCandidate = Boolean(iface.getFunction('masterCopy()')) || (safeProxyFallback && matchedBytecode.toLowerCase().includes('a619486e'));
             if (source.abi.length && iface.fragments.length === 0) result.abiWarning = 'Verified ABI could not be parsed';
             else {
               result.abiSelectors = [...entry.selectors].map(selector => ({ selector, present: Boolean(iface.getFunction(selector)) }));
@@ -82,8 +88,9 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
       }
     }
   } catch (error) { result.reason = `Verified source lookup unavailable: ${error.message}`; }
-  // ERC-1967 is only one proxy standard. A zero slot is not proof of a direct
-  // contract; other proxies and diamonds must remain explicitly unresolved.
+  // ERC-1967 is only one proxy standard. Check SafeProxy's slot-0 singleton
+  // only when the verified outer ABI exposes masterCopy(), avoiding a random
+  // slot-0 value being presented as a proxy implementation.
   if (depth === 0) {
     try {
       const slot = await provider.getStorage(entry.address, IMPLEMENTATION_SLOT, effectiveBlockTag);
@@ -93,6 +100,16 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
         result.proxy.implementationCode = await inspectOne({ address: result.proxy.implementation, selectors: entry.selectors, operations: entry.operations }, provider, network, effectiveBlockTag, lookup, 1, Boolean(base.historicalUnavailable));
       }
     } catch (error) { result.proxyCheck = `ERC-1967 slot unavailable: ${error.shortMessage ?? error.message}`; }
+    if (!result.proxy && result.safeProxyCandidate) {
+      try {
+        const slot = await provider.getStorage(entry.address, 0, effectiveBlockTag);
+        const singleton = `0x${slot.slice(-40)}`;
+        if (isAddress(singleton) && !/^0x0{40}$/i.test(singleton)) {
+          result.proxy = { standard: 'SafeProxy', implementation: getAddress(singleton) };
+          result.proxy.implementationCode = await inspectOne({ address: result.proxy.implementation, selectors: entry.selectors, operations: entry.operations }, provider, network, effectiveBlockTag, lookup, 1, Boolean(base.historicalUnavailable));
+        }
+      } catch (error) { result.proxyCheck = `Safe singleton slot unavailable: ${error.shortMessage ?? error.message}`; }
+    }
   }
   return result;
 }

@@ -18,15 +18,88 @@ test('recommended projects appear only in the dark footer', async () => {
   assert.match(footer, /Other recommended projects/);
   assert.match(footer, /github\.com\/pcaversaccio\/safe-tx-hashes-util/);
   assert.match(css, /footer\.site-footer\{[^}]*background:#102734/);
+  assert.match(main, /Free independent tx review/);
+  assert.match(main, /Before signing · while queued · after execution/);
+  assert.match(main, /Ask about sponsorship on X/);
+  assert.match(main, /Help keep reviews free/);
+  assert.match(main, /hosting, bandwidth, monitoring/);
+  assert.match(main, /tier-diamond[\s\S]*tier-gold[\s\S]*tier-silver[\s\S]*tier-bronze/);
+  assert.match(main, /Infrastructure support also counts/);
+  assert.doesNotMatch(main, /data-network="sep"/);
+  assert.match(main, /Polygon Amoy · JSON; RPC configurable/);
+  assert.match(main, /Choose JSON file/);
+  assert.match(main, /drag and drop one JSON file/);
+  assert.match(footer, /All rights reserved except as granted under the MIT License/);
+  assert.match(main, /deploy your own instance once the source is public/);
+  assert.match(main, /report it on GitHub/);
+  assert.match(html, /\/web\/vendor\/cytoscape\.min\.js/);
+  assert.match(footer, /Sponsor inquiries on X/);
+  assert.doesNotMatch(main, /github\.com\/rriescog/);
 });
 
-function ui({ publicMode = false, search = '' } = {}) {
+test('call graph builds a Safe root and call edges while the text path stays available', async () => {
+  const page = ui();
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const review = await analyze(tx, 'eth', { fetchState: false });
+  review.call.children = [{ ...review.call, to: tx.safe, operation: 1, children: [] }];
+  page.context.sample = review;
+  const graph = page.evaluate('graphElements(sample)');
+  assert.equal(graph.elements.length, 5);
+  assert.equal(graph.elements[0].data.id, 'safe');
+  assert.equal(graph.elements[2].data.source, 'safe');
+  assert.equal(graph.elements[4].data.source, '1');
+  assert.equal(graph.elements[3].data.kind, 'delegatecall');
+  const reportHtmlValue = page.evaluate('reportHtml(sample)');
+  assert.match(reportHtmlValue, /Explore this call tree as an interactive graph/);
+  assert.ok(reportHtmlValue.indexOf('class="flow-map"') < reportHtmlValue.indexOf('class="graph-extra"'));
+});
+
+test('queue separates stale unexecuted records from the current nonce', async () => {
+  const page = ui();
+  const base = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', value: '0', data: '0x', operation: 0 };
+  const old = await analyze({ ...base, nonce: '7' }, 'eth', { fetchState: false });
+  const current = await analyze({ ...base, nonce: '8' }, 'eth', { fetchState: false });
+  page.context.sample = { kind: 'queue', scope: 'pending', safe: base.safe, network: 'eth', source: 'safe_api', availability: 'available', safeState: { nonce: '8', threshold: 2 }, reports: [old, current] };
+  const html = page.evaluate('queueHtml(sample)');
+  assert.match(html, /1 at or above reported Safe nonce 8 · 1 obsolete in this page/);
+  assert.match(html, /1 obsolete proposals in this page · nonce below 8/);
+  assert.match(html, /Obsolete nonce · cannot execute now/);
+  assert.match(html, /data-index="0"/);
+  assert.match(html, /data-index="1"/);
+  assert.match(html, /potential impact if executed, not whether a proposal is malicious/);
+});
+
+test('an undeployed Safe URL shows a chain-specific explanation', () => {
+  const page = ui();
+  page.context.sample = { kind: 'queue', scope: 'pending', safe: '0x1111111111111111111111111111111111111111', network: 'kat', source: 'unavailable', availability: 'absent', reports: [], warnings: ['No contract is deployed on kat'] };
+  const html = page.evaluate('queueHtml(sample)');
+  assert.match(html, /No Safe contract on kat/);
+  assert.match(html, /will not silently switch chains/);
+  assert.doesNotMatch(html, /Queue source unavailable/);
+});
+
+test('unsigned 1/1 Safe records are visibly distinguished from approved proposals', async () => {
+  const page = ui();
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: 0, value: '0', data: '0x', operation: 0 };
+  const report = await analyze(tx, 'eth', { fetchState: false, verifyTargets: false });
+  report.evidence = { source: 'safe_api_untrusted', retrievedAt: 'now' };
+  const queue = { kind: 'queue', scope: 'pending', source: 'safe_api_untrusted', network: 'eth', safe: tx.safe, reports: [report], warnings: ['Unsigned 1/1 record'] };
+  page.context.sample = queue;
+  assert.match(page.evaluate('queueHtml(sample)'), /Unsigned and untrusted/);
+  assert.match(page.evaluate('queueHtml(sample)'), /Unsigned 1\/1 record/);
+  page.context.sample = report;
+  assert.match(page.evaluate('verificationHtml(sample)'), /unsigned, untrusted record/);
+  assert.match(page.evaluate('reportHtml(sample)'), /Fetched live from Safe Transaction Service \(unsigned record\)/);
+  assert.match(page.evaluate('reportHtml(sample)'), /Unsigned record · no approval verified/);
+});
+
+function ui({ publicMode = false, search = '', hostname = '127.0.0.1' } = {}) {
   const elements = new Map();
   const selectors = new Map();
   const make = () => ({ value: '', textContent: '', innerHTML: '', checked: false, disabled: false, dataset: {}, classList: { add() {}, remove() {} }, addEventListener(name, handler) { this[`on_${name}`] = handler; }, querySelector() { return make(); }, querySelectorAll() { return []; }, insertAdjacentHTML(_position, value) { this.innerHTML += value; }, focus() { this.focused = true; } });
   const document = { body: make(), getElementById(id) { if (!elements.has(id)) elements.set(id, make()); return elements.get(id); }, querySelector(selector) { if (!selectors.has(selector)) selectors.set(selector, make()); return selectors.get(selector); } };
   document.body.dataset.publicMode = String(publicMode);
-  const context = vm.createContext({ document, URL, location: { search }, setInterval: () => 1, clearInterval: () => {}, console, fetch: async () => { throw new Error('Unexpected network call'); } });
+  const context = vm.createContext({ document, URL, TextEncoder, location: { search, hostname }, setInterval: () => 1, clearInterval: () => {}, console, fetch: async () => { throw new Error('Unexpected network call'); } });
   vm.runInContext(source, context, { filename: sourcePath });
   return { context, elements, selectors, document, evaluate: expression => vm.runInContext(expression, context) };
 }
@@ -48,6 +121,14 @@ test('public UI disables wallet monitoring and labels its owner-key limitations'
   page.elements.get('watch').on_change();
   assert.equal(page.elements.get('watch').checked, false);
   assert.doesNotMatch(page.evaluate('targetChecksHtml({})'), /id="verify-targets"/);
+});
+
+test('monitoring is hidden on a non-loopback hostname even in local mode', () => {
+  const page = ui({ hostname: 'example.org' });
+  assert.equal(page.selectors.get('.watch-control').hidden, true);
+  page.evaluate('watch.checked = true');
+  page.elements.get('watch').on_change();
+  assert.equal(page.elements.get('watch').checked, false);
 });
 
 test('deep link prefills only a valid transaction hash without fetching data', () => {
@@ -124,7 +205,7 @@ test('bytecode status and RPC provenance distinguish completed, partial, and unr
   const rpc = { checks: [], evidence: {}, transaction: {}, rpc: { kind: 'public', label: 'PublicNode (ethereum.publicnode.com)' } };
   page.context.sample = rpc;
   assert.match(page.evaluate('verificationHtml(sample)'), /PublicNode \(ethereum\.publicnode\.com\)/);
-  assert.match(page.evaluate('verificationHtml(sample)'), /you did not provide an RPC key/);
+  assert.match(page.evaluate('verificationHtml(sample)'), /no personal RPC key was provided/);
   assert.match(page.evaluate('verificationHtml(sample)'), /Not run/);
   page.context.sample = { ...rpc, rpc: { kind: 'configured', label: 'RPC configured for eth' } };
   assert.doesNotMatch(page.evaluate('verificationHtml(sample)'), /provider\.example|secret/);
@@ -314,6 +395,25 @@ test('web buttons select a Safe, import JSON, and reject oversized files', async
   await jsonFile.on_change();
   assert.equal(page.elements.get('safe-address').value, safe);
   assert.match(page.elements.get('input').value, /Imported safe.json/);
+});
+
+test('JSON drop accepts one bounded data file and renders an attacker filename as text', async () => {
+  const page = ui();
+  const drop = page.elements.get('json-drop');
+  const status = page.elements.get('status');
+  let prevented = false;
+  const event = files => ({ preventDefault() { prevented = true; }, stopPropagation() {}, dataTransfer: { files } });
+  drop.on_drop(event([]));
+  assert.equal(prevented, true);
+  assert.match(status.textContent, /exactly one/);
+  const name = '<img src=x onerror=alert(1)>.json';
+  await drop.on_drop(event([{ name, size: 6, text: async () => '"bad"' }]));
+  await new Promise(done => setImmediate(done));
+  assert.match(status.textContent, /Expected a JSON object/);
+  await drop.on_drop(event([{ name, size: 2, text: async () => '{}' }]));
+  await new Promise(done => setImmediate(done));
+  assert.equal(page.elements.get('json-drop-hint').textContent, name);
+  assert.equal(page.elements.get('json-drop-hint').innerHTML, '');
 });
 
 test('watch keeps the execution notice visible when a proposal leaves the queue', async () => {
