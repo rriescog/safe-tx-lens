@@ -20,7 +20,7 @@ function actionImpact(action) {
   if (['transfer', 'transferFrom'].includes(method)) return { score: 75, reason: 'Moves tokens; value and recipient need independent review.' };
   if (/^(retrieveRemaining|withdrawAll|emergencyWithdraw|sweep|sweepToken|rescueTokens|recoverERC20)$/i.test(method ?? '')) return { score: 80, reason: 'Function name suggests a balance recovery or sweep; inspect verified source and token flows before signing.' };
   if (method === 'cleanMapToken') return { score: 80, reason: 'Changes token mapping; verify bridge effects against events and storage.' };
-  if (method === null && action.selector !== '0x') return { score: 75, reason: 'Unknown contract call; its effect cannot be classified from the local ABI.' };
+  if (method === null && action.selector !== '0x') return { score: 75, reason: 'No verified ABI or unambiguous signature decoded this call; its effect remains unknown.' };
   if (method === null) return { score: 45, reason: 'Moves native value or consumes a Safe nonce.' };
   return { score: 50, reason: 'State-changing contract call; inspect target and parameters.' };
 }

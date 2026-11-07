@@ -150,7 +150,7 @@ test('deep link prefills only a valid transaction hash without fetching data', (
   assert.equal(invalid.elements.get('input').value, '');
 });
 
-test('one-click saved example selects Ethereum and opens a locally decoded report', async () => {
+test('one-click saved example selects Ethereum and opens a report from saved fields', async () => {
   const page = ui();
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
   const review = await analyze(tx, 'eth', { fetchState: false });
@@ -165,7 +165,7 @@ test('one-click saved example selects Ethereum and opens a locally decoded repor
   assert.equal(requests[0].url, '/api/demo');
   assert.equal(requests[0].options, undefined);
   assert.match(page.elements.get('report').innerHTML, /Saved PoS Council example/);
-  assert.equal(page.elements.get('status').textContent, 'Saved example decoded locally · no live lookup');
+  assert.equal(page.elements.get('status').textContent, 'Saved example reviewed · no live lookup');
 });
 
 test('verification panel distinguishes supplied data, a user hash, local calculation, and RPC', async () => {

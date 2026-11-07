@@ -8,6 +8,7 @@ import { validateInspectionRequest } from '../src/input-boundary.mjs';
 import { publicSupportConfig } from '../src/support.mjs';
 import { chainId } from '../src/chains.mjs';
 import { assessRisk } from '../src/risk.mjs';
+import { analyze } from '../src/analyze.mjs';
 
 const SAFE = '0x1111111111111111111111111111111111111111';
 const TOKEN = '0x2222222222222222222222222222222222222222';
@@ -32,6 +33,20 @@ test('verified ABI decodes an unknown nested selector beside a transfer', async 
   assert.equal(summarizeCalls(root)[1].label, 'retrieveRemaining()');
   const risk = assessRisk({ call: root, actions: summarizeCalls(root), findings: [], effects: [], checks: [], transaction: { operation: 1, isExecuted: false } });
   assert.equal(risk.actionRatings[1].level, 'high');
+});
+
+test('an arbitrary supplied Safe transaction uses its target verified ABI', async () => {
+  const abi = ['function rotateTreasury(address newTreasury,uint256 epoch)'];
+  const data = new Interface(abi).encodeFunctionData('rotateTreasury', [SAFE, 42]);
+  const provider = { getNetwork: async () => ({ chainId: 1n }), getCode: async () => '0x60016000', getStorage: async () => '0x' };
+  const sourceLookup = async () => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: '0x60016000' }, abi });
+  const report = await analyze({ safe: SAFE, to: VAULT, nonce: 1, value: '0', data, operation: 0 }, 'eth', {
+    fetchState: false, verifyTargets: true, targetProvider: provider, sourceLookup,
+  });
+  assert.equal(report.call.method, 'rotateTreasury(address,uint256)');
+  assert.equal(report.call.decodeBasis, 'verified_abi');
+  assert.equal(report.call.args[0].value, SAFE);
+  assert.equal(report.targetChecks[0].status, 'verified');
 });
 
 test('source label is withheld if RPC bytecode differs or selector is absent', async () => {

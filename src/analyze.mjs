@@ -67,7 +67,7 @@ export function classifyIntent(call) {
     const add = (severity, code, message) => findings.push({ severity, code, path, message });
     if (node.operation === 1) add('critical', 'DELEGATECALL', 'Delegatecall runs target code in the Safe storage context; inspect target bytecode and simulation.');
     if (node.value !== '0') add('info', 'NATIVE_VALUE', `Sends ${node.value} wei from the Safe.`);
-    if (!method && node.data !== '0x') add('warning', 'UNKNOWN_SELECTOR', `Selector ${node.selector} has no locally verified ABI. A label from an API would not prove behavior.`);
+    if (!method && node.data !== '0x') add('warning', 'UNKNOWN_SELECTOR', `Selector ${node.selector} has no matching verified ABI in this review. A label from a signature database would not prove behavior.`);
     if (node.decodeBasis === 'selector_candidate') add('warning', 'SELECTOR_CANDIDATE', `Selector ${node.selector} was decoded from a 4byte signature candidate; the signature has not been matched to this target's bytecode or verified ABI.`);
     if (['upgradeTo', 'upgradeToAndCall', 'upgradeAndCall', 'updateImplementation', 'changeAdmin'].includes(method)) add('critical', 'UPGRADE', `Possible implementation or admin change: ${method}.`);
     if (['addOwnerWithThreshold', 'removeOwner', 'swapOwner', 'changeThreshold', 'enableModule', 'disableModule', 'setGuard', 'setFallbackHandler'].includes(method)) add('critical', 'SAFE_AUTHORITY', `Safe authority change: ${method}.`);
@@ -278,7 +278,7 @@ export async function analyze(raw, network = 'eth', options = {}) {
     // Proxy ABI describes dispatch, not the functions that run through it.
     // A missing selector is meaningful only after checking the implementation.
     const effectiveTarget = target.proxy ? target.proxy.implementationCode : target;
-    if (effectiveTarget?.abiSelectors?.some(selector => !selector.present)) findings.push({ severity: 'warning', code: 'TARGET_ABI_MISMATCH', path: target.address, message: `The locally decoded selector is absent from the matching verified ${target.proxy ? 'implementation' : 'target'} ABI; the function label may be wrong.` });
+    if (effectiveTarget?.abiSelectors?.some(selector => !selector.present)) findings.push({ severity: 'warning', code: 'TARGET_ABI_MISMATCH', path: target.address, message: `The decoded selector is absent from the matching verified ${target.proxy ? 'implementation' : 'target'} ABI; the function label may be wrong.` });
   }
   if (options.verifyTargets && targetChecks.some(target => !['verified', 'verified_current'].includes(target.status) || (target.proxy && !['verified', 'verified_current'].includes(target.proxy.implementationCode?.status)))) warnings.push('At least one called target or ERC-1967 implementation lacks matching verified runtime bytecode. A decoded selector is only a hypothesis about behavior.');
   if (tx.to.toLowerCase() === tx.safe.toLowerCase() && tx.data === '0x' && tx.value === '0' && tx.operation === 0) {
