@@ -19,7 +19,7 @@
       <div><span>02 · Inspect</span><strong>Check the source, recalculated hash, call graph, and code status.</strong></div>
       <div><span>03 · Decide</span><strong>Review measured changes when available and compare independently before signing.</strong></div>
     </section>
-    <details class="demo-guide"><summary>See a 30-second walkthrough</summary><div class="demo-guide-body"><p><strong>Example:</strong> select “Safe multisig address”, paste the address, choose a network and “Read queued for this Safe”. Pick a nonce from the list to open its report.</p><p>First compare the transaction hash with your signing device. Then follow the call graph and the “encoded changes” list. “Verified bytecode” means a source match was measured; “not run” or “unavailable” means no such conclusion. Run simulation only if you want a snapshot of one execution path. Before approving, repeat the hash check with a separate implementation.</p><p class="meta">This walkthrough is illustrative. It does not fetch a transaction or consume an API request.</p></div></details>
+    <section class="example-try" aria-label="Try a real example"><div><strong>Try a real Safe transaction</strong><p>Executed on Ethereum. One click loads its execution hash and runs the same inspection as your own input. This is an execution hash, not a Safe transaction hash.</p></div><button id="try-example" type="button">Try a real example</button></section>
     <section class="workspace">
       <div class="sidebar"><aside class="input-panel">
         <h2>Inspect</h2>

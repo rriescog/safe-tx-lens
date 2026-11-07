@@ -48,6 +48,22 @@ test('deep link prefills only a valid transaction hash without fetching data', (
   assert.equal(invalid.elements.get('input').value, '');
 });
 
+test('one-click real example selects Ethereum and runs the normal inspection', async () => {
+  const page = ui();
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const review = await analyze(tx, 'eth', { fetchState: false });
+  const requests = [];
+  page.context.fetch = async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, json: async () => review }; };
+  page.elements.get('try-example').on_click();
+  await new Promise(done => setImmediate(done));
+  assert.equal(page.elements.get('input').value, '0x7fa90051644c1dc76f1a8cbf8402ff401781a5a65c5601b40827b7a6193b86a0');
+  assert.equal(page.elements.get('network').value, 'eth');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].network, 'eth');
+  assert.equal(requests[0].input, page.elements.get('input').value);
+  assert.equal(page.elements.get('status').textContent, 'Inspection complete');
+});
+
 test('verification panel distinguishes supplied data, a user hash, local calculation, and RPC', async () => {
   const page = ui();
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
@@ -145,7 +161,7 @@ test('input wizard shows only the fields for the selected input and auto-detects
   assert.equal(page.elements.get('json-import').hidden, false);
   assert.equal(page.elements.get('json-options').hidden, false);
   assert.equal(page.elements.get('scope-group').hidden, true);
-  assert.match(page.elements.get('network-help').textContent, /chain for this export/);
+  assert.match(page.elements.get('network-help').textContent, /EVM chain ID inside the JSON/);
   mode.value = 'url';
   mode.on_change();
   assert.equal(page.elements.get('network-group').hidden, true);

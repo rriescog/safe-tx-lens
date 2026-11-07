@@ -5,7 +5,7 @@ import { analyzeExecutionHash, discoverExecutionNetworks, fetchRecentExecutions,
 import { analyzeBuilderExport, isBuilderExport } from './builder.mjs';
 import { analyzeMonitorStorage, isMonitorStorage } from './monitor-import.mjs';
 import { fetchMonitorStorage, localCredentials } from './tenderly-storage.mjs';
-import { CHAINS } from './chains.mjs';
+import { CHAINS, chainId } from './chains.mjs';
 import { findIndexedExecution } from './execution-index.mjs';
 
 async function detectNetwork(parsed, options = {}) {
@@ -15,6 +15,11 @@ async function detectNetwork(parsed, options = {}) {
     const id = parsed.transaction.chainId ?? parsed.transaction.transaction?.chainId;
     const chain = Object.entries(CHAINS).find(([, value]) => String(value) === String(id))?.[0];
     if (chain) return chain;
+    // JSON can carry a valid chain ID even when this chain has no named UI
+    // integration. The local EIP-712 calculation needs no Safe index or RPC.
+    if (id !== undefined) {
+      try { chainId(String(id)); return String(id); } catch { /* Invalid or unsafe chain ID. */ }
+    }
   } else {
     const snapshot = options.monitorFallback === true ? await fetchMonitorStorage().catch(() => null) : null;
     let monitoredNetworks = [];
@@ -50,7 +55,7 @@ async function detectNetwork(parsed, options = {}) {
     }
     if (parsed.kind === 'hash') {
       const executionNetworks = await discoverExecutionNetworks(parsed.hash, Object.keys(CHAINS), options);
-      if (executionNetworks.length === 1) return executionNetworks[0];
+      if (executionNetworks.length === 1) return { network: executionNetworks[0], source: 'execution_receipt' };
       if (executionNetworks.length > 1) throw new Error(`Execution hash appeared on multiple networks (${executionNetworks.join(', ')}). Select the network explicitly.`);
       for (const network of Object.keys(CHAINS)) {
         try { if (await findIndexedExecution(parsed.hash, network)) return network; }
@@ -81,6 +86,20 @@ export async function resolve(input, network = 'eth', options = {}) {
   const parsed = parseInput(input, network);
   if (parsed.network === 'auto') {
     const detected = await detectNetwork(parsed, options);
+    if (detected?.source === 'execution_receipt') {
+      // The receipt proves this is an execution hash on the detected chain.
+      // Safe Transaction Service expects a Safe transaction hash instead, so
+      // querying it here wastes quota and can mask a transient RPC failure.
+      const rpcProvenance = rpcDetailsFor(detected.network, options.rpcUrl);
+      const settings = { ...options, rpcUrl: rpcProvenance.url, rpcProvenance, verifyTargets: options.verifyTargets ?? true };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try { return await (options.analyzeExecution ?? analyzeExecutionHash)(parsed.hash, detected.network, settings); }
+        catch (error) {
+          if (/RPC chain does not match|not a Safe execTransaction|Safe execution event with transaction hash was not found|Could not recover Safe nonce/.test(error.message)) throw error;
+        }
+      }
+      throw new Error('Onchain execution source unavailable after the Safe receipt identified its network. Retry shortly or configure a reliable RPC for that network locally.');
+    }
     if (!Array.isArray(detected)) return resolve(input, detected, options);
     const results = await Promise.all(detected.map(chain => resolve(input, chain, options)));
     return {

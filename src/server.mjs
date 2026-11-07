@@ -55,10 +55,11 @@ export function redactPrivateSimulationUrl(result) {
 function inspectionFailure(res, error, recordIncident) {
   const message = String(error.message ?? 'Inspection failed').slice(0, 600);
   const upstreamLimited = /Safe API 429|Safe Client Gateway 429|Safe API rate limit or quota is cooling down|Safe API quota is exhausted|monthly quota exhausted/i.test(message);
-  const upstreamFailed = /Safe API 5\d\d|Safe Client Gateway 5\d\d|Safe Client Gateway 403|Safe API 403/i.test(message);
+  const onchainFailed = /Onchain execution source unavailable/i.test(message);
+  const upstreamFailed = /Safe API 5\d\d|Safe Client Gateway 5\d\d|Safe Client Gateway 403|Safe API 403|Onchain execution source unavailable/i.test(message);
   if (upstreamLimited || upstreamFailed) {
     const incidentId = recordIncident(upstreamLimited ? 'upstream_limit' : 'upstream_unavailable', 503);
-    return reply(res, 503, { error: upstreamLimited ? 'Sorry, the transaction source is at its request limit. Please retry later or choose another input. We recorded this interruption to improve the service.' : 'Sorry, the transaction source is unavailable. Please retry later or use a transaction JSON export. We recorded this interruption to improve the service.', code: upstreamLimited ? 'UPSTREAM_LIMITED' : 'UPSTREAM_UNAVAILABLE', incidentId });
+    return reply(res, 503, { error: upstreamLimited ? 'Sorry, the transaction source is at its request limit. Please retry later or choose another input. We recorded this interruption to improve the service.' : onchainFailed ? 'The Safe execution was found onchain, but the RPC could not return its full details. Please retry shortly or choose a reliable RPC locally. We recorded this interruption.' : 'Sorry, the transaction source is unavailable. Please retry later or use a transaction JSON export. We recorded this interruption to improve the service.', code: upstreamLimited ? 'UPSTREAM_LIMITED' : onchainFailed ? 'RPC_UNAVAILABLE' : 'UPSTREAM_UNAVAILABLE', incidentId });
   }
   if (/Safe API 404|Safe Client Gateway 404|For an offchain proposal without Safe API access/i.test(message)) {
     return reply(res, 422, { error: 'We could not retrieve this transaction from the available Safe sources. Check the network, try a Safe URL, or import its transaction JSON.', code: 'TRANSACTION_UNAVAILABLE' });

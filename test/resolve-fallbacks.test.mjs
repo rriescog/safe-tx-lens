@@ -103,7 +103,9 @@ test('failed queue sources are unavailable, while JSON chain detection stays off
   const builder = { chainId: '1', meta: {}, transactions: [{ to: tx.to, value: '0', data: '0x' }] };
   const plan = await resolve(builder, 'auto', { rpcUrl: '' });
   assert.equal(plan.network, 'eth');
-  await assert.rejects(() => resolve({ ...builder, chainId: '999999' }, 'auto'), /does not reveal its network/);
+  const otherChain = await resolve({ ...builder, chainId: '130' }, 'auto', { rpcUrl: '' });
+  assert.equal(otherChain.network, '130');
+  await assert.rejects(() => resolve({ ...builder, chainId: '0' }, 'auto'), /does not reveal its network/);
 }));
 
 test('an unindexed offchain hash reports source failure instead of fabricating transaction fields', async () => withSources({}, async () => {
@@ -123,6 +125,53 @@ test('an unseen hash can discover its network through the authenticated Safe Tra
     assert.equal(report.hash, gno.safeTxHash);
     assert.equal(report.checks[0].status, 'pass');
   } finally { globalThis.fetch = original; }
+}));
+
+test('auto-discovered Safe execution uses its RPC receipt, retries a transient failure, and skips Safe API', async () => withSources({}, async () => {
+  const executionHash = `0x${'ab'.repeat(32)}`;
+  const eventTopic = id('ExecutionSuccess(bytes32,uint256)');
+  const fetchImpl = async (url, options) => {
+    const method = JSON.parse(options.body).method;
+    const ethereum = String(url).includes('ethereum.publicnode.com');
+    return new Response(JSON.stringify({ result: method === 'eth_chainId' ? '0x1' : ethereum ? { logs: [{ topics: [eventTopic] }] } : null }), { status: 200 });
+  };
+  const previousFetch = globalThis.fetch;
+  let safeCalls = 0;
+  globalThis.fetch = async (...args) => { if (String(args[0]).includes('safe.global')) safeCalls++; return previousFetch(...args); };
+  let attempts = 0;
+  const analyzeExecution = async (hash, network) => {
+    attempts++;
+    assert.equal(hash, executionHash);
+    assert.equal(network, 'eth');
+    if (attempts === 1) throw new Error('RPC temporarily unavailable');
+    return { hash, network, evidence: { source: 'onchain_execution' } };
+  };
+  try {
+    const report = await resolve(executionHash, 'auto', { fetchImpl, analyzeExecution, verifyTargets: false });
+    assert.equal(report.evidence.source, 'onchain_execution');
+    assert.equal(attempts, 2);
+    assert.equal(safeCalls, 0);
+    await assert.rejects(() => resolve(executionHash, 'auto', { fetchImpl, analyzeExecution: async () => { throw new Error('RPC down'); } }), /Onchain execution source unavailable/);
+    assert.equal(safeCalls, 0);
+  } finally { globalThis.fetch = previousFetch; }
+}));
+
+test('auto-discovered execution follows a non-Ethereum network', async () => withSources({}, async () => {
+  const executionHash = `0x${'cd'.repeat(32)}`;
+  const fetchImpl = async (url, options) => {
+    const method = JSON.parse(options.body).method;
+    const polygon = String(url).includes('polygon-bor-rpc.publicnode.com');
+    return new Response(JSON.stringify({ result: method === 'eth_chainId' ? '0x89' : polygon ? { logs: [{ topics: [id('ExecutionSuccess(bytes32,uint256)')] }] } : null }), { status: 200 });
+  };
+  const report = await resolve(executionHash, 'auto', {
+    fetchImpl,
+    analyzeExecution: async (hash, network) => {
+      assert.equal(hash, executionHash);
+      assert.equal(network, 'pol');
+      return { hash, network, evidence: { source: 'onchain_execution' } };
+    },
+  });
+  assert.equal(report.network, 'pol');
 }));
 
 test('auto discovery declines a hash absent from every supported indexed and proposal source', async () => withSources({}, async () => {

@@ -13,7 +13,7 @@ A compromised multisig interface can show a benign description while presenting 
 3. Follow the decoded call graph and proposed changes. Check whether target bytecode verification actually ran and whether it matched source at the relevant block.
 4. If configured, run one simulation and read only the state changes the provider returned. Use a separate implementation and a separately trusted source for the final review.
 
-The UI includes a walkthrough that illustrates this sequence without making an API request.
+The UI has a one-click real Ethereum Safe execution example. It uses a known onchain execution hash and performs the same live review as a visitor's input, so it consumes a normal lookup request.
 
 The hosted interface and its Safe, RPC, Sourcify, and Tenderly providers are additional trust boundaries. For a stronger independent check, install the source on infrastructure you control, select an RPC you trust separately, and compare results with another implementation. This repository is currently private while the service is being prepared for a public MIT-licensed release; a hosted report is not a safety guarantee.
 
@@ -156,7 +156,7 @@ The added focus is a single input surface for hash, URL, JSON, and offchain queu
 ## Security and limitations
 
 - Supported Safe Transaction Service network prefixes are listed in `src/chains.mjs`. A Safe URL must be on `app.safe.global`.
-- Other EVM chain IDs can be entered explicitly in the UI, CLI (`--network 130`), or MCP. Safe Client Gateway must serve that chain for pending proposals; set `RPC_URL_<CHAIN_ID>` or `--rpc` to check contract bytecode. Automatic chain discovery remains limited to the twelve named integrations. An unsupported chain or unavailable Safe service is reported rather than guessed.
+- Other EVM chain IDs can be entered explicitly in the UI, CLI (`--network 130`), or MCP. JSON with a valid chain ID can select that chain automatically for offline decoding and EIP-712 hashing. Safe Client Gateway must serve that chain for pending proposals; set `RPC_URL_<CHAIN_ID>` or `--rpc` to check contract bytecode. Hash-only or address-only automatic chain discovery remains limited to the twelve named integrations: a 32-byte hash has no chain ID, and probing every Safe-supported chain on each public request would exhaust provider quotas. For another chain, supply its chain ID or a Safe URL that contains it. An unavailable Safe service is reported rather than guessed.
 - [Dated network coverage](docs/NETWORK-COVERAGE.md) records actual Safe indexing, pending and history endpoint responses alongside RPC chain-ID checks. The UI displays the same dated snapshot; a live request may differ. Recheck with `npm run check:networks -- --live --snapshot web/network-coverage.json`. The script caps and paces Safe requests, stops on HTTP 429 or low remaining quota, and never publishes the key or quota headers in the UI snapshot.
 - The tool fetches from fixed Safe, Tenderly, and Sourcify endpoints plus network-specific public RPCs. `--rpc` or `RPC_URL_<NETWORK>` selects another RPC. The local UI listens on `127.0.0.1` and does not expose API keys to the browser.
 - The built-in ABI list covers common calls. Unknown selectors are decoded with a Sourcify ABI only after the source runtime bytecode matches an RPC response for the target or its ERC-1967 implementation. A function name describes the call format, not what the contract will actually do. Historical code may be unavailable; the report labels current-only matches.

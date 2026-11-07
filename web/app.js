@@ -108,10 +108,21 @@ function updateWizard() {
   };
   document.getElementById('input-label').textContent = guidance[mode][0];
   document.getElementById('mode-help').textContent = guidance[mode][1];
-  document.getElementById('network-help').textContent = mode === 'json' ? 'Select the chain for this export. Auto-detect works when the JSON includes a supported chain ID.' : mode === 'safe' ? 'A Safe address can exist on several chains. Local auto-detect checks available sources.' : 'A hash alone does not identify its chain. Local auto-detect searches available sources.';
+  document.getElementById('network-help').textContent = mode === 'json' ? 'Auto-detect uses the EVM chain ID inside the JSON; otherwise select a network.' : mode === 'safe' ? 'A Safe address can exist on several chains. Auto-detect checks configured networks; enter the chain ID for another EVM network.' : 'A hash does not contain its chain ID. Auto-detect checks configured networks; enter the chain ID for another EVM network.';
 }
 inputMode.addEventListener('change', updateWizard);
 updateWizard();
+document.getElementById('try-example').addEventListener('click', () => {
+  // An actual Safe execution hash avoids relying on the Safe offchain quota
+  // for the first-run example. The normal inspection path still verifies it.
+  importedJson = null;
+  inputMode.value = 'hash';
+  input.value = '0x7fa90051644c1dc76f1a8cbf8402ff401781a5a65c5601b40827b7a6193b86a0';
+  network.value = 'eth';
+  document.getElementById('custom-chain-group').hidden = true;
+  updateWizard();
+  inspect();
+});
 // A copied local link may include a transaction hash in its query string.
 // Prefill only a valid hash and require an explicit review click, so merely
 // opening a link cannot consume the shared upstream quota.
