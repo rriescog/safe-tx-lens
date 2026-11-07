@@ -178,7 +178,7 @@ function argValue(arg, call) {
   return JSON.stringify(arg.value);
 }
 function decodeEvidence(call) {
-  if (call.decodeSource) return `<div class="decode-source">ABI from ${esc(call.decodeSource)}${call.decodeSourceUrl ? ` · <a href="${esc(call.decodeSourceUrl)}" target="_blank" rel="noopener noreferrer">source</a>` : ''}. Function name does not prove behavior.</div>`;
+  if (call.decodeSource) return `<div class="decode-source">${call.decodeBasis === 'proxy_candidate_abi' ? 'Possible call through a proxy: ' : 'ABI from '}${esc(call.decodeSource)}${call.decodeSourceUrl ? ` · <a href="${esc(call.decodeSourceUrl)}" target="_blank" rel="noopener noreferrer">source</a>` : ''}. Function name does not prove behavior.</div>`;
   if (call.decodeBasis === 'selector_candidate') return '<div class="decode-source">Candidate signature from Sourcify 4byte. Arguments fit the calldata, but this is not verified against the called contract. Inspect target bytecode before relying on the name.</div>';
   if (call.decodeCandidates?.length) return `<div class="decode-source">Ambiguous selector candidates: ${esc(call.decodeCandidates.join(' · '))}. No function was chosen.</div>`;
   if (call.decodeBasis === 'known_signature') return '<div class="decode-source">Known ABI signature; target behavior still requires bytecode verification.</div>';
@@ -199,7 +199,7 @@ function flowHtml(node, path, labels) {
   const title = labels.get(path) ?? method;
   const kind = /^schedule/.test(method) || node.stage === 'schedule' ? 'Schedule' : /^execute/.test(method) ? 'Execute' : node.operation === 1 ? 'Delegatecall' : 'Call';
   const children = node.children?.length ? `<ul class="flow-children">${node.children.map((child, i) => flowHtml(child, `${path}.${i + 1}`, labels)).join('')}</ul>` : '';
-  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong>${esc(title)}</strong><span class="flow-address mono">${esc(node.to)}</span>${node.token ? `<span class="token-identity">${esc(node.token.amount ?? 'Raw amount unavailable')} ${esc(node.token.symbol)} · ${esc(node.token.address)}<small>Symbol and decimals reported by the contract via RPC; identity unverified.</small></span>` : ''}${node.decodeSource ? `<span class="flow-evidence">Verified ABI · ${esc(node.decodeSource)}</span>` : node.decodeBasis === 'selector_candidate' ? '<span class="flow-evidence">Candidate signature · target unverified</span>' : ''}</div></div>${children}</li>`;
+  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong>${esc(title)}</strong><span class="flow-address mono">${esc(node.to)}</span>${node.token ? `<span class="token-identity">${esc(node.token.amount ?? 'Raw amount unavailable')} ${esc(node.token.symbol)} · ${esc(node.token.address)}<small>Symbol and decimals reported by the contract via RPC; identity unverified.</small></span>` : ''}${node.decodeSource ? `<span class="flow-evidence">${node.decodeBasis === 'proxy_candidate_abi' ? 'Proxy route inferred' : 'Verified ABI'} · ${esc(node.decodeSource)}</span>` : node.decodeBasis === 'selector_candidate' ? '<span class="flow-evidence">Candidate signature · target unverified</span>' : ''}</div></div>${children}</li>`;
 }
 function graphElements(r) {
   const elements = [{ data: { id: 'safe', label: `Safe nonce ${r.transaction.nonce}`, detail: `Safe ${r.transaction.safe}`, kind: 'safe' } }];
@@ -272,32 +272,35 @@ function verificationHtml(r) {
 function targetVerificationSummary(r) {
   const checks = r.targetChecks ?? [];
   if (!r.targetVerificationAttempted && !checks.length) return { tone: 'unverified', label: 'Bytecode check not run', detail: 'No target runtime bytecode has been compared yet.' };
-  const targets = checks.flatMap(check => check.proxy ? [check, check.proxy.implementationCode ?? { status: 'unavailable' }] : [check]);
+  const targets = checks.flatMap(check => [check, ...(check.proxy ? [check.proxy.implementationCode ?? { status: 'unavailable' }] : []), ...(check.plannedImplementationCode ? [check.plannedImplementationCode] : [])]);
   if (!targets.length) return { tone: 'unavailable', label: 'Bytecode check unavailable', detail: 'The check ran but returned no target results.' };
   const matched = targets.filter(target => ['verified', 'verified_current'].includes(target.status)).length;
-  const selectorMismatch = checks.some(check => (check.proxy ? check.proxy.implementationCode : check)?.abiSelectors?.some(selector => !selector.present));
   if (targets.some(target => target.status === 'mismatch')) return { tone: 'fail', label: `Bytecode mismatch · ${matched}/${targets.length} matched`, detail: 'At least one RPC runtime bytecode differs from the verified source. Review before signing.' };
   if (matched !== targets.length) return { tone: 'warning', label: `Bytecode check incomplete · ${matched}/${targets.length} matched`, detail: 'One or more targets or proxy implementations could not be matched with verified source.' };
-  if (selectorMismatch) return { tone: 'warning', label: `Bytecode matched, ABI selector mismatch · ${matched}/${targets.length}`, detail: 'At least one decoded function selector is absent from the matching verified ABI. Treat that function label as unconfirmed.' };
   if (targets.some(target => target.status === 'verified_current')) return { tone: 'partial', label: `Current bytecode matches · ${matched}/${targets.length}`, detail: 'All inspected contracts match verified source now. The RPC could not return bytecode from before this execution, so past code remains unverified.' };
   return { tone: 'pass', label: `Verified bytecode · ${matched}/${targets.length}`, detail: 'Every inspected runtime bytecode matched Sourcify verified source at the checked block. This does not prove the code is safe.' };
 }
 function targetChecksHtml(r, retryNote = '') {
   const checks = r.targetChecks ?? [];
   const summary = targetVerificationSummary(r);
+  const inferredRoutes = checks.filter(check => check.proxy?.standard === 'implementation() fallback').length;
+  const routeNotice = inferredRoutes ? `<div class="verification-summary verification-warning"><span class="pill warning">Proxy route</span><div><strong>${inferredRoutes} proxy forwarding path${inferredRoutes === 1 ? '' : 's'} inferred</strong><p>Proxy and implementation bytecode match verified source, but the ABI alone does not prove that the fallback forwards these calls. Review the verified proxy source and execution trace.</p></div></div>` : '';
+  const missingSelectors = checks.flatMap(check => (check.proxy ? check.proxy.implementationCode : check)?.abiSelectors?.filter(selector => !selector.present && !(check.proxy && check.abiSelectors?.some(outer => outer.selector === selector.selector && outer.present)) && !(['verified', 'verified_current'].includes(check.plannedImplementationCode?.status) && check.plannedImplementationCode?.abiSelectors?.some(planned => planned.selector === selector.selector && planned.present))).map(selector => ({ address: check.address, selector: selector.selector })) ?? []);
+  const abiNotice = missingSelectors.length ? `<div class="verification-summary verification-warning"><span class="pill warning">ABI review</span><div><strong>${missingSelectors.length} call selector${missingSelectors.length === 1 ? '' : 's'} absent from the matched ABI</strong><p>The runtime bytecode matches verified source. This separate warning concerns how its calls are interpreted: a fallback or proxy implementation may handle these selectors. Review the implementation and call path before trusting the function labels.</p></div></div>` : '';
   const rows = checks.map(check => {
     const proxy = check.proxy ? `<p>${esc(check.proxy.standard ?? 'ERC-1967')} implementation: <span class="mono">${esc(check.proxy.implementation)}</span> · ${esc(check.proxy.implementationCode?.status ?? 'unavailable')}${check.proxy.implementationCode?.bytecodeHash ? ` · <span class="mono">${esc(check.proxy.implementationCode.bytecodeHash)}</span>` : ''}</p>` : '';
+    const planned = check.plannedImplementationCode ? `<p>Proposed upgrade to <span class="mono">${esc(check.plannedImplementation)}</span>: ${esc(check.plannedImplementationCode.status)}. Its ABI can describe later calls only if the upgrade executes first.</p>` : '';
     const effective = check.proxy ? check.proxy.implementationCode : check;
     const abi = effective?.abiSelectors?.length ? `<p>Selectors in verified ${check.proxy ? 'implementation' : 'target'} ABI: ${effective.abiSelectors.map(item => `${esc(item.selector)} ${item.present ? 'yes' : 'no'}`).join(' · ')}</p>` : effective?.abiWarning ? `<p>${esc(effective.abiWarning)}</p>` : '';
     const badge = check.status === 'verified_current' ? '<span class="pill verified_current">Current code matched</span>' : pill(check.status);
     const plainResult = check.status === 'verified_current' ? 'Current code matches verified source. Code at execution time was not checked.' : check.status === 'verified' ? 'Code at the inspected block matches verified source.' : check.status === 'mismatch' ? 'Verified source and onchain bytecode differ. Stop and investigate.' : check.reason;
-    const technical = `<details><summary>Technical evidence</summary><p>${esc(check.reason)} · block ${esc(check.blockTag)}${check.bytecodeHash ? `<br>Runtime bytecode hash: <span class="mono">${esc(check.bytecodeHash)}</span>` : ''}</p>${abi}${proxy}</details>`;
+    const technical = `<details><summary>Technical evidence</summary><p>${esc(check.reason)} · block ${esc(check.blockTag)}${check.bytecodeHash ? `<br>Runtime bytecode hash: <span class="mono">${esc(check.bytecodeHash)}</span>` : ''}</p>${abi}${proxy}${planned}</details>`;
     return `<div class="item">${badge}<div class="item-content"><strong class="mono">${esc(check.address)}</strong><p>${esc(plainResult)}${check.source ? `<br><a href="${esc(check.source)}" target="_blank" rel="noopener noreferrer">Inspect verified source</a>` : ''}</p>${technical}</div></div>`;
   }).join('');
   const archiveNextStep = summary.tone === 'partial' ? `<div class="next-step"><strong>To verify code at execution time</strong><p>${publicFacing ? 'This service needs an archive-capable RPC for this network. The service operator must add one; clicking again on the current public RPC will not change this result. You can also run the open-source tool locally with an archive RPC.' : `Set RPC_URL_${esc(String(r.network ?? '').toUpperCase())} to an archive-capable endpoint, restart the local service, and inspect this transaction again. Clicking again with the same RPC will not change this result.`}</p></div>` : '';
-  const action = publicMode ? '<p class="meta">Run the local tool to verify target bytecode with your own provider.</p>' : ['pass', 'partial', 'fail'].includes(summary.tone) ? '' : `<div class="simulation-action"><button type="button" id="verify-targets">${checks.length ? 'Check bytecode again' : 'Check target bytecode'}</button><p>Asks this network’s RPC for runtime bytecode and compares it with Sourcify. A repeated lookup may return the same result; the next report will say whether evidence changed.</p></div>`;
+  const action = publicMode ? ['pass', 'partial', 'fail'].includes(summary.tone) ? '' : '<p class="meta">The public demo checks at most four targets per selected transaction. For an unchecked target, run the open-source tool with your own RPC.</p>' : ['pass', 'partial', 'fail'].includes(summary.tone) ? '' : `<div class="simulation-action"><button type="button" id="verify-targets">${checks.length ? 'Check bytecode again' : 'Check target bytecode'}</button><p>Asks this network’s RPC for runtime bytecode and compares it with Sourcify. A repeated lookup may return the same result; the next report will say whether evidence changed.</p></div>`;
   const summaryBadge = summary.tone === 'partial' ? '<span class="pill partial">Past code unchecked</span>' : summary.tone === 'unverified' ? '<span class="pill unverified">Not checked</span>' : pill(summary.tone);
-  return `<div class="verification-summary verification-${summary.tone}">${summaryBadge}<div><strong>${esc(summary.label)}</strong><p>${esc(summary.detail)}</p></div></div>${retryNote ? `<div class="next-step" role="status">${esc(retryNote)}</div>` : ''}${rows}${archiveNextStep}${action}`;
+  return `<div class="verification-summary verification-${summary.tone}">${summaryBadge}<div><strong>${esc(summary.label)}</strong><p>${esc(summary.detail)}</p></div></div>${abiNotice}${routeNotice}${retryNote ? `<div class="next-step" role="status">${esc(retryNote)}</div>` : ''}${rows}${archiveNextStep}${action}`;
 }
 function effectHtml(effect) {
   const asset = effect.kind === 'asset_transfer';
@@ -315,14 +318,15 @@ function pendingCheckAction(kind) {
     return `<a class="pending-action" href="#${kind === 'rpc' ? 'evidence-checks' : 'target-code'}">View check details</a>`;
   }
   if (kind === 'simulation' && !publicMode && (!communityMode || simulationEnabled)) return '<button type="button" class="pending-action" data-pending-action="simulate">Run simulation</button>';
-  const target = ['hash', 'hash_mismatch', 'rpc'].includes(kind) ? 'evidence-checks' : kind === 'decode' ? 'call-path' : ['bytecode', 'archive'].includes(kind) ? 'target-code' : 'simulation-results';
-  const label = kind === 'decode' ? 'Review call path' : kind === 'archive' ? 'View code status' : kind === 'hash' || kind === 'hash_mismatch' ? 'Open hash checks' : 'View limitations';
+  const target = ['hash', 'hash_mismatch', 'rpc'].includes(kind) ? 'evidence-checks' : kind === 'decode' ? 'call-path' : ['bytecode', 'archive', 'proxy'].includes(kind) ? 'target-code' : 'simulation-results';
+  const label = kind === 'decode' ? 'Review call path' : ['archive', 'proxy'].includes(kind) ? 'View code status' : kind === 'hash' || kind === 'hash_mismatch' ? 'Open hash checks' : 'View limitations';
   return `<a class="pending-action" href="#${target}">${label}</a>`;
 }
 function confidenceHtml(confidence) {
   if (!confidence) return '';
   const gaps = confidence.gaps ?? [];
-  const pending = gaps.length ? `<div class="pending-heading"><strong>Pending checks</strong><span>${gaps.length} to review</span></div><ul class="pending-checks">${gaps.map(gap => `<li><div><strong>${esc(gap.title ?? 'Review missing evidence')}</strong><p>${esc(gap.label)}</p></div>${pendingCheckAction(gap.kind)}</li>`).join('')}</ul>` : '<p class="checks-complete">All scored checks completed. Review the limitations below.</p>';
+  const pendingTitle = gaps.length === 1 ? `Pending check: ${esc(gaps[0].title ?? 'Review missing evidence')}` : `${gaps.length} pending checks`;
+  const pending = gaps.length ? `<div class="pending-heading"><strong>${pendingTitle}</strong></div><ul class="pending-checks">${gaps.map(gap => `<li><div><strong>${esc(gap.title ?? 'Review missing evidence')}</strong><p>${esc(gap.label)}</p></div>${pendingCheckAction(gap.kind)}</li>`).join('')}</ul>` : '<p class="checks-complete">All scored checks completed. Review the limitations below.</p>';
   return `<div class="confidence confidence-${esc(confidence.color)}"><div class="confidence-score"><span class="confidence-number">${esc(confidence.score)}<small>/10</small></span><span>Evidence confidence</span></div><div class="confidence-content"><p>How much of this report could be checked. This is not a safety score.</p>${pending}<details><summary>How this was scored</summary><ul>${confidence.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details></div></div>`;
 }
 function priorityExplanation(risk) {
@@ -330,9 +334,17 @@ function priorityExplanation(risk) {
   // only the strongest contributing signals, without inventing a narrative.
   const reasons = risk.reasons ?? [];
   const strongestScore = Math.max(0, ...reasons.map(reason => Number(reason.score) || 0));
-  const drivers = reasons.filter(reason => Number(reason.score) === strongestScore).slice(0, 3);
+  const grouped = new Map();
+  for (const reason of reasons.filter(reason => Number(reason.score) === strongestScore)) {
+    const stage = /^(Scheduled|Called): (.*)$/.exec(reason.message);
+    const key = stage?.[2] ?? reason.message;
+    const item = grouped.get(key) ?? { message: key, stages: new Set() };
+    if (stage) item.stages.add(stage[1]);
+    grouped.set(key, item);
+  }
+  const drivers = [...grouped.values()].slice(0, 3).map(item => item.stages.size === 2 ? `Scheduled and called: ${item.message}` : item.stages.size === 1 ? `${[...item.stages][0]}: ${item.message}` : item.message);
   const why = drivers.length
-    ? `<ul>${drivers.map(reason => `<li>${esc(reason.message)}</li>`).join('')}</ul>`
+    ? `<ul>${drivers.map(message => `<li>${esc(message)}</li>`).join('')}</ul>`
     : '<p>No specific driver was returned. Inspect the decoded call path before relying on this priority.</p>';
   return `<div class="priority-explanation"><strong>Why ${esc(risk.reviewPriority)} priority</strong>${why}<small>Based on ${esc(risk.basis || 'the available transaction evidence')}.</small></div>`;
 }

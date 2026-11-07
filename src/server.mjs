@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from './resolve.mjs';
 import { analyze } from './analyze.mjs';
 import { parseInput } from './inputs.mjs';
+import { isBuilderExport } from './builder.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
 import { publicQuota } from './public-quota.mjs';
 import { communityQuota } from './community-quota.mjs';
@@ -75,7 +76,7 @@ function errorPage(incidentId) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page unavailable · Safe Tx Lens</title><link rel="stylesheet" href="/web/style.css"></head><body><header class="masthead"><div class="brand"><span class="mark" aria-hidden="true">◎</span><span>Safe Tx Lens</span></div></header><main class="error-page"><p class="kicker">We are sorry</p><h1>Something went wrong.</h1><p>We could not open this page. We recorded the issue so we can improve the service. Your transaction data was not included in this notice.</p><p class="meta">Reference: <code>${incidentId}</code></p><a href="/">Open the inspector</a></main></body></html>`;
 }
 
-export async function serve({ port = 4173, rpcUrl, publicMode = false, communityMode = false, publicOrigin, quotaFile = '/data/public-quota.json', dailyLimit = 5, communityQuotaFile = '/data/community-quota.json', communityDailyUnits = 600, communityMonthlyUnits = 10000, communityClientDailyRequests = 20, credentialReader = localCredentials, incidentReporter = event => console.error(JSON.stringify(event)) } = {}) {
+export async function serve({ port = 4173, rpcUrl, publicMode = false, communityMode = false, publicOrigin, quotaFile = '/data/public-quota.json', dailyLimit = 5, communityQuotaFile = '/data/community-quota.json', communityDailyUnits = 600, communityMonthlyUnits = 10000, communityClientDailyRequests = 20, credentialReader = localCredentials, inspectionResolver = resolve, incidentReporter = event => console.error(JSON.stringify(event)) } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid port');
   if (publicMode && communityMode) throw new Error('Choose public demo or community mode');
   const publicFacing = publicMode || communityMode;
@@ -147,6 +148,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
         if (!req.headers['content-type']?.startsWith('application/json')) return reply(res, 415, { error: 'Expected application/json' });
         const payload = validateInspectionRequest(JSON.parse(await readBody(req, publicFacing ? 262144 : 5000000)));
         const inputKind = parseInput(payload.input, payload.network ?? 'eth').kind;
+        const singleTransaction = inputKind !== 'safe' && !(inputKind === 'json' && isBuilderExport(payload.input));
         if (publicMode && payload.simulate) return reply(res, 403, { error: 'Simulation is unavailable on the public demo; run the tool locally with your own credentials' });
         if (payload.simulate === true && inputKind === 'safe') throw new Error('Select one transaction before running a simulation');
         if (publicMode) {
@@ -157,7 +159,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           const ticket = quota.take();
           if (!ticket.allowed) return reply(res, 429, { error: ticket.reason === 'busy' ? 'Public demo is busy; retry shortly' : 'Public demo daily request budget reached; use the CLI locally' });
           try {
-            return reply(res, 200, await resolve(payload.input, payload.network ?? 'eth', { simulate: false, fetchState: false, verifyTargets: false, decodeCandidates: payload.decodeCandidates === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash }));
+            return reply(res, 200, await inspectionResolver(payload.input, payload.network ?? 'eth', { simulate: false, fetchState: false, verifyTargets: singleTransaction, targetLimit: 4, decodeCandidates: payload.decodeCandidates === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash }));
           } finally { quota.release(); }
         }
         if (communityMode) {
@@ -166,17 +168,18 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           if (typeof clientIp !== 'string' || !isIP(clientIp)) return reply(res, 403, { error: 'Trusted client identity unavailable' });
           if (payload.simulate && !simulationEnabled) return reply(res, 503, { error: 'Tenderly simulation is not configured for this service' });
           if (inputKind === 'safe' && payload.verifyTargets === true) return reply(res, 400, { error: 'Select one transaction before verifying target code' });
-          const cost = communityCost(payload.input, payload.network ?? 'auto', payload.scope ?? 'pending', payload);
+          const verifyTargets = singleTransaction || payload.verifyTargets === true;
+          const cost = communityCost(payload.input, payload.network ?? 'auto', payload.scope ?? 'pending', { ...payload, verifyTargets });
           const ticket = community.take(clientIp, cost, { simulation: payload.simulate === true });
           if (!ticket.allowed) return denied(res, ticket);
           try {
-            const result = await resolve(payload.input, payload.network ?? 'auto', { simulate: payload.simulate === true, fetchState: false, verifyTargets: payload.verifyTargets === true, decodeCandidates: payload.decodeCandidates === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
+            const result = await inspectionResolver(payload.input, payload.network ?? 'auto', { simulate: payload.simulate === true, fetchState: false, verifyTargets, decodeCandidates: payload.decodeCandidates === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
             return reply(res, 200, redactPrivateSimulationUrl(result));
           } finally { community.release(); }
         }
         // Simulation is an explicit UI action. The ordinary inspection path stays
         // read-only and does not consume simulation quota or share calldata.
-        const result = await resolve(payload.input, payload.network ?? 'eth', { rpcUrl, simulate: payload.simulate === true, verifyTargets: payload.verifyTargets !== false, decodeCandidates: payload.decodeCandidates === true, limit: 20, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
+        const result = await inspectionResolver(payload.input, payload.network ?? 'eth', { rpcUrl, simulate: payload.simulate === true, verifyTargets: payload.verifyTargets !== false, decodeCandidates: payload.decodeCandidates === true, limit: 20, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
         return reply(res, 200, result);
       } catch (error) { return inspectionFailure(res, error, recordIncident); }
     }

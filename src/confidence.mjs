@@ -16,9 +16,9 @@ export function assessConfidence({ call, checks = [], targetChecks = [], simulat
   const visit = node => { nodes.push(node); node.children?.forEach(visit); };
   visit(call);
   const meaningful = nodes.filter(node => node.data && node.data !== '0x');
-  const decoded = meaningful.filter(node => node.method && node.decodeBasis !== 'selector_candidate');
+  const decoded = meaningful.filter(node => node.method && !['selector_candidate', 'proxy_candidate_abi'].includes(node.decodeBasis));
   if (meaningful.length && decoded.length === meaningful.length) { score += 1; reasons.push('Every call selector in the graph has been decoded.'); }
-  else { reasons.push(meaningful.length ? `${meaningful.length - decoded.length} call selector(s) remain undecoded by a verified or built-in ABI; a 4byte candidate does not close this gap.` : 'No call selector was available to decode.'); gaps.push({ kind: 'decode', title: 'Review undecoded calls', points: 1, label: 'Decode every call selector in the nested call path. A candidate function name does not verify the target contract.' }); }
+  else { const proxyCandidate = nodes.some(node => node.decodeBasis === 'proxy_candidate_abi'); reasons.push(meaningful.length ? `${meaningful.length - decoded.length} call selector(s) remain undecoded or unconfirmed by the called contract; a 4byte or inferred proxy ABI does not close this gap.` : 'No call selector was available to decode.'); gaps.push(proxyCandidate ? { kind: 'proxy', title: 'Confirm proxy forwarding', points: 1, label: 'The implementation ABI fits the calldata, but the proxy forwarding path has only been inferred. Inspect the verified proxy source.' } : { kind: 'decode', title: 'Review undecoded calls', points: 1, label: 'Decode every call selector in the nested call path. A candidate function name does not verify the target contract.' }); }
   const called = targetChecks.filter(target => target.selectors?.length);
   const verified = called.filter(target => ['verified', 'verified_current'].includes(target.status) && (!target.proxy || ['verified', 'verified_current'].includes(target.proxy.implementationCode?.status)));
   if (called.length && verified.length === called.length) { score += 2; reasons.push('Every called target with calldata has matching verified runtime bytecode.'); }

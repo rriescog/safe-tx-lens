@@ -9,8 +9,9 @@ function targets(root) {
   const visit = node => {
     if (isAddress(node.to)) {
       const key = node.to.toLowerCase();
-      const entry = found.get(key) ?? { address: getAddress(node.to), selectors: new Set(), operations: new Set() };
+      const entry = found.get(key) ?? { address: getAddress(node.to), selectors: new Set(), operations: new Set(), needsDecode: false };
       if (/^0x[0-9a-fA-F]{8}$/.test(node.selector)) entry.selectors.add(node.selector.toLowerCase());
+      if (node.data !== '0x' && (!node.method || node.decodeBasis === 'selector_candidate')) entry.needsDecode = true;
       entry.operations.add(node.operation);
       found.set(key, entry);
     }
@@ -71,6 +72,9 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
             // in their ABI, while implementing masterCopy() in assembly.
             const safeProxyFallback = source.abi.some(item => item?.type === 'constructor' && item.inputs?.some(input => input.name === '_singleton')) && source.abi.some(item => item?.type === 'fallback');
             result.safeProxyCandidate = Boolean(iface.getFunction('masterCopy()')) || (safeProxyFallback && matchedBytecode.toLowerCase().includes('a619486e'));
+            // Older transparent proxies expose both getters and dispatch
+            // unknown selectors through fallback, without using ERC-1967.
+            result.getterProxyCandidate = Boolean(iface.getFunction('implementation()') && iface.getFunction('proxyType()') && source.abi.some(item => item?.type === 'fallback'));
             if (source.abi.length && iface.fragments.length === 0) result.abiWarning = 'Verified ABI could not be parsed';
             else {
               result.abiSelectors = [...entry.selectors].map(selector => ({ selector, present: Boolean(iface.getFunction(selector)) }));
@@ -110,12 +114,24 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
         }
       } catch (error) { result.proxyCheck = `Safe singleton slot unavailable: ${error.shortMessage ?? error.message}`; }
     }
+    if (!result.proxy && result.getterProxyCandidate) {
+      try {
+        const iface = new Interface(['function implementation() view returns (address)']);
+        const data = await provider.call({ to: entry.address, data: iface.encodeFunctionData('implementation') }, effectiveBlockTag);
+        const implementation = iface.decodeFunctionResult('implementation', data)[0];
+        if (isAddress(implementation) && implementation.toLowerCase() !== entry.address.toLowerCase() && !/^0x0{40}$/i.test(implementation)) {
+          result.proxy = { standard: 'implementation() fallback', implementation: getAddress(implementation) };
+          result.proxy.implementationCode = await inspectOne({ address: result.proxy.implementation, selectors: entry.selectors, operations: entry.operations }, provider, network, effectiveBlockTag, lookup, 1, Boolean(base.historicalUnavailable));
+        }
+      } catch (error) { result.proxyCheck = `Implementation getter unavailable: ${error.shortMessage ?? error.message}`; }
+    }
   }
   return result;
 }
 
-export async function inspectTargetCode(call, network, { rpcUrl, provider, blockTag = 'latest', sourceLookup = sourcifyLookup } = {}) {
+export async function inspectTargetCode(call, network, { rpcUrl, provider, blockTag = 'latest', sourceLookup = sourcifyLookup, maxTargets = MAX_TARGETS } = {}) {
   const entries = targets(call);
+  if (!Number.isInteger(maxTargets) || maxTargets < 1 || maxTargets > MAX_TARGETS) throw new Error('Invalid target verification limit');
   if (!rpcUrl && !provider) return entries.map(entry => ({ address: entry.address, network, blockTag, selectors: [...entry.selectors], status: 'unavailable', reason: 'No RPC configured for this network' }));
   const rpc = provider ?? new JsonRpcProvider(rpcUrl);
   try {
@@ -124,7 +140,14 @@ export async function inspectTargetCode(call, network, { rpcUrl, provider, block
   } catch (error) {
     return entries.map(entry => ({ address: entry.address, network, blockTag, selectors: [...entry.selectors], status: 'unavailable', reason: error.message }));
   }
+  // Public reviews spend their small lookup budget on undecoded calls first.
+  // Retain skipped entries as unavailable so the report never claims that all
+  // target bytecode was checked after inspecting only a subset.
+  const ordered = maxTargets < entries.length ? [...entries].sort((a, b) => Number(b.needsDecode) - Number(a.needsDecode)) : entries;
   const reports = [];
-  for (const entry of entries) reports.push(await inspectOne(entry, rpc, network, blockTag, sourceLookup));
+  for (const [index, entry] of ordered.entries()) {
+    if (index >= maxTargets) reports.push({ address: entry.address, network, blockTag, selectors: [...entry.selectors], status: 'unavailable', reason: 'Automatic target verification limit reached; inspect this target separately' });
+    else reports.push(await inspectOne(entry, rpc, network, blockTag, sourceLookup));
+  }
   return reports;
 }

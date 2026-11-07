@@ -11,7 +11,7 @@ function actionImpact(action) {
   // Scores are review priorities for possible impact, not exploit likelihood.
   // Unknown selectors remain high because a name cannot be inferred safely.
   const method = action.method?.split('(')[0] ?? null;
-  if (action.decodeBasis === 'selector_candidate') return { score: /upgrade|admin|owner|guard/i.test(method ?? '') ? 95 : 75, reason: 'Only a candidate function signature matched the selector; target behavior remains unverified.' };
+  if (['selector_candidate', 'proxy_candidate_abi'].includes(action.decodeBasis)) return { score: /upgrade|admin|owner|guard|reinitialize/i.test(method ?? '') ? 95 : 75, reason: action.decodeBasis === 'proxy_candidate_abi' ? 'The verified implementation ABI fits, but proxy forwarding has not been independently proven.' : 'Only a candidate function signature matched the selector; target behavior remains unverified.' };
   if (['upgradeTo', 'upgradeToAndCall', 'upgradeAndCall', 'updateImplementation', 'changeAdmin'].includes(method)) return { score: 95, reason: 'Changes implementation or admin authority.' };
   if (['addOwnerWithThreshold', 'removeOwner', 'swapOwner', 'changeThreshold', 'enableModule', 'disableModule', 'setGuard', 'setFallbackHandler'].includes(method)) return { score: 95, reason: 'Changes who can control or execute from the Safe.' };
   if (method === 'reinitializeValidatorState') return { score: 90, reason: 'Reinitializes validator accounting state.' };
@@ -54,7 +54,7 @@ export function assessRisk({ call, actions, findings, effects, checks, simulatio
   if (effects.some(effect => effect.severity === 'critical')) add(95, 'Simulation shows a change to authority, implementation, or Safe singleton storage.');
   if (effects.some(effect => effect.kind === 'asset_transfer')) add(80, 'Simulation shows asset transfers. Review recipients and amounts.');
   const reviewScore = Math.max(impactScore, ...reasons.map(item => item.score), 0);
-  const uncertain = findings.some(finding => ['UNKNOWN_SELECTOR', 'SELECTOR_CANDIDATE', 'MULTISEND_TARGET_UNVERIFIED'].includes(finding.code)) || actionRatings.some(action => action.decodeBasis === 'selector_candidate' || (action.method === null && action.selector !== '0x'));
+  const uncertain = findings.some(finding => ['UNKNOWN_SELECTOR', 'SELECTOR_CANDIDATE', 'MULTISEND_TARGET_UNVERIFIED'].includes(finding.code)) || actionRatings.some(action => ['selector_candidate', 'proxy_candidate_abi'].includes(action.decodeBasis) || (action.method === null && action.selector !== '0x'));
   const basis = simulation?.mode === 'conditional_threshold_override' ? 'decoded calldata and conditional simulated effects' : simulation?.success === true ? 'decoded calldata and simulated effects' : transaction.isExecuted ? 'onchain execution and decoded calldata' : 'decoded calldata only';
   return {
     level: level(reviewScore), impactLevel: level(impactScore), reviewPriority: level(reviewScore),

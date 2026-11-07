@@ -49,6 +49,24 @@ test('an arbitrary supplied Safe transaction uses its target verified ABI', asyn
   assert.equal(report.targetChecks[0].status, 'verified');
 });
 
+test('bounded live ABI lookup prioritizes unknown calls and reports skipped targets', async () => {
+  const batch = new Interface(['function multiSend(bytes)']).encodeFunctionData('multiSend', [packed]);
+  const root = decodeCall({ to: BATCH, value: '0', operation: 1, data: batch });
+  const requested = [];
+  const provider = {
+    getNetwork: async () => ({ chainId: 1n }),
+    getCode: async address => { requested.push(address); return '0x60016000'; },
+    getStorage: async () => '0x',
+  };
+  const sourceLookup = async () => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: '0x60016000' }, abi: ['function retrieveRemaining()'] });
+  const checks = await inspectTargetCode(root, 'eth', { provider, sourceLookup, maxTargets: 1 });
+  assert.equal(requested.length, 1);
+  assert.equal(requested[0].toLowerCase(), VAULT.toLowerCase());
+  assert.equal(checks.find(check => check.address.toLowerCase() === VAULT.toLowerCase()).status, 'verified');
+  assert.equal(checks.filter(check => check.status === 'unavailable').length, 2);
+  assert.ok(checks.filter(check => check.status === 'unavailable').every(check => /limit/.test(check.reason)));
+});
+
 test('source label is withheld if RPC bytecode differs or selector is absent', async () => {
   const root = decodeCall({ to: VAULT, value: '0', operation: 0, data: retrieve });
   enrichVerifiedCalls(root, [{ address: VAULT, status: 'mismatch', verifiedFunctions: [{ selector: retrieve, signature: 'retrieveRemaining()', abi: 'function retrieveRemaining()' }] }]);

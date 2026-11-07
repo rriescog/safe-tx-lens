@@ -26,7 +26,7 @@ test('recommended projects appear only in the dark footer', async () => {
   assert.match(main, /tier-diamond[\s\S]*tier-gold[\s\S]*tier-silver[\s\S]*tier-bronze/);
   assert.match(main, /Infrastructure support also counts/);
   assert.doesNotMatch(main, /data-network="sep"/);
-  assert.match(main, /Polygon Amoy · JSON; RPC configurable/);
+  assert.match(main, /Polygon Amoy · onchain and JSON only/);
   assert.match(main, /Choose JSON file/);
   assert.match(main, /drag and drop one JSON file/);
   assert.match(footer, /All rights reserved except as granted under the MIT License/);
@@ -209,7 +209,9 @@ test('bytecode status and RPC provenance distinguish completed, partial, and unr
   assert.match(page.evaluate('targetChecksHtml(sample)'), /To verify code at execution time/);
   assert.doesNotMatch(page.evaluate('targetChecksHtml(sample)'), /id="verify-targets"/);
   page.context.sample = { ...base, targetVerificationAttempted: true, targetChecks: [{ address: target, status: 'verified', reason: 'matched', blockTag: 'latest', abiSelectors: [{ selector: '0x12345678', present: false }] }] };
-  assert.match(page.evaluate('targetChecksHtml(sample)'), /ABI selector mismatch/);
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /Verified bytecode · 1\/1/);
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /1 call selector absent from the matched ABI/);
+  assert.doesNotMatch(page.evaluate('targetChecksHtml(sample)'), /id="verify-targets"/);
   page.context.sample = { ...base, targetVerificationAttempted: true, targetChecks: [{ address: target, status: 'mismatch', reason: 'different bytecode', blockTag: 'latest' }] };
   assert.match(page.evaluate('targetChecksHtml(sample)'), /Bytecode mismatch/);
   const rpc = { checks: [], evidence: {}, transaction: {}, rpc: { kind: 'public', label: 'PublicNode (ethereum.publicnode.com)' } };
@@ -520,7 +522,8 @@ test('web report renders transaction evidence, target verification, effects, and
   const html = page.evaluate('reportHtml(sample)');
   for (const phrase of ['Safe nonce 7', 'Safe Transaction Service', 'Target bytecode and verified source', 'Verified bytecode · 1/1', 'ERC20 transfer', 'Safe execution succeeded in simulation', 'Technical details']) assert.match(html, new RegExp(phrase));
   assert.ok(html.indexOf('Technical details: decoded arguments') < html.indexOf('3 · Changes encoded'));
-  assert.match(html, /Pending checks/);
+  assert.match(html, /pending checks|Pending check:/);
+  assert.match(html, /Compare the Safe hash/);
   assert.doesNotMatch(html, /evidence points still missing|<strong>−[0-9]/);
   assert.match(html, /href="#evidence-checks"/);
   assert.match(html, /href="#target-code"|data-pending-action="verify"/);
@@ -548,6 +551,7 @@ test('review priority explains the strongest transaction-specific signal', async
   const review = await analyze(tx, 'eth', { fetchState: false });
   review.risk = { ...review.risk, reviewPriority: 'high', impactLevel: 'high', level: 'high', basis: 'decoded calldata only', reasons: [
     { score: 75, level: 'high', message: 'Called: transfer to 0x3333. Moves tokens; value and recipient need independent review.' },
+    { score: 75, level: 'high', message: 'Scheduled: transfer to 0x3333. Moves tokens; value and recipient need independent review.' },
     { score: 50, level: 'medium', message: 'Called: unrelated custom call.' },
   ] };
   page.context.sample = review;
@@ -555,8 +559,19 @@ test('review priority explains the strongest transaction-specific signal', async
   assert.match(html, /Why high priority/);
   assert.match(html, /transfer to 0x3333/);
   assert.match(html, /Moves tokens; value and recipient need independent review/);
+  assert.match(html, /Scheduled and called: transfer to 0x3333/);
+  assert.equal((html.match(/Moves tokens; value and recipient need independent review/g) ?? []).length, 1);
   assert.doesNotMatch(html, /unrelated custom call/);
   assert.match(html, /Based on decoded calldata only/);
+});
+
+test('one pending check names the action in its heading', () => {
+  const page = ui();
+  page.context.sample = { score: 9, color: 'green', reasons: [], gaps: [{ kind: 'simulation', title: 'Measure state changes', label: 'Run a simulation.' }] };
+  const html = page.evaluate('confidenceHtml(sample)');
+  assert.match(html, /Pending check: Measure state changes/);
+  assert.match(html, /data-pending-action="simulate"/);
+  assert.doesNotMatch(html, /1 to review/);
 });
 
 test('web report marks unavailable verification and simulation outcomes explicitly', async () => {

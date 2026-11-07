@@ -108,7 +108,11 @@ export function enrichVerifiedCalls(root, targetChecks) {
   const visit = node => {
     if (node.data !== '0x') {
       const target = byAddress.get(node.to.toLowerCase());
-      const source = target?.proxy?.implementationCode ?? target;
+      // Proxy administration methods belong to the outer contract; ordinary
+      // forwarded methods belong to the implementation. Try the matching ABI
+      // on either side rather than calling a valid outer method a mismatch.
+      const implementation = target?.proxy?.implementationCode;
+      const source = implementation?.verifiedFunctions?.some(item => item.selector === node.selector.toLowerCase()) ? implementation : target;
       if (source && ['verified', 'verified_current'].includes(source.status)) {
         const functionInfo = source.verifiedFunctions?.find(item => item.selector === node.selector.toLowerCase());
         if (functionInfo) {
@@ -122,8 +126,9 @@ export function enrichVerifiedCalls(root, targetChecks) {
               }
               node.method = parsed.signature;
               node.args = parsed.fragment.inputs.map((input, index) => ({ name: input.name || `arg${index}`, value: clean(parsed.args[index]) }));
-              node.decodeBasis = 'verified_abi';
-              node.decodeSource = source.status === 'verified_current' ? 'verified current bytecode (historical code unavailable)' : 'verified bytecode at inspected block';
+              const inferredRoute = target.proxy?.standard === 'implementation() fallback' && source === implementation;
+              node.decodeBasis = inferredRoute ? 'proxy_candidate_abi' : 'verified_abi';
+              node.decodeSource = inferredRoute ? 'verified implementation ABI; proxy forwarding inferred from its getters and fallback, not independently proven' : source.status === 'verified_current' ? 'verified current bytecode (historical code unavailable)' : 'verified bytecode at inspected block';
               node.decodeSourceUrl = source.source;
             }
           } catch (error) { node.decodeError = `Verified ABI could not decode calldata: ${error.message}`; }

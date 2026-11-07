@@ -48,13 +48,15 @@ test('inventory runner accepts an array, filters unsupported networks, and prior
   try {
     await writeFile(path, JSON.stringify([
       { chain_id: 999999, address: tx.safe, name: 'Unsupported' },
+      { chain_id: 1, address: tx.safe, name: 'Legacy multisig', type: null },
       { chain_id: 1, address: '0x0000000000000000000000000000000000000001', name: 'Other' },
       { chain_id: 1, address: tx.safe, name: 'Protocol Council fixture' },
     ]));
     const result = run(path, '1');
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Protocol Council fixture/);
-    assert.doesNotMatch(result.stdout, /Other|Unsupported/);
+    assert.doesNotMatch(result.stdout, /Other|Unsupported|Legacy multisig/);
+    assert.match(result.stdout, /"excludedNonSafe":1/);
     await writeFile(path, JSON.stringify({ invalid: [] }));
     assert.match(run(path, '1').stderr, /Inventory must be an array/);
   } finally { await rm(dir, { recursive: true, force: true }); }

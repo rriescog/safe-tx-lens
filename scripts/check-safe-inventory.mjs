@@ -17,7 +17,10 @@ if (!inventoryPath || !/^\d+$/.test(requestedCount) || Number(requestedCount) < 
   const document = JSON.parse(await readFile(inventoryPath, 'utf8'));
   const items = Array.isArray(document) ? document : document.safes;
   if (!Array.isArray(items)) throw new Error('Inventory must be an array or an object with a safes array');
-  const supported = items.filter(item => chain.has(Number(item.chain_id)) && (!networks || networks.has(chain.get(Number(item.chain_id)))));
+  // Spectre inventories can include legacy multisigs without Safe's nonce,
+  // threshold, or Transaction Service support. Test only records explicitly
+  // typed as Safe, while allowing older generic fixtures without a type key.
+  const supported = items.filter(item => (item.type === undefined || item.type === 'safe') && chain.has(Number(item.chain_id)) && (!networks || networks.has(chain.get(Number(item.chain_id)))));
   const priority = item => /Protocol Council|AggLayer Rollup Multisig|Polygon_Security_Multisig|Polygon_Engineering_Multisig/i.test(item.name ?? '');
   const selected = [...supported.filter(priority), ...supported.filter(item => !priority(item))].slice(0, Number(requestedCount));
   if (selected.length !== Number(requestedCount)) throw new Error(`Inventory has only ${selected.length} supported multisigs`);
@@ -46,6 +49,6 @@ if (!inventoryPath || !/^\d+$/.test(requestedCount) || Number(requestedCount) < 
     }
     console.log(`${index + 1}/${selected.length} ${network} ${item.name ?? safe}: ${statuses.join(' · ')}`);
   }
-  console.log(JSON.stringify({ safes: selected.length, scopeChecks: passed + failed, passed, failed, decoded }));
+  console.log(JSON.stringify({ safes: selected.length, scopeChecks: passed + failed, passed, failed, decoded, excludedNonSafe: items.filter(item => item.type !== undefined && item.type !== 'safe').length, unsupportedNetwork: items.filter(item => (item.type === undefined || item.type === 'safe') && !chain.has(Number(item.chain_id))).length }));
   if (failed) process.exitCode = 1;
 }

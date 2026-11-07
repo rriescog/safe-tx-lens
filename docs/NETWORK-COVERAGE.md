@@ -1,6 +1,6 @@
 # Network endpoint coverage
 
-Last live probe: **2026-11-07 11:18 UTC**. This is a dated observation, not a promise of future availability.
+Last live probe: **2026-11-07 18:23 UTC**. This is a dated observation, not a promise of future availability.
 
 The original probe made **30 authenticated Safe Transaction Service requests**, paced by 600 ms and capped at three per named network. It stopped automatically if Safe returned HTTP 429 or its remaining quota fell below 100. Nine public RPC endpoints were checked once each with `eth_chainId`. The unavailable legacy chain from that probe is excluded from the supported network list. The Safe key and quota headers are not published in the UI snapshot.
 
@@ -37,4 +37,4 @@ npm run check:networks -- --live --snapshot web/network-coverage.json
 
 Safe counts [one API unit per HTTP request](https://docs.safe.global/core-api/api-authentication). The probe reads `X-RateLimit-Remaining`, never retries a 429, and does not write credentials to the snapshot.
 
-Immutable zkEVM (chain 13371) was added as an explicit onchain/JSON integration after an `eth_chainId` response of `0x343b` from its official public RPC on 2026-11-07. Safe proposal indexing and queue/history endpoints were not verified for this chain; do not treat it as full Safe Transaction Service coverage. Polygon Amoy remains JSON/configurable-RPC only until a working service and RPC probe succeeds.
+Immutable zkEVM (chain 13371) was added as an explicit onchain/JSON integration after an `eth_chainId` response of `0x343b` from its official public RPC on 2026-11-07. Safe proposal indexing and queue/history endpoints were not verified for this chain; do not treat it as full Safe Transaction Service coverage. Polygon Amoy and Immutable zkEVM returned HTTP 404 from the configured Safe Transaction Service endpoints in the 2026-11-07 live probe; their UI choices are limited to onchain execution hashes and supplied JSON. The old Polygon-operated Amoy RPC was retired; PublicNode returned chain ID 80002 on 2026-11-07. Neither network can currently retrieve a pending Safe hash or queue through this tool.

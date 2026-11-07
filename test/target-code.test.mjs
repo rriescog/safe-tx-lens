@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Interface, keccak256 } from 'ethers';
 import { inspectTargetCode, sourcifyLookup } from '../src/target-code.mjs';
 import { analyze } from '../src/analyze.mjs';
+import { assessConfidence } from '../src/confidence.mjs';
 
 const TARGET = '0x2222222222222222222222222222222222222222';
 const LOGIC = '0x3333333333333333333333333333333333333333';
@@ -52,6 +53,41 @@ test('SafeProxy slot-0 singleton ABI is inspected instead of treating proxy ABI 
   assert.equal(target.abiSelectors[0].present, false);
   assert.equal(target.proxy.implementationCode.abiSelectors[0].present, true);
   const review = await analyze({ safe: TARGET, to: TARGET, value: '0', data, operation: 0, nonce: 1 }, 'eth', { fetchState: false, verifyTargets: true, targetProvider: rpc, sourceLookup: lookup });
+  assert.equal(review.findings.some(item => item.code === 'TARGET_ABI_MISMATCH'), false);
+});
+
+test('verified fallback proxy follows its implementation getter before judging the call ABI', async () => {
+  const getter = new Interface(['function implementation() view returns (address)']);
+  const rpc = {
+    getNetwork: async () => ({ chainId: 1n }),
+    getCode: async () => '0x60016000',
+    getStorage: async () => '0x',
+    call: async () => getter.encodeFunctionResult('implementation', [LOGIC]),
+  };
+  const proxyAbi = ['function implementation() view returns (address)', 'function proxyType() view returns (uint256)', { type: 'fallback', stateMutability: 'payable' }];
+  const lookup = async (_network, address) => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: '0x60016000' }, abi: address.toLowerCase() === TARGET.toLowerCase() ? proxyAbi : abi });
+  const [target] = await inspectTargetCode(call, 'eth', { provider: rpc, sourceLookup: lookup });
+  assert.equal(target.status, 'verified');
+  assert.equal(target.abiSelectors[0].present, false);
+  assert.equal(target.proxy.standard, 'implementation() fallback');
+  assert.equal(target.proxy.implementation, LOGIC);
+  assert.equal(target.proxy.implementationCode.abiSelectors[0].present, true);
+  const review = await analyze({ safe: TARGET, to: TARGET, value: '0', data, operation: 0, nonce: 1 }, 'eth', { fetchState: false, verifyTargets: true, targetProvider: rpc, sourceLookup: lookup });
+  assert.equal(review.call.decodeBasis, 'proxy_candidate_abi');
+  assert.equal(review.findings.some(item => item.code === 'TARGET_ABI_MISMATCH'), false);
+  assert.ok(assessConfidence({ call: review.call, checks: [], targetChecks: review.targetChecks, transaction: review.transaction }).gaps.some(gap => gap.kind === 'proxy'));
+});
+
+test('a proxy administration selector is valid in the outer ABI even when absent from its implementation ABI', async () => {
+  const update = new Interface(['function updateImplementation(address newImplementation)']).encodeFunctionData('updateImplementation', [LOGIC]);
+  const getter = new Interface(['function implementation() view returns (address)']);
+  const rpc = { getNetwork: async () => ({ chainId: 1n }), getCode: async () => '0x60016000', getStorage: async () => '0x', call: async () => getter.encodeFunctionResult('implementation', [LOGIC]) };
+  const proxyAbi = ['function implementation() view returns (address)', 'function proxyType() view returns (uint256)', 'function updateImplementation(address newImplementation)', { type: 'fallback', stateMutability: 'payable' }];
+  const lookup = async (_network, address) => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: '0x60016000' }, abi: address.toLowerCase() === TARGET.toLowerCase() ? proxyAbi : abi });
+  const review = await analyze({ safe: TARGET, to: TARGET, value: '0', data: update, operation: 0, nonce: 1 }, 'eth', { fetchState: false, verifyTargets: true, targetProvider: rpc, sourceLookup: lookup });
+  assert.equal(review.call.decodeBasis, 'verified_abi');
+  assert.equal(review.targetChecks[0].abiSelectors[0].present, true);
+  assert.equal(review.targetChecks[0].proxy.implementationCode.abiSelectors[0].present, false);
   assert.equal(review.findings.some(item => item.code === 'TARGET_ABI_MISMATCH'), false);
 });
 

@@ -70,3 +70,22 @@ test('a corrupt quota state fails closed instead of silently resetting the publi
     assert.throws(() => publicQuota({ file, dailyLimit: 0 }), /Invalid public quota/);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test('public single-transaction reviews request bounded live target decoding', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'safe-lens-live-decode-'));
+  const seen = [];
+  const server = await serve({ port: 0, publicMode: true, publicOrigin: 'https://lens.example.test', quotaFile: join(directory, 'budget.json'), dailyLimit: 3, credentialReader: async () => ({}), inspectionResolver: async (input, network, options) => { seen.push({ input, network, options }); return { kind: 'test', ok: true }; } });
+  const url = `http://127.0.0.1:${server.address().port}/api/inspect`;
+  const post = input => fetch(url, { method: 'POST', headers: { origin: 'https://lens.example.test', 'content-type': 'application/json' }, body: JSON.stringify({ input, network: 'eth', decodeCandidates: true }) });
+  try {
+    assert.equal((await post(`0x${'a'.repeat(64)}`)).status, 200);
+    assert.equal(seen[0].options.verifyTargets, true);
+    assert.equal(seen[0].options.targetLimit, 4);
+    assert.equal(seen[0].options.decodeCandidates, true);
+    assert.equal((await post('0x1111111111111111111111111111111111111111')).status, 200);
+    assert.equal(seen[1].options.verifyTargets, false);
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

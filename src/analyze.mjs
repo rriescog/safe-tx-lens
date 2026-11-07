@@ -265,9 +265,34 @@ export async function analyze(raw, network = 'eth', options = {}) {
   const call = decodeCall(tx);
   // A selector is only a decoding hypothesis. Pin every resolved target to
   // bytecode on the selected chain and compare Sourcify's verified runtime.
-  const targetChecks = options.verifyTargets ? await inspectTargetCode(call, network, { rpcUrl: options.rpcUrl, provider: options.targetProvider, blockTag: tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest', sourceLookup: options.sourceLookup }) : [];
+  const targetChecks = options.verifyTargets ? await inspectTargetCode(call, network, { rpcUrl: options.rpcUrl, provider: options.targetProvider, blockTag: tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest', sourceLookup: options.sourceLookup, maxTargets: options.targetLimit }) : [];
   enrichVerifiedCalls(call, targetChecks);
   if (options.decodeCandidates) await enrichCandidateCalls(call, { lookup: options.selectorLookup });
+  // A batch can upgrade a proxy and then call a function that exists only in
+  // the proposed new implementation. Check that new bytecode separately. It
+  // remains conditional: calldata alone cannot prove the upgrade succeeded.
+  if (options.verifyTargets) {
+    const proposed = new Map();
+    const visit = node => {
+      if (node.method?.startsWith('updateImplementation(')) {
+        const next = node.args?.find(arg => arg.name === 'newImplementation')?.value;
+        if (isAddress(next)) proposed.set(node.to.toLowerCase(), getAddress(next));
+      }
+      node.children?.forEach(visit);
+    };
+    visit(call);
+    let plannedChecks = 0;
+    for (const target of targetChecks) {
+      const next = proposed.get(target.address.toLowerCase());
+      const missing = target.proxy?.implementationCode?.abiSelectors?.filter(selector => !selector.present && !target.abiSelectors?.some(outer => outer.selector === selector.selector && outer.present)) ?? [];
+      if (!next || !missing.length || plannedChecks >= 2) continue;
+      plannedChecks++;
+      const nodes = missing.map(selector => ({ to: next, data: selector.selector, selector: selector.selector, operation: 0, children: [] }));
+      const [planned] = await inspectTargetCode({ ...nodes[0], children: nodes.slice(1) }, network, { rpcUrl: options.rpcUrl, provider: options.targetProvider, blockTag: tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest', sourceLookup: options.sourceLookup, maxTargets: 1 });
+      target.plannedImplementation = next;
+      target.plannedImplementationCode = planned;
+    }
+  }
   if (options.enrichTokens) await enrichTokenCalls(call, network, { rpcUrl: options.rpcUrl, provider: options.tokenProvider });
   const actions = summarizeCalls(call);
   const findings = classifyIntent(call);
@@ -278,7 +303,11 @@ export async function analyze(raw, network = 'eth', options = {}) {
     // Proxy ABI describes dispatch, not the functions that run through it.
     // A missing selector is meaningful only after checking the implementation.
     const effectiveTarget = target.proxy ? target.proxy.implementationCode : target;
-    if (effectiveTarget?.abiSelectors?.some(selector => !selector.present)) findings.push({ severity: 'warning', code: 'TARGET_ABI_MISMATCH', path: target.address, message: `The decoded selector is absent from the matching verified ${target.proxy ? 'implementation' : 'target'} ABI; the function label may be wrong.` });
+    const missing = effectiveTarget?.abiSelectors?.filter(selector => !selector.present && !(target.proxy && target.abiSelectors?.some(outer => outer.selector === selector.selector && outer.present))) ?? [];
+    const planned = target.plannedImplementationCode;
+    const plannedCoversMissing = missing.length && ['verified', 'verified_current'].includes(planned?.status) && missing.every(selector => planned.abiSelectors?.some(item => item.selector === selector.selector && item.present));
+    if (plannedCoversMissing) findings.push({ severity: 'info', code: 'UPGRADE_TARGET_ABI_CONDITIONAL', path: target.address, message: `The missing selector exists in the verified proposed implementation ${target.plannedImplementation}. This interpretation depends on the upgrade executing before the call.` });
+    else if (missing.length) findings.push({ severity: 'warning', code: 'TARGET_ABI_MISMATCH', path: target.address, message: `The decoded selector is absent from the matching verified ${target.proxy ? 'implementation' : 'target'} ABI; the function label may be wrong.` });
   }
   if (options.verifyTargets && targetChecks.some(target => !['verified', 'verified_current'].includes(target.status) || (target.proxy && !['verified', 'verified_current'].includes(target.proxy.implementationCode?.status)))) warnings.push('At least one called target or ERC-1967 implementation lacks matching verified runtime bytecode. A decoded selector is only a hypothesis about behavior.');
   if (tx.to.toLowerCase() === tx.safe.toLowerCase() && tx.data === '0x' && tx.value === '0' && tx.operation === 0) {
