@@ -190,7 +190,10 @@ function callHtml(call) {
   const children = call.children?.length ? `<div class="call-children">${call.children.map(callHtml).join('')}</div>` : '';
   return `<div class="call"><div class="call-title">${esc(title)} ${call.operation === 1 ? pill('DELEGATECALL') : ''} ${call.stage === 'schedule' ? pill('scheduled') : ''}</div><div class="call-detail mono">${call.via ? `${esc(call.via)} · ` : ''}To ${esc(call.to)} · ${esc(call.value)} wei</div>${decodeEvidence(call)}${args}${call.decodeError ? `<p class="notice danger">Decode error: ${esc(call.decodeError)}</p>` : ''}${children}<details><summary>Raw calldata</summary><div class="raw">${esc(call.data)}</div></details></div>`;
 }
-function section(title, body) { return `<section class="report-section"><h3>${esc(title)}</h3>${body}</section>`; }
+function section(title, body) {
+  const id = title.startsWith('1 ·') ? 'evidence-checks' : title.startsWith('2 ·') ? 'call-path' : title.startsWith('4 ·') ? 'target-code' : title.startsWith('5 ·') ? 'simulation-results' : '';
+  return `<section class="report-section"${id ? ` id="${id}"` : ''}><h3>${esc(title)}</h3>${body}</section>`;
+}
 function flowHtml(node, path, labels) {
   const method = node.method?.split('(')[0] ?? (node.data === '0x' ? 'Empty or value call' : `Unknown ${node.selector}`);
   const title = labels.get(path) ?? method;
@@ -306,6 +309,22 @@ function effectHtml(effect) {
   const detail = !asset && hasValues ? `<details><summary>Full before and after values</summary><div class="raw mono">Before: ${esc(effect.before)}<br>After: ${esc(effect.after)}</div></details>` : '';
   return `<div class="item">${pill(effect.severity)}<div class="item-content"><strong>${esc(title)}</strong><p class="mono">${esc(effect.address || 'Address unavailable')}<br>${values}</p>${detail}</div></div>`;
 }
+function pendingCheckAction(kind) {
+  if (kind === 'rpc' || kind === 'bytecode') {
+    if (!publicMode) return `<button type="button" class="pending-action" data-pending-action="verify">${kind === 'rpc' ? 'Retry RPC check' : 'Run bytecode check'}</button>`;
+    return `<a class="pending-action" href="#${kind === 'rpc' ? 'evidence-checks' : 'target-code'}">View check details</a>`;
+  }
+  if (kind === 'simulation' && !publicMode && (!communityMode || simulationEnabled)) return '<button type="button" class="pending-action" data-pending-action="simulate">Run simulation</button>';
+  const target = ['hash', 'hash_mismatch', 'rpc'].includes(kind) ? 'evidence-checks' : kind === 'decode' ? 'call-path' : ['bytecode', 'archive'].includes(kind) ? 'target-code' : 'simulation-results';
+  const label = kind === 'decode' ? 'Review call path' : kind === 'archive' ? 'View code status' : kind === 'hash' || kind === 'hash_mismatch' ? 'Open hash checks' : 'View limitations';
+  return `<a class="pending-action" href="#${target}">${label}</a>`;
+}
+function confidenceHtml(confidence) {
+  if (!confidence) return '';
+  const gaps = confidence.gaps ?? [];
+  const pending = gaps.length ? `<div class="pending-heading"><strong>Pending checks</strong><span>${gaps.length} to review</span></div><ul class="pending-checks">${gaps.map(gap => `<li><div><strong>${esc(gap.title ?? 'Review missing evidence')}</strong><p>${esc(gap.label)}</p></div>${pendingCheckAction(gap.kind)}</li>`).join('')}</ul>` : '<p class="checks-complete">All scored checks completed. Review the limitations below.</p>';
+  return `<div class="confidence confidence-${esc(confidence.color)}"><div class="confidence-score"><span class="confidence-number">${esc(confidence.score)}<small>/10</small></span><span>Evidence confidence</span></div><div class="confidence-content"><p>How much of this report could be checked. This is not a safety score.</p>${pending}<details><summary>How this was scored</summary><ul>${confidence.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details></div></div>`;
+}
 function reportHtml(r, retryNote = '') {
   const tx = r.transaction;
   const safeUiKnown = r.network !== 'kat';
@@ -321,7 +340,7 @@ function reportHtml(r, retryNote = '') {
   const flow = `<div class="flow-map"><div class="flow-origin"><span class="flow-kind">Safe transaction</span><strong>Nonce ${esc(tx.nonce)}</strong><span class="mono">${esc(tx.safe)}</span></div><ul class="flow-root">${flowHtml(r.call, '1', actionLabels)}</ul></div><details class="graph-extra"><summary>Explore this call tree as an interactive graph</summary><div class="graph-shell"><div class="graph-top"><strong>Interactive call graph</strong><span>Drag to pan · scroll or pinch to zoom · select a node</span></div><div class="call-graph" role="img" aria-label="Interactive graph of calls encoded in this Safe transaction"></div><div class="graph-selection" aria-live="polite"></div></div></details>`;
   const actionSummary = r.risk.actionRatings.map(action => `<div class="planned-action">${pill(action.level)}<div><span class="action-stage">${esc(action.stage === 'schedule' ? 'Encoded to schedule' : 'Encoded to call')}</span><strong>${esc(action.label)}</strong><p>${esc(action.reason)}</p></div></div>`).join('');
   const riskReasons = r.risk.reasons.filter(reason => !/^(Called|Scheduled):/.test(reason.message)).map(reason => `<div class="semantic-reason">${pill(reason.level)}<span>${esc(reason.message)}</span></div>`).join('');
-  const confidence = r.confidence ? `<div class="confidence confidence-${esc(r.confidence.color)}"><span class="confidence-number">${esc(r.confidence.score)}<small>/10</small></span><div><strong>Evidence confidence</strong><p>How much of this report could be checked. This is not a safety score.</p>${r.confidence.gaps?.length ? `<strong>${esc(10 - r.confidence.score)} evidence points still missing</strong><ul>${r.confidence.gaps.map(gap => `<li><strong>−${esc(gap.points)}</strong> ${esc(gap.label)}</li>`).join('')}</ul>` : '<p>All scored checks completed. Review the limitations below.</p>'}<details><summary>How this was scored</summary><ul>${r.confidence.reasons.map(reason => `<li>${esc(reason)}</li>`).join('')}</ul></details></div></div>` : '';
+  const confidence = confidenceHtml(r.confidence);
   const riskHtml = `${confidence}<div class="risk-summary"><div>${pill(r.risk.level)}<strong>${esc(r.risk.reviewPriority)} review priority</strong><span>${esc(r.risk.impactLevel)} potential impact</span></div><p>Priority reflects the possible impact of the decoded calls. It does not say the transaction is malicious or prove what will happen onchain.</p></div>${riskReasons}`;
   const checks = r.checks.map(c => `<div class="item">${pill(c.status)}<div class="item-content"><strong>${esc(c.name)}</strong><p class="mono">${esc(c.detail)}</p></div></div>`).join('');
   const findings = r.findings.length ? r.findings.map(f => `<div class="item">${pill(f.severity)}<div class="item-content"><strong>${esc(f.code)} · call ${esc(f.path)}</strong><p>${esc(f.message)}</p></div></div>`).join('') : '<p class="meta">No known intent pattern matched. This does not establish safety.</p>';
@@ -378,6 +397,11 @@ function showTransactionReport(result, retryNote = '') {
     event.currentTarget.disabled = true;
     inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, verifyTargets: true, retryTargets: true });
   });
+  report.querySelectorAll('[data-pending-action]').forEach(button => button.addEventListener('click', event => {
+    event.currentTarget.disabled = true;
+    if (event.currentTarget.dataset.pendingAction === 'simulate') inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, simulate: true });
+    else inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, verifyTargets: true, retryTargets: true });
+  }));
 }
 async function inspect({ silent = false, overrideInput = null, overrideNetwork = null, simulate = false, verifyTargets = !publicMode && (!communityMode || ['hash', 'json'].includes(selectedInputMode())), retryTargets = false } = {}) {
   const selectedInput = overrideInput ?? importedJson ?? input.value.trim();

@@ -484,6 +484,8 @@ test('report actions can rerun simulation and target verification for the select
     if (!buttons.has(selector)) buttons.set(selector, { addEventListener(name, handler) { this[name] = handler; } });
     return buttons.get(selector);
   };
+  const pendingButtons = ['simulate', 'verify'].map(pendingAction => ({ dataset: { pendingAction }, addEventListener(name, handler) { this[name] = handler; } }));
+  page.elements.get('report').querySelectorAll = selector => selector === '[data-pending-action]' ? pendingButtons : [];
   page.elements.get('input').value = review.hash;
   const requests = [];
   page.context.fetch = async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, json: async () => review }; };
@@ -496,6 +498,13 @@ test('report actions can rerun simulation and target verification for the select
   }
   assert.equal(requests[1].simulate, true);
   assert.equal(requests[2].verifyTargets, true);
+  for (const button of pendingButtons) {
+    button.click({ currentTarget: button });
+    await new Promise(done => setImmediate(done));
+    assert.equal(button.disabled, true);
+  }
+  assert.equal(requests[3].simulate, true);
+  assert.equal(requests[4].verifyTargets, true);
   assert.match(page.elements.get('report').innerHTML, /Checked again: no new bytecode evidence/);
 });
 
@@ -511,7 +520,11 @@ test('web report renders transaction evidence, target verification, effects, and
   const html = page.evaluate('reportHtml(sample)');
   for (const phrase of ['Safe nonce 7', 'Safe Transaction Service', 'Target bytecode and verified source', 'Verified bytecode · 1/1', 'ERC20 transfer', 'Safe execution succeeded in simulation', 'Technical details']) assert.match(html, new RegExp(phrase));
   assert.ok(html.indexOf('Technical details: decoded arguments') < html.indexOf('3 · Changes encoded'));
-  assert.match(html, /evidence points still missing/);
+  assert.match(html, /Pending checks/);
+  assert.doesNotMatch(html, /evidence points still missing|<strong>−[0-9]/);
+  assert.match(html, /href="#evidence-checks"/);
+  assert.match(html, /href="#target-code"|data-pending-action="verify"/);
+  assert.match(html, /data-pending-action="simulate"/);
   assert.match(html, /SAFE MULTISIG · eth/);
   assert.match(html, /https:\/\/app\.safe\.global\/home\?safe=eth%3A0x1111111111111111111111111111111111111111/);
   page.context.sample = { ...review, network: 'xlayer' };
