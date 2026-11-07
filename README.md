@@ -45,20 +45,38 @@ node bin/safe-tx-lens.mjs inspect @builder-export.json --network eth --safe-hash
 node bin/safe-tx-lens.mjs watch 0xYOUR_SAFE_ADDRESS --network eth --interval 30
 ```
 
-Nine supported networks have public RPC defaults; Polygon zkEVM requires `RPC_URL_ZKEVM` or `--rpc` for bytecode and onchain reconstruction. Set `RPC_URL_<NETWORK>` or `--rpc` to choose your own provider. No key is needed for local JSON analysis or reconstruction from an onchain execution transaction hash. Pending proposals are offchain, so an EVM RPC cannot recover their calldata from a Safe transaction hash. Safe Transaction Service access is needed for reliable hash-only lookup of pending proposals. [Anonymous access](https://docs.safe.global/core-api/how-to-use-api-keys) has a monthly quota; `SAFE_API_KEY` enables authenticated access.
+Nine named networks have public RPC defaults. These endpoints need no user key but have no service guarantee. Polygon zkEVM has no public RPC default and its Safe Transaction Service endpoints returned 404 in the [last bounded probe](docs/NETWORK-COVERAGE.md), so it is **not** currently covered for hash-only or Safe-address lookup. `RPC_URL_ZKEVM` or `--rpc` only enables onchain checks and reconstruction from an execution hash; it cannot create an offchain proposal source. No key is needed for local JSON analysis or reconstruction from an onchain execution transaction hash when a public RPC responds. Pending proposals are offchain, so an EVM RPC cannot recover their calldata from a Safe transaction hash. Safe Transaction Service access is needed for reliable hash-only lookup of pending proposals. [Anonymous access](https://docs.safe.global/core-api/how-to-use-api-keys) has a monthly quota; `SAFE_API_KEY` enables authenticated access.
 
 For a Safe hash, the UI, CLI, and MCP look up offchain proposals through Safe services and can use an optional Etherscan event index to locate executed transactions. An indexed execution is reconstructed and checked against the EVM RPC; an index hit by itself is not treated as proof. For a Safe address, Safe services supply the pending queue and executed history; Ethereum history can fall back to a recent RPC scan. The RPC scan covers roughly the latest 8,000 blocks and reports its range. If every pending source fails, the queue is marked **unavailable**, never empty. Listings show at most 20 per category in the UI and MCP.
 
 A bare Safe hash does not encode a readable network or Safe address. The UI defaults to **Auto-detect**, which searches supported chain indexes and Safe Transaction Services. A Safe URL supplies its own network. A bare Safe address is probed on supported chains; when found on several, the UI lets the reviewer choose a network. Network discovery depends on reachable services and may miss unsupported or unavailable chains. For an executed transaction, the report labels the onchain execution hash, block, and time separately from decoded intent. An empty measured state-diff section means no trace or simulation supplied those effects.
 
-To configure a key locally, copy `.env.example` to `.env`, fill `SAFE_API_KEY`, then start with `node --env-file=.env bin/safe-tx-lens.mjs serve`. `.env` is gitignored; never paste a key into the web UI. [Safe Builder](https://safe.global/api) provides a free authenticated plan with a monthly quota. `ETHERSCAN_API_KEY` is optional and helps locate older executed hashes. For simulation, set `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT`, and `TENDERLY_PROJECT`, then use `--simulate` with CLI `inspect` or select the simulation button for one report in the UI. A simulation is saved in the configured Tenderly project and the report links to its trace.
+### Credentials and RPC setup
+
+Copy `.env.example` to `.env`, fill only the services you use, then start with `node --env-file=.env bin/safe-tx-lens.mjs serve`. `.env` is gitignored; never paste a key into the web UI. Keys embedded in an RPC URL are secrets too.
+
+| Setting | Needed for | Local CLI/UI/MCP | Hosted community service today |
+| --- | --- | --- | --- |
+| `SAFE_API_KEY` | Reliable queued hash lookup and Safe pending/history listings | Recommended; anonymous quota is limited | Required; provision a dedicated service key as a server secret |
+| `RPC_URL_ETH`, `RPC_URL_POL` | Independent Ethereum/Polygon chain reads: Safe contract hash, execution receipt/logs, target bytecode, ERC-1967 slot, historical state when available | Recommended for dependable reviews; public RPC defaults exist | Dedicated RPC URLs are **not yet wired** into hosted mode; it uses public defaults |
+| Other `RPC_URL_<NETWORK>` | The same onchain checks on another selected network | Optional; `RPC_URL_ZKEVM` is required for zkEVM onchain checks | Dedicated URLs are **not yet wired** into hosted mode |
+| `ETHERSCAN_API_KEY` | Optional index for older executed Safe hashes | Optional | Not provisioned in the current deployment |
+| `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT`, `TENDERLY_PROJECT` | Optional simulation and measured state changes | Optional | Optional dedicated community project; disabled by default |
+| Sourcify | Verified runtime bytecode and ABI lookup | No key | No key; public API fair use applies |
+
+The network suffixes are `ETH` (Ethereum, chain 1), `POL` (Polygon PoS, 137), `GNO` (Gnosis, 100), `ARB1` (Arbitrum One, 42161), `OETH` (Optimism, 10), `BASE` (8453), `SEP` (Sepolia, 11155111), `ZKEVM` (Polygon zkEVM, 1101), `BNB` (56), and `AVAX` (43114). A numeric chain ID uses `RPC_URL_<CHAIN_ID>` for explicit local inspection. Configure one endpoint **per network** for multi-chain use: the single `RPC_URL` or `--rpc` overrides every network in that process/request, so it is suitable only when inspecting one selected chain. The tool checks the RPC's `eth_chainId` against the selected network and reports a mismatch rather than trusting the wrong chain. For historical bytecode/storage checks, choose a provider that serves the required past block; if it cannot, the report labels current-only or unavailable evidence.
+
+Ethereum and Polygon PoS had working Safe indexing, pending and history endpoints, and matching public RPC chain IDs in the [dated network probe](docs/NETWORK-COVERAGE.md). That probe did **not** establish that every transaction, contract, or historical block can be verified. For a dependable public service, dedicated Ethereum and Polygon RPC endpoints, caching, provider failure handling, and end-to-end tests must be added to hosted mode before claiming that standard. A paid RPC plan alone does not change the present hosted configuration.
+
+[Safe Builder](https://safe.global/plans) provides a free authenticated plan with a monthly quota; Safe lists it for prototyping and its Growth plan for production. For simulation, set the Tenderly variables above, then use `--simulate` with CLI `inspect` or select the simulation button for one report in the UI. A simulation is saved in the configured Tenderly project and the report links to its trace.
 
 In the UI, open one transaction and select **Run simulation and inspect state changes**. This sends that transaction's calldata and signatures to the configured Tenderly project. The report separates decoded intent from storage, balance, and asset changes returned by the simulation. If signatures are insufficient, hash verification fails, or the provider omits the state diff, it reports that limit rather than claiming no changes. Simulation is opt-in per transaction so browsing a Safe queue does not submit dozens of simulations.
 
 ```sh
 export SAFE_API_KEY='...'
 export ETHERSCAN_API_KEY='...'
-export RPC_URL='https://...'
+export RPC_URL_ETH='https://YOUR_ETHEREUM_RPC'
+export RPC_URL_POL='https://YOUR_POLYGON_RPC'
 export TENDERLY_ACCESS_KEY='...'
 export TENDERLY_ACCOUNT='your-account'
 export TENDERLY_PROJECT='your-project'
