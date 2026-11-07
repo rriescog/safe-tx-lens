@@ -76,8 +76,17 @@ test('executed Safe state falls back to current RPC state when archive storage i
 }, { failArchive: true }));
 
 test('historical simulation refuses to invent a preceding block without receipt or block number', async () => withRpc(async rpcUrl => {
-  const report = await analyze({ ...tx, isExecuted: true, executor: TARGET, transactionHash: `0x${'aa'.repeat(32)}`, signatures: `0x${'11'.repeat(65)}` }, 'eth', {
-    rpcUrl, verifyTargets: false, simulate: true, safeInfo: { nonce: '7', threshold: 1, owners: [SAFE], source: 'safe_api' },
-  });
-  assert.match(report.simulation.unavailable, /Historical execution receipt unavailable/);
+  // This path stops before contacting Tenderly, but it must pass the
+  // credential precheck on clean CI runners as well as developer machines.
+  const names = ['TENDERLY_ACCESS_KEY', 'TENDERLY_ACCOUNT', 'TENDERLY_PROJECT'];
+  const previous = names.map(name => process.env[name]);
+  [process.env.TENDERLY_ACCESS_KEY, process.env.TENDERLY_ACCOUNT, process.env.TENDERLY_PROJECT] = ['test-only', 'test-account', 'test-project'];
+  try {
+    const report = await analyze({ ...tx, isExecuted: true, executor: TARGET, transactionHash: `0x${'aa'.repeat(32)}`, signatures: `0x${'11'.repeat(65)}` }, 'eth', {
+      rpcUrl, verifyTargets: false, simulate: true, safeInfo: { nonce: '7', threshold: 1, owners: [SAFE], source: 'safe_api' },
+    });
+    assert.match(report.simulation.unavailable, /Historical execution receipt unavailable/);
+  } finally {
+    names.forEach((name, index) => { if (previous[index] === undefined) delete process.env[name]; else process.env[name] = previous[index]; });
+  }
 }));
