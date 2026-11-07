@@ -7,6 +7,7 @@ import { assessConfidence } from '../src/confidence.mjs';
 import { validateInspectionRequest } from '../src/input-boundary.mjs';
 import { publicSupportConfig } from '../src/support.mjs';
 import { chainId } from '../src/chains.mjs';
+import { assessRisk } from '../src/risk.mjs';
 
 const SAFE = '0x1111111111111111111111111111111111111111';
 const TOKEN = '0x2222222222222222222222222222222222222222';
@@ -29,6 +30,8 @@ test('verified ABI decodes an unknown nested selector beside a transfer', async 
   assert.deepEqual(root.children[1].args, []);
   assert.match(root.children[1].decodeSource, /verified bytecode/);
   assert.equal(summarizeCalls(root)[1].label, 'retrieveRemaining()');
+  const risk = assessRisk({ call: root, actions: summarizeCalls(root), findings: [], effects: [], checks: [], transaction: { operation: 1, isExecuted: false } });
+  assert.equal(risk.actionRatings[1].level, 'high');
 });
 
 test('source label is withheld if RPC bytecode differs or selector is absent', async () => {
