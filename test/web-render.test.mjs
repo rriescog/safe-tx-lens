@@ -542,6 +542,23 @@ test('web report renders transaction evidence, target verification, effects, and
   assert.match(page.evaluate('reportHtml(sample)'), /Verified from eth onchain execution/);
 });
 
+test('review priority explains the strongest transaction-specific signal', async () => {
+  const page = ui();
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const review = await analyze(tx, 'eth', { fetchState: false });
+  review.risk = { ...review.risk, reviewPriority: 'high', impactLevel: 'high', level: 'high', basis: 'decoded calldata only', reasons: [
+    { score: 75, level: 'high', message: 'Called: transfer to 0x3333. Moves tokens; value and recipient need independent review.' },
+    { score: 50, level: 'medium', message: 'Called: unrelated custom call.' },
+  ] };
+  page.context.sample = review;
+  const html = page.evaluate('reportHtml(sample)');
+  assert.match(html, /Why high priority/);
+  assert.match(html, /transfer to 0x3333/);
+  assert.match(html, /Moves tokens; value and recipient need independent review/);
+  assert.doesNotMatch(html, /unrelated custom call/);
+  assert.match(html, /Based on decoded calldata only/);
+});
+
 test('web report marks unavailable verification and simulation outcomes explicitly', async () => {
   const page = ui();
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
