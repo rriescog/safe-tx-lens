@@ -43,6 +43,7 @@ let anonymousQuotaUntil = 0;
 export async function safeGet(network, path, apiKey) {
   apiKey ??= (await localCredentials()).SAFE_API_KEY;
   chainId(network);
+  if (/^[0-9]+$/.test(network)) throw new Error('No Transaction Service alias configured for this chain ID; trying Safe Client Gateway');
   if (!/^\/[a-zA-Z0-9/_?=&.-]+$/.test(path) || path.includes('..')) throw new Error('Invalid Safe API path');
   if (!apiKey && Date.now() < anonymousQuotaUntil) throw new Error('Safe anonymous monthly quota exhausted. Import transaction JSON for offchain proposals or use an onchain execution hash.');
   const headers = { Accept: 'application/json' };

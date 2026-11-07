@@ -10,7 +10,7 @@ function help() {
 
 Inputs: Safe tx hash, onchain execution tx hash, Safe address, app.safe.global URL, or JSON file (@path)
 Options:
-  --network <auto|eth|gno|pol|arb1|oeth|base|sep|zkevm|bnb|avax>
+  --network <auto|eth|gno|pol|arb1|oeth|base|sep|zkevm|bnb|avax|CHAIN_ID>
   --rpc <url>          Verify against the Safe contract; historical simulation
   --simulate           Simulate an inspected transaction with Tenderly
   --monitor-fallback    Explicitly allow a local Tenderly monitor snapshot if Safe services fail

@@ -2,6 +2,7 @@ const form = document.getElementById('inspect-form');
 const inputMode = document.getElementById('input-mode');
 const input = document.getElementById('input');
 const network = document.getElementById('network');
+const customChainId = document.getElementById('custom-chain-id');
 const scope = document.getElementById('scope');
 const safeAddress = document.getElementById('safe-address');
 const safeHash = document.getElementById('safe-hash');
@@ -52,6 +53,14 @@ let activeReportInput = null;
 let activeReportNetwork = null;
 let activeReportEvidence = null;
 let activeReportTargetChecks = null;
+
+function selectedNetwork() {
+  if (network.value !== 'other') return network.value;
+  const id = customChainId.value.trim();
+  if (!/^[1-9][0-9]{0,15}$/.test(id) || !Number.isSafeInteger(Number(id))) throw new Error('Enter a valid EVM chain ID');
+  return id;
+}
+network.addEventListener('change', () => { document.getElementById('custom-chain-group').hidden = network.value !== 'other'; });
 
 function selectedInputMode() {
   if (inputMode.value && inputMode.value !== 'auto') return inputMode.value;
@@ -201,7 +210,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
   if (!silent) { submit.disabled = true; status.textContent = simulate ? 'Simulating Safe execution and measuring state changes…' : 'Inspecting Safe data and recalculating hashes…'; }
   try {
     const isJson = selectedInputMode() === 'json';
-    const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? network.value, scope: scope.value, simulate, verifyTargets, safeAddress: isJson ? safeAddress.value.trim() || undefined : undefined, safeHash: isJson ? safeHash.value.trim() || undefined : undefined }) });
+    const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? selectedNetwork(), scope: scope.value, simulate, verifyTargets, safeAddress: isJson ? safeAddress.value.trim() || undefined : undefined, safeHash: isJson ? safeHash.value.trim() || undefined : undefined }) });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error ?? 'Inspection failed');
     report.classList.remove('empty');

@@ -6,6 +6,7 @@ import { inspectTargetCode } from '../src/target-code.mjs';
 import { assessConfidence } from '../src/confidence.mjs';
 import { validateInspectionRequest } from '../src/input-boundary.mjs';
 import { publicSupportConfig } from '../src/support.mjs';
+import { chainId } from '../src/chains.mjs';
 
 const SAFE = '0x1111111111111111111111111111111111111111';
 const TOKEN = '0x2222222222222222222222222222222222222222';
@@ -61,4 +62,11 @@ test('donation destinations are explicit EVM addresses and do not include Bitcoi
   assert.equal(config.wallets.length, 9);
   assert.equal(config.wallets.find(wallet => wallet.network === 'pol').address.toLowerCase(), '0x36560ad123164440a5187243783614237d783e98');
   assert.throws(() => publicSupportConfig('[{"network":"eth","address":"<script>"}]'));
+});
+
+test('a supplied EVM chain ID extends inspection beyond the named networks without auto-discovery', () => {
+  assert.equal(chainId('130'), 130);
+  assert.equal(validateInspectionRequest({ input: { safe: SAFE, to: VAULT }, network: '130' }).network, '130');
+  assert.throws(() => chainId('0'));
+  assert.throws(() => chainId('9999999999999999'));
 });

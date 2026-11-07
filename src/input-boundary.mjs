@@ -1,5 +1,5 @@
 import { isAddress } from 'ethers';
-import { CHAINS } from './chains.mjs';
+import { chainId } from './chains.mjs';
 
 const HASH = /^0x[0-9a-fA-F]{64}$/;
 
@@ -10,7 +10,7 @@ const HASH = /^0x[0-9a-fA-F]{64}$/;
 export function validateInspectionRequest(payload) {
   if (!payload || Array.isArray(payload) || typeof payload !== 'object') throw new Error('Expected one inspection request object');
   const network = payload.network ?? 'eth';
-  if (network !== 'auto' && !Object.hasOwn(CHAINS, network)) throw new Error('Unsupported network');
+  if (network !== 'auto') chainId(network);
   if (!['pending', 'history', 'both'].includes(payload.scope ?? 'pending')) throw new Error('Invalid transaction scope');
   for (const key of ['simulate', 'verifyTargets']) if (payload[key] !== undefined && typeof payload[key] !== 'boolean') throw new Error(`Invalid ${key}`);
   if (payload.safeAddress !== undefined && (!isAddress(payload.safeAddress) || payload.safeAddress.length !== 42)) throw new Error('Invalid Safe address');

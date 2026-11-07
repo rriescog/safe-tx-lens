@@ -4,6 +4,7 @@ export const CHAINS = Object.freeze({
 });
 
 export function chainId(prefix) {
+  if (typeof prefix === 'string' && /^[1-9][0-9]{0,15}$/.test(prefix) && Number.isSafeInteger(Number(prefix))) return Number(prefix);
   if (!Object.hasOwn(CHAINS, prefix)) throw new Error(`Unsupported Safe network: ${prefix}`);
   return CHAINS[prefix];
 }

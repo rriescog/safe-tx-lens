@@ -3,7 +3,7 @@ import * as z from 'zod/v4';
 import { resolve } from './resolve.mjs';
 import { parseInput } from './inputs.mjs';
 
-const network = z.enum(['auto', 'eth', 'gno', 'pol', 'arb1', 'oeth', 'base', 'sep', 'zkevm', 'bnb', 'avax']).default('auto');
+const network = z.union([z.enum(['auto', 'eth', 'gno', 'pol', 'arb1', 'oeth', 'base', 'sep', 'zkevm', 'bnb', 'avax']), z.string().regex(/^[1-9][0-9]{0,15}$/)]).default('auto');
 const annotations = { readOnlyHint: true, destructiveHint: false };
 
 // The hosted MCP deliberately has no caller-supplied RPC URL, credentials,
