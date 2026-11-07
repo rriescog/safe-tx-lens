@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { CHAINS } from '../src/chains.mjs';
+import { CHAINS, safeServiceAlias } from '../src/chains.mjs';
 import { PUBLIC_RPC } from '../src/onchain.mjs';
 import { localCredentials } from '../src/tenderly-storage.mjs';
 import { writeFile } from 'node:fs/promises';
@@ -49,7 +49,7 @@ export async function probeNetworks({ request = fetch, credentials = localCreden
       if (output.safeRequests) await pause(PAUSE_MS);
       output.safeRequests++;
       try {
-        const response = await request(`https://api.safe.global/tx-service/${network}/api/v1${path}`, { headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+        const response = await request(`https://api.safe.global/tx-service/${safeServiceAlias(network)}/api/v1${path}`, { headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
         const header = response.headers.get('x-ratelimit-remaining');
         if (header !== null && /^\d+$/.test(header)) remaining = Number(header);
         const body = await response.text();

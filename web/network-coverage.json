@@ -1,6 +1,6 @@
 {
-  "checkedAt": "2026-11-07T11:18:14.468Z",
-  "method": "Authenticated Safe Transaction Service indexing, pending and history endpoints with an empty test address; RPC eth_chainId",
+  "checkedAt": "2026-11-07T12:14:49Z",
+  "method": "Original ten networks checked at 11:18 UTC; Katana and X Layer checked at 12:14 UTC. Authenticated Safe indexing, pending and history with an empty address, plus RPC eth_chainId.",
   "networks": [
     {
       "network": "eth",
@@ -77,6 +77,22 @@
     {
       "network": "avax",
       "chainId": 43114,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "kat",
+      "chainId": 747474,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "xlayer",
+      "chainId": 196,
       "indexing": "available",
       "pending": "available",
       "history": "available",

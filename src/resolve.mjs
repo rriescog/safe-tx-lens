@@ -1,7 +1,7 @@
 import { analyze, analyzeHash } from './analyze.mjs';
 import { parseInput } from './inputs.mjs';
 import { fetchSafeTransactions, safeGet } from './safe-api.mjs';
-import { analyzeExecutionHash, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from './onchain.mjs';
+import { analyzeExecutionHash, discoverExecutionNetworks, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from './onchain.mjs';
 import { analyzeBuilderExport, isBuilderExport } from './builder.mjs';
 import { analyzeMonitorStorage, isMonitorStorage } from './monitor-import.mjs';
 import { fetchMonitorStorage, localCredentials } from './tenderly-storage.mjs';
@@ -49,6 +49,9 @@ async function detectNetwork(parsed, options = {}) {
       if (networks.size > 1) return [...networks];
     }
     if (parsed.kind === 'hash') {
+      const executionNetworks = await discoverExecutionNetworks(parsed.hash, Object.keys(CHAINS), options);
+      if (executionNetworks.length === 1) return executionNetworks[0];
+      if (executionNetworks.length > 1) throw new Error(`Execution hash appeared on multiple networks (${executionNetworks.join(', ')}). Select the network explicitly.`);
       for (const network of Object.keys(CHAINS)) {
         try { if (await findIndexedExecution(parsed.hash, network)) return network; }
         catch { /* This chain may be unsupported or temporarily unavailable in the index. */ }
@@ -64,7 +67,7 @@ async function detectNetwork(parsed, options = {}) {
       }
     }
   }
-  throw new Error('The hash or address does not reveal its network. No matching proposal or execution was found on supported chains. Select a network, or provide a Safe URL with chain prefix. Pending proposals require an accessible offchain source.');
+  throw new Error('The hash or address does not reveal its network. Available sources did not identify it; a provider outage or unsupported chain may also explain this. Select a network, or provide a Safe URL with chain prefix. Pending proposals require an accessible offchain source.');
 }
 
 async function monitorReports(network, options) {

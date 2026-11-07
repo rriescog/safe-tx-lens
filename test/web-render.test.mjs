@@ -210,7 +210,7 @@ test('web inspector opens a report, handles unavailable queues and shows API err
   page.context.fetch = async () => ({ ok: false, json: async () => ({ error: '<unsafe>' }) });
   await page.evaluate('inspect()');
   assert.match(page.elements.get('report').innerHTML, /&lt;unsafe&gt;/);
-  assert.equal(page.elements.get('status').textContent, 'Inspection failed');
+  assert.match(page.elements.get('status').textContent, /Inspection failed · <unsafe>/);
 });
 
 test('web form handles empty input, malformed JSON and an API error without a message', async () => {
@@ -361,6 +361,11 @@ test('web report renders transaction evidence, target verification, effects, and
   for (const phrase of ['Safe nonce 7', 'Safe Transaction Service', 'Target bytecode and verified source', 'Verified bytecode · 1/1', 'ERC20 transfer', 'Safe execution succeeded in simulation', 'Technical details']) assert.match(html, new RegExp(phrase));
   assert.match(html, /SAFE MULTISIG · eth/);
   assert.match(html, /https:\/\/app\.safe\.global\/home\?safe=eth%3A0x1111111111111111111111111111111111111111/);
+  page.context.sample = { ...review, network: 'xlayer' };
+  assert.match(page.evaluate('reportHtml(sample)'), /safe=okb%3A0x1111111111111111111111111111111111111111/);
+  page.context.sample = { ...review, network: 'kat' };
+  assert.match(page.evaluate('reportHtml(sample)'), /katanascan\.com\/address\//);
+  page.context.sample = review;
   assert.doesNotMatch(html, /id="verify-targets"/);
   assert.match(html, /project access required/);
   const publicPage = ui({ publicMode: true });

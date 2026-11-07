@@ -1,5 +1,5 @@
 import { getAddress, isAddress } from 'ethers';
-import { chainId } from './chains.mjs';
+import { chainId, internalNetwork } from './chains.mjs';
 
 const HASH = /^0x[0-9a-fA-F]{64}$/;
 
@@ -18,12 +18,13 @@ export function parseInput(input, network = 'eth') {
     if (!safe) throw new Error('Safe URL needs a safe= network:address parameter');
     const match = /^([a-z0-9]+):(0x[0-9a-fA-F]{40})$/.exec(safe);
     if (!match || !isAddress(match[2])) throw new Error('Invalid Safe URL address');
-    chainId(match[1]);
+    const urlNetwork = internalNetwork(match[1]);
+    chainId(urlNetwork);
     if (id) {
       const hash = id.match(/0x[0-9a-fA-F]{64}/)?.[0];
-      if (hash) return { kind: 'hash', hash, network: match[1], expectedSafe: getAddress(match[2]) };
+      if (hash) return { kind: 'hash', hash, network: urlNetwork, expectedSafe: getAddress(match[2]) };
     }
-    return { kind: 'safe', address: getAddress(match[2]), network: match[1] };
+    return { kind: 'safe', address: getAddress(match[2]), network: urlNetwork };
   } catch (error) {
     if (error.message?.startsWith('Only ') || error.message?.startsWith('Safe URL') || error.message?.startsWith('Invalid ')) throw error;
   }

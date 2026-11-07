@@ -45,6 +45,8 @@ test('invalid Safe fields fail before decoding or simulation', () => {
 test('Safe URL parsing rejects a mismatched origin, malformed Safe, and unknown chain', () => {
   const valid = parseInput(`https://app.safe.global/home?safe=eth:${SAFE}`, 'auto');
   assert.deepEqual({ kind: valid.kind, network: valid.network, address: valid.address }, { kind: 'safe', network: 'eth', address: SAFE });
+  assert.equal(parseInput(`https://app.safe.global/home?safe=okb:${SAFE}`, 'auto').network, 'xlayer');
+  assert.equal(parseInput(`https://app.safe.global/home?safe=katana:${SAFE}`, 'auto').network, 'kat');
   for (const input of [
     `https://app.safe.global.evil.example/home?safe=eth:${SAFE}`,
     `https://app.safe.global/home?safe=eth:0x123`,

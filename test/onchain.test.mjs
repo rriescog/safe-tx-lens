@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Interface, id } from 'ethers';
 import { calculateHash, normalizeTransaction } from '../src/analyze.mjs';
-import { analyzeExecutionHash, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from '../src/onchain.mjs';
+import { analyzeExecutionHash, discoverExecutionNetworks, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from '../src/onchain.mjs';
 
 test('RPC provenance names public defaults but never exposes a configured key', () => {
   const previous = process.env.RPC_URL_ETH;
@@ -29,6 +29,18 @@ const safeHash = calculateHash(normalizeTransaction(transaction), 'eth');
 const outer = { from: TARGET, to: SAFE, data: EXEC.encodeFunctionData('execTransaction', [TARGET, 0, '0x', 0, 0, 0, 0, ZERO, ZERO, '0x']) };
 const log = { address: SAFE, transactionHash: EXECUTION_HASH, topics: [id('ExecutionSuccess(bytes32,uint256)'), safeHash], data: '0x' };
 const receipt = { blockNumber: 500, logs: [log] };
+
+test('auto discovery recognizes an execution receipt only with a Safe event and matching RPC chain', async () => {
+  const request = async (url, options) => {
+    const method = JSON.parse(options.body).method;
+    const isEthereum = String(url).includes('ethereum.publicnode.com');
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: method === 'eth_chainId' ? '0x1' : isEthereum ? { logs: [log] } : null }), { status: 200 });
+  };
+  assert.deepEqual(await discoverExecutionNetworks(EXECUTION_HASH, ['eth', 'pol'], { fetchImpl: request }), ['eth']);
+  const wrongChain = async (_url, options) => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: JSON.parse(options.body).method === 'eth_chainId' ? '0x89' : { logs: [log] } }), { status: 200 });
+  assert.deepEqual(await discoverExecutionNetworks(EXECUTION_HASH, ['eth'], { fetchImpl: wrongChain }), []);
+  assert.deepEqual(await discoverExecutionNetworks(EXECUTION_HASH, ['eth'], { rpcUrl: '', fetchImpl: request }), []);
+});
 
 function provider(overrides = {}) {
   return {

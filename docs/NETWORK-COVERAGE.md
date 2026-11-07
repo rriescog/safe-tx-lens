@@ -17,13 +17,20 @@ The probe made **30 authenticated Safe Transaction Service requests**, paced by 
 | BNB Chain | 56 | 200, synced | 200 | 200 | Matched |
 | Avalanche | 43114 | 200, synced | 200 | 200 | Matched |
 
+Two Agglayer rollups were added after that probe. At **2026-11-07 12:14 UTC**, their official public RPCs answered `eth_chainId` with the expected IDs. Six additional authenticated Safe requests used the correct service aliases (`katana` and `okb`): each indexer reported synced and each pending/history endpoint returned a valid empty-address list. This confirms endpoint availability, **not** that any particular Safe or transaction is indexed:
+
+| Network | Chain ID | Safe indexer | Pending endpoint | History endpoint | RPC chain ID |
+| --- | ---: | --- | --- | --- | --- |
+| [Katana](https://docs.katana.network/katana/technical-reference/network-information/) | 747474 | 200, synced | 200 | 200 | Matched |
+| [X Layer](https://web3.okx.com/it/onchainos/dev-docs/xlayer/developer/rpc-endpoints/rpc-endpoints) | 196 | 200, synced | 200 | 200 | Matched |
+
 The pending and history calls used the zero address with `limit=1`. Their empty `results` arrays prove those endpoints answered with the expected list format; they do **not** prove that a particular Safe or transaction exists, that a pending proposal is recoverable, or that decoding and historical state verification work for every contract. A 404 for Polygon zkEVM means the configured Safe Transaction Service alias did not serve these endpoints during this probe. A supplied transaction JSON can still be decoded locally for chain 1101; onchain checks require an explicit RPC.
 
 One separate end-to-end sample used the public [Polygon PoS Council Safe](https://docs.polygon.technology/pos/reference/commit-chain-multisigs) on Ethereum with `limit=1` for each scope. Safe Transaction Service returned pending nonce 243 and executed nonce 244; both locally recomputed Safe hashes matched the returned hashes. This sample spent four additional Safe requests and does not validate the other eight available networks' individual transactions.
 
 For another EVM chain ID, the tool can ask Safe Client Gateway for the selected chain and recompute the Safe hash if complete transaction fields are returned. Such chains are **not** part of this probe or auto-discovery and must not be shown as covered until tested.
 
-Run the bounded probe again with:
+Run the bounded probe again with the current twelve-network list (at most 36 Safe requests) with:
 
 ```sh
 npm run check:networks -- --live --snapshot web/network-coverage.json

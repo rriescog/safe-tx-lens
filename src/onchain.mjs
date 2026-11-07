@@ -16,7 +16,29 @@ export const PUBLIC_RPC = Object.freeze({
   oeth: 'https://optimism-rpc.publicnode.com', base: 'https://base-rpc.publicnode.com',
   sep: 'https://ethereum-sepolia-rpc.publicnode.com', bnb: 'https://bsc-rpc.publicnode.com',
   avax: 'https://avalanche-c-chain-rpc.publicnode.com',
+  kat: 'https://rpc.katana.network', xlayer: 'https://rpc.xlayer.tech',
 });
+
+export async function discoverExecutionNetworks(hash, networks, options = {}) {
+  // A Safe hash has no chain ID, whereas an execution hash may be present in
+  // an RPC receipt. A receipt is only a discovery hint: the full onchain
+  // reconstruction below still verifies the Safe event and EIP-712 hash.
+  const fetcher = options.fetchImpl ?? fetch;
+  const matches = await Promise.all(networks.map(async network => {
+    const rpc = rpcDetailsFor(network, options.rpcUrl).url;
+    if (!rpc) return null;
+    try {
+      const response = await fetcher(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt', params: [hash] }), signal: AbortSignal.timeout(4000) });
+      if (!response.ok) return null;
+      const receipt = (await response.json()).result;
+      if (!receipt?.logs?.some(log => [SUCCESS_TOPIC, FAILURE_TOPIC].includes(log.topics?.[0]?.toLowerCase()))) return null;
+      const chainResponse = await fetcher(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'eth_chainId', params: [] }), signal: AbortSignal.timeout(4000) });
+      if (!chainResponse.ok || Number((await chainResponse.json()).result) !== chainId(network)) return null;
+      return network;
+    } catch { return null; }
+  }));
+  return matches.filter(Boolean);
+}
 
 export function rpcDetailsFor(network, override) {
   if (override !== undefined && override !== null) return { url: override, kind: override ? 'custom' : 'none', label: override ? 'Custom RPC configured for this request' : 'No RPC used' };

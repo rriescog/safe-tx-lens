@@ -39,8 +39,8 @@ export function assessRisk({ call, actions, findings, effects, checks, simulatio
     if (finding.code === 'DELEGATECALL') {
       const parsedBatch = transaction.operation === 1 && call?.method === 'multiSend(bytes)' && call.children.length > 0 && !call.decodeError;
       add(parsedBatch ? 60 : 95, parsedBatch
-        ? 'MultiSend uses delegatecall. Its inner actions were decoded, but the target bytecode has not been independently verified.'
-        : 'Delegatecall can execute target code in Safe storage context; target bytecode has not been independently verified here.');
+        ? 'MultiSend uses delegatecall. Its inner actions were decoded; review the target bytecode result below and the execution context.'
+        : 'Delegatecall can execute target code in Safe storage context; review the target bytecode result below and the execution context.');
     }
     if (finding.code === 'GAS_REFUND') add(80, 'Gas refund fields can move value beyond the visible target call.');
     if (finding.code === 'EXECUTION_MISMATCH') add(100, 'Historical simulation differs from the recorded execution outcome.');

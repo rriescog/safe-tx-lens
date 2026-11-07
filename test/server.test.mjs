@@ -17,8 +17,10 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
     const coverage = await fetch(`http://127.0.0.1:${server.address().port}/api/network-coverage`);
     assert.equal(coverage.status, 200);
     const snapshot = await coverage.json();
-    assert.equal(snapshot.networks.length, 10);
+    assert.equal(snapshot.networks.length, 12);
     assert.equal(snapshot.networks.find(row => row.network === 'zkevm').pending, 'not_available');
+    assert.equal(snapshot.networks.find(row => row.network === 'kat').pending, 'available');
+    assert.equal(snapshot.networks.find(row => row.network === 'xlayer').rpc, 'available');
     assert.doesNotMatch(JSON.stringify(snapshot), /SAFE_API_KEY|safeQuotaRemaining/);
     const plan = { chainId: '1', meta: {}, transactions: [{ to: SAFE, value: '0', data: '0x' }] };
     const valid = await post({ input: plan, network: 'eth' });

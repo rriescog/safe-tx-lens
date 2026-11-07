@@ -30,6 +30,16 @@ test('Safe Transaction Service requests use the configured key and validate path
   await assert.rejects(() => safeGet('unknown', `/safes/${SAFE}/`, 'explicit-test-key'), /Unsupported/);
 }));
 
+test('Agglayer display names resolve to the Safe Transaction Service aliases', async () => {
+  const urls = [];
+  await withFetch(async url => { urls.push(String(url)); return new Response(JSON.stringify({ synced: true, currentBlockNumber: 1 }), { status: 200 }); }, async () => {
+    await safeGet('kat', '/about/indexing/', 'explicit-test-key');
+    await safeGet('xlayer', '/about/indexing/', 'explicit-test-key');
+  });
+  assert.match(urls[0], /\/tx-service\/katana\/api\/v1\/about\/indexing\//);
+  assert.match(urls[1], /\/tx-service\/okb\/api\/v1\/about\/indexing\//);
+});
+
 test('a hash lookup records the live source and queue pages preserve their coverage', async () => withFetch(async (url, options) => {
   assert.equal(options.headers.Authorization, 'Bearer test-only-safe-key');
   const path = String(url);

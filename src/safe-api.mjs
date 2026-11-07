@@ -1,4 +1,4 @@
-import { chainId } from './chains.mjs';
+import { chainId, safeServiceAlias } from './chains.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
 import { getAddress } from 'ethers';
 import { createHash } from 'node:crypto';
@@ -54,7 +54,7 @@ export async function safeGet(network, path, apiKey) {
   if (keyId && Date.now() < (authenticatedCooldown.get(keyId) ?? 0)) throw new Error('Safe API rate limit or quota is cooling down; retry after the limit resets');
   const headers = { Accept: 'application/json' };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-  const response = await fetch(`https://api.safe.global/tx-service/${network}/api/v1${path}`, { headers, signal: AbortSignal.timeout(15000) });
+  const response = await fetch(`https://api.safe.global/tx-service/${safeServiceAlias(network)}/api/v1${path}`, { headers, signal: AbortSignal.timeout(15000) });
   if (!response.ok) {
     if (response.status === 429) {
       const remaining = response.headers.get('x-ratelimit-remaining');
