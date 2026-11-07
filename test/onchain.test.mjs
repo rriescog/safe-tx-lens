@@ -8,7 +8,7 @@ test('RPC provenance names public defaults but never exposes a configured key', 
   const previous = process.env.RPC_URL_ETH;
   delete process.env.RPC_URL_ETH;
   try {
-    assert.deepEqual(rpcDetailsFor('eth'), { url: 'https://ethereum.publicnode.com', kind: 'public', label: 'PublicNode (ethereum.publicnode.com)' });
+    assert.deepEqual(rpcDetailsFor('eth'), { url: 'https://eth-mainnet.g.alchemy.com/public', kind: 'public', label: 'Alchemy public (eth-mainnet.g.alchemy.com)' });
     assert.deepEqual(rpcDetailsFor('pol'), { url: 'https://polygon-bor-rpc.publicnode.com', kind: 'public', label: 'PublicNode (polygon-bor-rpc.publicnode.com)' });
     process.env.RPC_URL_ETH = 'https://provider.example/key/secret';
     const configured = rpcDetailsFor('eth');
@@ -33,7 +33,7 @@ const receipt = { blockNumber: 500, logs: [log] };
 test('auto discovery recognizes an execution receipt only with a Safe event and matching RPC chain', async () => {
   const request = async (url, options) => {
     const method = JSON.parse(options.body).method;
-    const isEthereum = String(url).includes('ethereum.publicnode.com');
+    const isEthereum = String(url).includes('eth-mainnet.g.alchemy.com');
     return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: method === 'eth_chainId' ? '0x1' : isEthereum ? { logs: [log] } : null }), { status: 200 });
   };
   assert.deepEqual(await discoverExecutionNetworks(EXECUTION_HASH, ['eth', 'pol'], { fetchImpl: request }), ['eth']);

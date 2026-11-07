@@ -49,6 +49,22 @@ test('evidence confidence fails closed on hash mismatch and flags unchecked targ
   const incomplete = assessConfidence({ call: root, checks: [{ method: 'local_eip712', status: 'pass' }] });
   assert.equal(incomplete.color, 'red');
   assert.match(incomplete.reasons.join(' '), /undecoded/);
+  assert.equal(incomplete.gaps.reduce((sum, gap) => sum + gap.points, 0), 10 - incomplete.score);
+  assert.match(incomplete.gaps.map(gap => gap.label).join(' '), /RPC|bytecode|simulation/);
+});
+
+test('historical code uncertainty explains the exact points withheld', () => {
+  const call = { to: VAULT, data: retrieve, method: 'retrieveRemaining()', children: [] };
+  const confidence = assessConfidence({
+    call,
+    checks: [{ method: 'local_eip712', status: 'pass' }, { method: 'onchain_rpc', status: 'pass' }],
+    targetChecks: [{ address: VAULT, status: 'verified_current', selectors: ['0x2bc2bef2'], historicalUnavailable: true }],
+    simulation: { success: true, stateDiffAvailable: true },
+    transaction: { isExecuted: true },
+  });
+  assert.equal(confidence.score, 7);
+  assert.equal(confidence.gaps.reduce((sum, gap) => sum + gap.points, 0), 3);
+  assert.match(confidence.gaps[0].label, /archive-capable RPC/);
 });
 
 test('every HTTP input field rejects instruction-like invalid values structurally', () => {

@@ -115,6 +115,7 @@ test('bytecode status and RPC provenance distinguish completed, partial, and unr
   page.context.sample = rpc;
   assert.match(page.evaluate('verificationHtml(sample)'), /PublicNode \(ethereum\.publicnode\.com\)/);
   assert.match(page.evaluate('verificationHtml(sample)'), /you did not provide an RPC key/);
+  assert.match(page.evaluate('verificationHtml(sample)'), /Not run/);
   page.context.sample = { ...rpc, rpc: { kind: 'configured', label: 'RPC configured for eth' } };
   assert.doesNotMatch(page.evaluate('verificationHtml(sample)'), /provider\.example|secret/);
 });
@@ -389,6 +390,8 @@ test('web report renders transaction evidence, target verification, effects, and
   page.context.sample = review;
   const html = page.evaluate('reportHtml(sample)');
   for (const phrase of ['Safe nonce 7', 'Safe Transaction Service', 'Target bytecode and verified source', 'Verified bytecode · 1/1', 'ERC20 transfer', 'Safe execution succeeded in simulation', 'Technical details']) assert.match(html, new RegExp(phrase));
+  assert.ok(html.indexOf('Technical details: decoded arguments') < html.indexOf('3 · Changes encoded'));
+  assert.match(html, /evidence points still missing/);
   assert.match(html, /SAFE MULTISIG · eth/);
   assert.match(html, /https:\/\/app\.safe\.global\/home\?safe=eth%3A0x1111111111111111111111111111111111111111/);
   page.context.sample = { ...review, network: 'xlayer' };

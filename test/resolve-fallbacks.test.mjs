@@ -132,7 +132,7 @@ test('auto-discovered Safe execution uses its RPC receipt, retries a transient f
   const eventTopic = id('ExecutionSuccess(bytes32,uint256)');
   const fetchImpl = async (url, options) => {
     const method = JSON.parse(options.body).method;
-    const ethereum = String(url).includes('ethereum.publicnode.com');
+    const ethereum = String(url).includes('eth-mainnet.g.alchemy.com');
     return new Response(JSON.stringify({ result: method === 'eth_chainId' ? '0x1' : ethereum ? { logs: [{ topics: [eventTopic] }] } : null }), { status: 200 });
   };
   const previousFetch = globalThis.fetch;

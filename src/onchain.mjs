@@ -11,7 +11,7 @@ const FAILURE_TOPIC = id('ExecutionFailure(bytes32,uint256)').toLowerCase();
 // infrastructure: verify the returned chain ID on every request and surface
 // outages rather than silently treating missing code as an EOA.
 export const PUBLIC_RPC = Object.freeze({
-  eth: 'https://ethereum.publicnode.com', gno: 'https://gnosis.publicnode.com',
+  eth: 'https://eth-mainnet.g.alchemy.com/public', gno: 'https://gnosis.publicnode.com',
   pol: 'https://polygon-bor-rpc.publicnode.com', arb1: 'https://arbitrum-one-rpc.publicnode.com',
   oeth: 'https://optimism-rpc.publicnode.com', base: 'https://base-rpc.publicnode.com',
   sep: 'https://ethereum-sepolia-rpc.publicnode.com', bnb: 'https://bsc-rpc.publicnode.com',
@@ -45,7 +45,7 @@ export function rpcDetailsFor(network, override) {
   const configured = process.env[`RPC_URL_${network.toUpperCase()}`];
   if (configured) return { url: configured, kind: 'configured', label: `RPC configured for ${network}` };
   const publicUrl = PUBLIC_RPC[network];
-  return publicUrl ? { url: publicUrl, kind: 'public', label: `PublicNode (${new URL(publicUrl).host})` } : { url: null, kind: 'none', label: 'No RPC configured for this network' };
+  return publicUrl ? { url: publicUrl, kind: 'public', label: `${network === 'eth' ? 'Alchemy public' : 'PublicNode'} (${new URL(publicUrl).host})` } : { url: null, kind: 'none', label: 'No RPC configured for this network' };
 }
 
 export function rpcFor(network, override) {
