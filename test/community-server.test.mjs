@@ -3,11 +3,18 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { serve } from '../src/server.mjs';
+import { serve, redactPrivateSimulationUrl } from '../src/server.mjs';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
 const origin = 'https://lens.example.org';
 const plan = { chainId: '1', meta: {}, transactions: [{ to: '0x1111111111111111111111111111111111111111', value: '0', data: '0x' }] };
+
+test('public reports retain measured effects without disclosing a private Tenderly dashboard URL', () => {
+  const result = { simulation: { url: 'https://dashboard.tenderly.co/private/project/simulator/1', success: true }, effects: [{ kind: 'storage', before: '0', after: '1' }] };
+  assert.deepEqual(redactPrivateSimulationUrl(result), { simulation: { success: true }, effects: [{ kind: 'storage', before: '0', after: '1' }] });
+  const queue = { reports: [{ simulation: { url: 'https://dashboard.tenderly.co/private', success: false } }] };
+  assert.deepEqual(redactPrivateSimulationUrl(queue), { reports: [{ simulation: { success: false } }] });
+});
 
 test('community web and hosted MCP share the same IP quota while deep review has higher cost', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'safe-community-server-'));

@@ -2,7 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Interface, id } from 'ethers';
 import { calculateHash, normalizeTransaction } from '../src/analyze.mjs';
-import { analyzeExecutionHash, fetchRecentExecutions, findRecentExecutionBySafeHash } from '../src/onchain.mjs';
+import { analyzeExecutionHash, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from '../src/onchain.mjs';
+
+test('RPC provenance names public defaults but never exposes a configured key', () => {
+  const previous = process.env.RPC_URL_ETH;
+  delete process.env.RPC_URL_ETH;
+  try {
+    assert.deepEqual(rpcDetailsFor('eth'), { url: 'https://ethereum.publicnode.com', kind: 'public', label: 'PublicNode (ethereum.publicnode.com)' });
+    assert.deepEqual(rpcDetailsFor('pol'), { url: 'https://polygon-bor-rpc.publicnode.com', kind: 'public', label: 'PublicNode (polygon-bor-rpc.publicnode.com)' });
+    process.env.RPC_URL_ETH = 'https://provider.example/key/secret';
+    const configured = rpcDetailsFor('eth');
+    assert.equal(configured.kind, 'configured');
+    assert.doesNotMatch(configured.label, /secret|provider\.example/);
+    assert.equal(rpcDetailsFor('eth', '').kind, 'none');
+  } finally { if (previous === undefined) delete process.env.RPC_URL_ETH; else process.env.RPC_URL_ETH = previous; }
+});
 
 const SAFE = '0x1111111111111111111111111111111111111111';
 const TARGET = '0x2222222222222222222222222222222222222222';

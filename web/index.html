@@ -14,8 +14,14 @@
   </header>
   <main>
     <section class="intro"><div><p class="kicker">Before you sign. Before it executes.</p><h1>See what a Safe transaction can actually do.</h1><p>Paste a Safe hash, onchain execution hash, Safe URL, address, or transaction JSON. For a pending transaction hash, the tool looks up its full details in Safe Transaction Service; the hash alone does not contain them.</p></div><div class="trust-note"><strong>Read-only by design</strong><span>This app never asks for a wallet connection, private key, or signature. A successful simulation does not prove a transaction is safe.</span></div></section>
+    <section class="journey" aria-label="How to review a transaction">
+      <div><span>01 · Provide</span><strong>Paste a Safe hash, address, URL, execution hash, or JSON.</strong></div>
+      <div><span>02 · Inspect</span><strong>Check the source, recalculated hash, call graph, and code status.</strong></div>
+      <div><span>03 · Decide</span><strong>Review measured changes when available and compare independently before signing.</strong></div>
+    </section>
+    <details class="demo-guide"><summary>See a 30-second walkthrough</summary><div class="demo-guide-body"><p><strong>Example:</strong> select “Safe multisig address”, paste the address, choose a network and “Read queued for this Safe”. Pick a nonce from the list to open its report.</p><p>First compare the transaction hash with your signing device. Then follow the call graph and the “encoded changes” list. “Verified bytecode” means a source match was measured; “not run” or “unavailable” means no such conclusion. Run simulation only if you want a snapshot of one execution path. Before approving, repeat the hash check with a separate implementation.</p><p class="meta">This walkthrough is illustrative. It does not fetch a transaction or consume an API request.</p></div></details>
     <section class="workspace">
-      <aside class="input-panel">
+      <div class="sidebar"><aside class="input-panel">
         <h2>Inspect</h2>
         <form id="inspect-form">
           <label for="input-mode" class="wizard-step">1 · What do you have?</label>
@@ -31,8 +37,13 @@
         </form>
         <div id="safe-actions" hidden><button id="load-pending" class="secondary-button" type="button">Read queued for this Safe</button><button id="load-history" class="secondary-button" type="button">Read historical for this Safe</button><div class="watch-control"><label class="switch"><input id="watch" type="checkbox"><span>Watch this Safe every 30 seconds (local only)</span></label><p>Available for a Safe address or Safe URL. New and newly confirmed proposals appear here.</p></div></div>
         <p class="local-note">Local-only mode. API keys stay on this computer.</p>
-      </aside>
+      </aside><aside class="external-panel" aria-label="Independent checks"><p class="kicker">Outside this report</p><h2>Check independently</h2><p>Use these steps before signing. They are recommendations, not results produced by Safe Tx Lens.</p><div id="independent-checks"><ol><li>Compare the exact Safe hash on your signing device.</li><li>Recalculate it with a separate implementation, such as <a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">pcaversaccio’s calculator</a>.</li><li>Review critical target code and execution effects with a separately trusted source.</li></ol></div></aside></div>
       <section class="results" aria-live="polite"><div id="status" class="status">Ready to inspect</div><div id="report" class="empty"><div class="empty-icon" aria-hidden="true">⌕</div><h2>Start with anything you have</h2><p>Onchain execution hashes and exported JSON work without a Safe API key. A pending Safe hash needs access to the proposal data.</p></div></section>
+    </section>
+    <section class="why-section" aria-labelledby="why-title">
+      <p class="kicker">Why this exists</p><h2 id="why-title">Check what you are signing, independently.</h2>
+      <p>A compromised multisig interface can describe one action while presenting different transaction data for approval. Before signing, compare the Safe hash on the signing device with the exact calls, recipients, permissions, and contract code behind it.</p>
+      <p>This tool helps teams inspect those details, but its hosted interface and external data providers cannot guarantee safety. The strongest review uses a copy you run yourself, a separately trusted RPC, and another independent check. The source is MIT licensed and will be available for self-hosting when the repository is released publicly.</p>
     </section>
     <section class="community-section" aria-label="Supported networks and community support">
       <div class="community-heading"><p class="kicker">Coverage</p><h2>Networks we inspect</h2><p>For another Safe-supported EVM network, enter its chain ID. Source verification needs a reachable RPC; unavailable checks are shown as such.</p><p id="network-coverage-note" class="coverage-note">Network coverage snapshot unavailable.</p></div>

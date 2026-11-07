@@ -84,12 +84,14 @@ export function classifyEffects(simulation, safeAddress) {
   if (!simulation) return [];
   const effects = [];
   for (const diff of simulation.storageDiffs ?? []) {
+    if (diff.from == null || diff.to == null || diff.from === '' || diff.to === '') continue;
     const label = String(diff.label ?? 'raw storage slot');
     const safeSlotZero = diff.address?.toLowerCase() === safeAddress?.toLowerCase() && /^0x0{64}$/i.test(label);
     const sensitive = safeSlotZero || /owner|threshold|module|guard|fallback|implementation|admin|paused/i.test(label);
     effects.push({ kind: safeSlotZero ? 'safe_singleton' : sensitive ? 'authority_or_control' : 'storage', severity: sensitive ? 'critical' : 'info', address: diff.address, label: safeSlotZero ? 'Safe singleton (storage slot 0)' : label, before: diff.from, after: diff.to });
   }
   for (const diff of simulation.balanceDiffs ?? []) {
+    if (diff.from == null || diff.to == null || diff.from === '' || diff.to === '') continue;
     effects.push({ kind: 'native_balance', severity: 'warning', address: diff.address, before: diff.from, after: diff.to });
   }
   for (const change of simulation.assetChanges ?? []) {
@@ -183,11 +185,25 @@ async function simulate(tx, network, safeInfo, options) {
   for (const item of Array.isArray(info.state_diff) ? info.state_diff : []) {
     if (item.soltype?.name && item.original != null && item.dirty != null && stateValue(item.original) !== stateValue(item.dirty)) {
       storageDiffs.push({ address: item.address, label: item.soltype.name, from: stateValue(item.original), to: stateValue(item.dirty) });
-    } else for (const raw of Array.isArray(item.raw) ? item.raw : []) if (stateValue(raw.original) !== stateValue(raw.dirty)) {
+    } else for (const raw of Array.isArray(item.raw) ? item.raw : []) if (raw.original != null && raw.dirty != null && stateValue(raw.original) !== stateValue(raw.dirty)) {
       storageDiffs.push({ address: item.address, label: String(raw.key ?? 'raw slot'), from: stateValue(raw.original), to: stateValue(raw.dirty) });
     }
   }
-  const balanceDiffs = (info.balance_changes ?? info.balance_diff ?? []).map(d => ({ address: d.address, from: String(d.original ?? d.before ?? ''), to: String(d.dirty ?? d.after ?? '') }));
+  // Tenderly may provide balance_changes as summaries without the original
+  // and dirty balances. Its call_trace.balance_diff contains the measured
+  // before/after values when available. Never invent empty values as a diff.
+  const balanceRecords = Array.isArray(info.call_trace?.balance_diff) ? info.call_trace.balance_diff : Array.isArray(info.balance_changes) ? info.balance_changes : Array.isArray(info.balance_diff) ? info.balance_diff : [];
+  const balanceDiffs = [];
+  let balanceDataIncompleteCount = 0;
+  for (const record of balanceRecords) {
+    const before = record?.original ?? record?.before;
+    const after = record?.dirty ?? record?.after;
+    if (!isAddress(record?.address) || !['string', 'number', 'bigint'].includes(typeof before) || !['string', 'number', 'bigint'].includes(typeof after) || String(before) === '' || String(after) === '') {
+      balanceDataIncompleteCount++;
+      continue;
+    }
+    if (String(before) !== String(after)) balanceDiffs.push({ address: record.address, from: String(before), to: String(after) });
+  }
   const assetChanges = (info.asset_changes ?? []).map(change => ({
     type: String(change.type ?? 'token'), token: String(change.token_info?.contract_address ?? change.asset?.address ?? change.token_address ?? ''),
     from: String(change.from ?? change.from_address ?? ''), to: String(change.to ?? change.to_address ?? ''), amount: String(change.amount ?? change.raw_amount ?? ''),
@@ -202,7 +218,7 @@ async function simulate(tx, network, safeInfo, options) {
     if (log.address?.toLowerCase() === tx.safe.toLowerCase() && topic === EXEC_SUCCESS_TOPIC) safeExecutionSuccess = true;
     if (log.address?.toLowerCase() === tx.safe.toLowerCase() && topic === EXEC_FAILURE_TOPIC) safeExecutionSuccess = false;
   }
-  return { evmSuccess: transaction.status === true, safeExecutionSuccess, success: transaction.status === true && safeExecutionSuccess === true ? true : transaction.status === false || safeExecutionSuccess === false ? false : null, url: result.simulation?.id ? `https://dashboard.tenderly.co/${encodeURIComponent(account)}/${encodeURIComponent(project)}/simulator/${result.simulation.id}` : null, stateDiffAvailable: Array.isArray(info.state_diff), storageDiffs, balanceDiffs, assetChanges, error: transaction.error_message ?? null, blockNumber: blockNumber ?? 'latest' };
+  return { evmSuccess: transaction.status === true, safeExecutionSuccess, success: transaction.status === true && safeExecutionSuccess === true ? true : transaction.status === false || safeExecutionSuccess === false ? false : null, url: result.simulation?.id ? `https://dashboard.tenderly.co/${encodeURIComponent(account)}/${encodeURIComponent(project)}/simulator/${result.simulation.id}` : null, stateDiffAvailable: Array.isArray(info.state_diff), storageDiffs, balanceDiffs, balanceDataIncompleteCount, assetChanges, error: transaction.error_message ?? null, blockNumber: blockNumber ?? 'latest' };
 }
 
 export async function analyze(raw, network = 'eth', options = {}) {
@@ -263,7 +279,7 @@ export async function analyze(raw, network = 'eth', options = {}) {
   const risk = assessRisk({ call, actions, findings, effects, checks, simulation, transaction: tx });
   const confidence = assessConfidence({ call, checks, targetChecks, simulation, transaction: tx });
   const status = checks.some(c => c.status === 'fail') ? 'BLOCK' : findings.some(f => f.severity === 'critical') || effects.some(e => e.severity === 'critical') ? 'REVIEW' : 'INSPECT';
-  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, risk, confidence, checks, targetChecks, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
+  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, risk, confidence, checks, targetChecks, targetVerificationAttempted: options.verifyTargets === true, rpc: options.rpcProvenance ? { kind: options.rpcProvenance.kind, label: options.rpcProvenance.label } : { kind: options.rpcUrl ? 'custom' : 'none', label: options.rpcUrl ? 'Custom RPC configured for this request' : 'No RPC used' }, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
 }
 
 export async function analyzeHash(hash, network, options = {}) {

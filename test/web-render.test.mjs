@@ -9,13 +9,13 @@ import { analyzeBuilderExport } from '../src/builder.mjs';
 const sourcePath = pathResolve('web/app.js');
 const source = await readFile(sourcePath, 'utf8');
 
-function ui({ publicMode = false } = {}) {
+function ui({ publicMode = false, search = '' } = {}) {
   const elements = new Map();
   const selectors = new Map();
   const make = () => ({ value: '', textContent: '', innerHTML: '', checked: false, disabled: false, dataset: {}, classList: { add() {}, remove() {} }, addEventListener(name, handler) { this[`on_${name}`] = handler; }, querySelector() { return make(); }, querySelectorAll() { return []; }, insertAdjacentHTML(_position, value) { this.innerHTML += value; }, focus() { this.focused = true; } });
   const document = { body: make(), getElementById(id) { if (!elements.has(id)) elements.set(id, make()); return elements.get(id); }, querySelector(selector) { if (!selectors.has(selector)) selectors.set(selector, make()); return selectors.get(selector); } };
   document.body.dataset.publicMode = String(publicMode);
-  const context = vm.createContext({ document, URL, setInterval: () => 1, clearInterval: () => {}, console, fetch: async () => { throw new Error('Unexpected network call'); } });
+  const context = vm.createContext({ document, URL, location: { search }, setInterval: () => 1, clearInterval: () => {}, console, fetch: async () => { throw new Error('Unexpected network call'); } });
   vm.runInContext(source, context, { filename: sourcePath });
   return { context, elements, selectors, document, evaluate: expression => vm.runInContext(expression, context) };
 }
@@ -37,6 +37,15 @@ test('public UI disables wallet monitoring and labels its owner-key limitations'
   page.elements.get('watch').on_change();
   assert.equal(page.elements.get('watch').checked, false);
   assert.doesNotMatch(page.evaluate('targetChecksHtml({})'), /id="verify-targets"/);
+});
+
+test('deep link prefills only a valid transaction hash without fetching data', () => {
+  const hash = `0x${'a'.repeat(64)}`;
+  const page = ui({ search: `?hash=${hash}` });
+  assert.equal(page.elements.get('input').value, hash);
+  assert.match(page.elements.get('status').textContent, /Select Review transaction/);
+  const invalid = ui({ search: '?hash=%3Cscript%3E' });
+  assert.equal(invalid.elements.get('input').value, '');
 });
 
 test('verification panel distinguishes supplied data, a user hash, local calculation, and RPC', async () => {
@@ -62,6 +71,42 @@ test('verification panel distinguishes supplied data, a user hash, local calcula
   assert.match(page.evaluate('crossCheckHtml(sample)'), /not the data source/);
 });
 
+test('bytecode status and RPC provenance distinguish completed, partial, and unrun checks', () => {
+  const page = ui();
+  const target = '0x2222222222222222222222222222222222222222';
+  const base = { network: 'eth', targetVerificationAttempted: false, targetChecks: [] };
+  page.context.sample = base;
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /Bytecode check not run/);
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /Verify target bytecode/);
+  page.context.sample = { ...base, targetVerificationAttempted: true, targetChecks: [{ address: target, status: 'verified', reason: 'matched', blockTag: 'latest' }] };
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /Verified bytecode · 1\/1/);
+  assert.doesNotMatch(page.evaluate('targetChecksHtml(sample)'), /id="verify-targets"/);
+  page.context.sample = { ...base, targetVerificationAttempted: true, targetChecks: [{ address: target, status: 'verified_current', reason: 'current only', blockTag: 'latest' }] };
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /current state/);
+  page.context.sample = { ...base, targetVerificationAttempted: true, targetChecks: [{ address: target, status: 'verified', reason: 'matched', blockTag: 'latest', abiSelectors: [{ selector: '0x12345678', present: false }] }] };
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /ABI selector mismatch/);
+  page.context.sample = { ...base, targetVerificationAttempted: true, targetChecks: [{ address: target, status: 'mismatch', reason: 'different bytecode', blockTag: 'latest' }] };
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /Bytecode mismatch/);
+  const rpc = { checks: [], evidence: {}, transaction: {}, rpc: { kind: 'public', label: 'PublicNode (ethereum.publicnode.com)' } };
+  page.context.sample = rpc;
+  assert.match(page.evaluate('verificationHtml(sample)'), /PublicNode \(ethereum\.publicnode\.com\)/);
+  assert.match(page.evaluate('verificationHtml(sample)'), /you did not provide an RPC key/);
+  page.context.sample = { ...rpc, rpc: { kind: 'configured', label: 'RPC configured for eth' } };
+  assert.doesNotMatch(page.evaluate('verificationHtml(sample)'), /provider\.example|secret/);
+});
+
+test('simulation display does not fabricate empty native balance values', async () => {
+  const page = ui();
+  page.context.sample = { severity: 'warning', kind: 'native_balance', address: '0x1111111111111111111111111111111111111111', before: '', after: '' };
+  const row = page.evaluate('effectHtml(sample)');
+  assert.match(row, /Before\/after values unavailable/);
+  assert.doesNotMatch(row, /<div class="raw mono">Before:/);
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const report = await analyze(tx, 'eth', { fetchState: false, verifyTargets: false });
+  page.context.sample = { ...report, simulation: { balanceDataIncompleteCount: 2, stateDiffAvailable: false }, effects: [] };
+  assert.match(page.evaluate('reportHtml(sample)'), /2 balance-change record\(s\) without complete before\/after values/);
+});
+
 test('public report opens without requesting bulk target verification', async () => {
   const page = ui({ publicMode: true });
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
@@ -75,7 +120,8 @@ test('public report opens without requesting bulk target verification', async ()
   assert.equal(requested.verifyTargets, false);
   assert.equal(requested.safeAddress, undefined);
   assert.equal(requested.safeHash, undefined);
-  assert.match(page.elements.get('report').innerHTML, /Where the data comes from/);
+  assert.match(page.elements.get('report').innerHTML, /Evidence and hash checks/);
+  assert.match(page.elements.get('independent-checks').innerHTML, /Outside|pcaversaccio/);
   assert.doesNotMatch(page.elements.get('report').innerHTML, /id="verify-targets"/);
 });
 
@@ -144,7 +190,7 @@ test('render helpers handle absent optional fields and long values', () => {
   assert.match(page.evaluate(`argValue({name:"payload",value:"0x${'ab'.repeat(80)}"},{})`), /inspect raw calldata/);
   page.context.sample = { to: '0x1', value: '0', data: '0xdeadbeef', selector: '0xdeadbeef', operation: 0, children: [] };
   assert.match(page.evaluate('callHtml(sample)'), /Unknown 0xdeadbeef/);
-  assert.match(page.evaluate('targetChecksHtml({})'), /Target code has not been checked yet/);
+  assert.match(page.evaluate('targetChecksHtml({})'), /Bytecode check not run/);
 });
 
 test('web inspector opens a report, handles unavailable queues and shows API errors', async () => {
@@ -203,7 +249,7 @@ test('web inspect renders a Builder response and preserves evidence on a rerun o
   page.context.fetch = async () => ({ ok: true, json: async () => rerun });
   await page.evaluate('inspect({simulate:true,overrideInput:activeReportInput,overrideNetwork:activeReportNetwork})');
   assert.match(page.elements.get('report').innerHTML, /Fetched live from Safe Transaction Service/);
-  assert.match(page.elements.get('report').innerHTML, /Source verification is incomplete/);
+  assert.match(page.elements.get('report').innerHTML, /Bytecode check incomplete/);
 });
 
 test('web buttons select a Safe, import JSON, and reject oversized files', async () => {
@@ -312,7 +358,14 @@ test('web report renders transaction evidence, target verification, effects, and
   review.simulation = { success: true, blockNumber: 1, url: 'https://dashboard.tenderly.co/test', stateDiffAvailable: true };
   page.context.sample = review;
   const html = page.evaluate('reportHtml(sample)');
-  for (const phrase of ['Safe nonce 7', 'Safe Transaction Service', 'Target bytecode and verified source', 'Matching verified runtime bytecode', 'asset_transfer', 'Safe execution succeeded in simulation', 'Technical details']) assert.match(html, new RegExp(phrase));
+  for (const phrase of ['Safe nonce 7', 'Safe Transaction Service', 'Target bytecode and verified source', 'Verified bytecode · 1/1', 'ERC20 transfer', 'Safe execution succeeded in simulation', 'Technical details']) assert.match(html, new RegExp(phrase));
+  assert.match(html, /SAFE MULTISIG · eth/);
+  assert.match(html, /https:\/\/app\.safe\.global\/home\?safe=eth%3A0x1111111111111111111111111111111111111111/);
+  assert.doesNotMatch(html, /id="verify-targets"/);
+  assert.match(html, /project access required/);
+  const publicPage = ui({ publicMode: true });
+  publicPage.context.sample = review;
+  assert.doesNotMatch(publicPage.evaluate('reportHtml(sample)'), /Open Tenderly trace/);
   review.evidence = { source: 'onchain_execution', blockNumber: 1, blockTime: 'now', executionHash: review.hash, discoveredBy: 'etherscan_index' };
   page.context.sample = review;
   assert.match(page.evaluate('reportHtml(sample)'), /Verified from eth onchain execution/);
@@ -330,7 +383,7 @@ test('web report marks unavailable verification and simulation outcomes explicit
   const html = variants.map(variant => { page.context.sample = variant; return page.evaluate('reportHtml(sample)'); });
   assert.match(html[0], /Safe Client Gateway/);
   assert.match(html[0], /Simulation unavailable: quota/);
-  assert.match(html[0], /Complete Safe transaction fields are required/);
+  assert.match(html[0], /No separate Safe transaction hash was supplied/);
   assert.match(html[1], /Safe execution failed in simulation/);
   assert.match(html[1], /storage diff/);
   assert.match(html[1], /no ABI/);
@@ -350,7 +403,7 @@ test('web renderers show scheduled actions, proxy uncertainty and missing queue 
   assert.match(page.evaluate('reportHtml(sample)'), /Simulation is available in the local tool/);
   assert.match(page.evaluate('reportHtml(sample)'), /ERC-1967 implementation/);
   page.context.sample = { ...review, targetChecks: [{ address: tx.to, status: 'unverified', reason: 'no source', blockTag: 7, proxy: { implementation: tx.safe } }] };
-  assert.match(page.evaluate('targetChecksHtml(sample)'), /Source verification is incomplete/);
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /Bytecode check incomplete/);
   page.context.sample = { kind: 'queue', scope: 'history', safe: tx.safe, network: 'eth', source: 'tenderly_storage', availability: 'unavailable', reports: [] };
   assert.match(page.evaluate('queueHtml(sample)'), /monitor JSON did not contain complete/);
   page.context.sample = { kind: 'queue', scope: 'history', safe: tx.safe, network: 'eth', source: 'safe_api', availability: 'available', reports: [{ ...review, actions: [] }] };

@@ -1,7 +1,7 @@
 import { analyze, analyzeHash } from './analyze.mjs';
 import { parseInput } from './inputs.mjs';
 import { fetchSafeTransactions, safeGet } from './safe-api.mjs';
-import { analyzeExecutionHash, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcFor } from './onchain.mjs';
+import { analyzeExecutionHash, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from './onchain.mjs';
 import { analyzeBuilderExport, isBuilderExport } from './builder.mjs';
 import { analyzeMonitorStorage, isMonitorStorage } from './monitor-import.mjs';
 import { fetchMonitorStorage, localCredentials } from './tenderly-storage.mjs';
@@ -89,7 +89,8 @@ export async function resolve(input, network = 'eth', options = {}) {
       reports: results.flatMap(result => result.reports), reviewedAt: new Date().toISOString(),
     };
   }
-  const settings = { ...options, rpcUrl: rpcFor(parsed.network, options.rpcUrl), verifyTargets: options.verifyTargets ?? true };
+  const rpcProvenance = rpcDetailsFor(parsed.network, options.rpcUrl);
+  const settings = { ...options, rpcUrl: rpcProvenance.url, rpcProvenance, verifyTargets: options.verifyTargets ?? true };
   if (parsed.kind === 'hash') {
     let safeError;
     try { return await analyzeHash(parsed.hash, parsed.network, { ...settings, expectedSafe: parsed.expectedSafe }); }

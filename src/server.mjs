@@ -43,6 +43,14 @@ function denied(res, ticket) {
   return reply(res, 429, { error, retryAfterSeconds: seconds }, 'application/json', { 'Retry-After': String(seconds) });
 }
 
+export function redactPrivateSimulationUrl(result) {
+  // Public API clients receive measured effects, but cannot assume they have
+  // permission to open the owner's saved Tenderly dashboard trace.
+  if (result.simulation) delete result.simulation.url;
+  for (const report of result.reports ?? []) if (report.simulation) delete report.simulation.url;
+  return result;
+}
+
 function inspectionFailure(res, error) {
   const message = String(error.message ?? 'Inspection failed').slice(0, 600);
   const upstreamLimited = /Safe API 429|Safe Client Gateway 429|Safe API rate limit or quota is cooling down|Safe API quota is exhausted|monthly quota exhausted/i.test(message);
@@ -85,7 +93,9 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
     if (req.method === 'GET' && req.url === '/healthz') return reply(res, 200, { ok: true });
     if (req.method === 'GET' && req.url === '/api/public-config') return reply(res, 200, supportConfig);
     if (req.method === 'GET' && req.url === '/api/network-coverage') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/network-coverage.json', import.meta.url)), 'utf8'), 'application/json');
-    if (req.method === 'GET' && req.url === '/') return reply(res, 200, html, 'text/html');
+    // Query strings identify a UI deep link, not a different route. Keep the
+    // root page available for /?hash=... and even an empty trailing ?.
+    if (req.method === 'GET' && new URL(req.url ?? '/', 'http://localhost').pathname === '/') return reply(res, 200, html, 'text/html');
     if (req.method === 'GET' && req.url === '/web/app.js') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/app.js', import.meta.url)), 'utf8'), 'text/javascript');
     if (req.method === 'GET' && req.url === '/web/style.css') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/style.css', import.meta.url)), 'utf8'), 'text/css');
     const icon = req.method === 'GET' ? /^\/web\/assets\/chains\/([a-z0-9]+)\.png$/.exec(req.url ?? '') : null;
@@ -121,7 +131,8 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           const ticket = community.take(clientIp, cost, { simulation: payload.simulate === true });
           if (!ticket.allowed) return denied(res, ticket);
           try {
-            return reply(res, 200, await resolve(payload.input, payload.network ?? 'auto', { simulate: payload.simulate === true, fetchState: false, verifyTargets: payload.verifyTargets === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash }));
+            const result = await resolve(payload.input, payload.network ?? 'auto', { simulate: payload.simulate === true, fetchState: false, verifyTargets: payload.verifyTargets === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
+            return reply(res, 200, redactPrivateSimulationUrl(result));
           } finally { community.release(); }
         }
         // Simulation is an explicit UI action. The ordinary inspection path stays

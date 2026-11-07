@@ -62,6 +62,22 @@ test('simulation reports missing storage data instead of claiming no changes', a
   assert.deepEqual(report.effects, []);
 }));
 
+test('simulation ignores balance summaries without measured before and after values', async () => withTenderlyStub({
+  transaction: { status: true, output: outputTrue, transaction_info: { state_diff: [], balance_changes: [{ address: SAFE, amount: '5' }] } },
+}, async () => {
+  const report = await analyze(transaction, 'eth', { safeInfo, simulate: true });
+  assert.equal(report.simulation.balanceDataIncompleteCount, 1);
+  assert.ok(!report.effects.some(effect => effect.kind === 'native_balance'));
+}));
+
+test('simulation reads measured native balances from Tenderly call trace', async () => withTenderlyStub({
+  transaction: { status: true, output: outputTrue, transaction_info: { state_diff: [], call_trace: { balance_diff: [{ address: SAFE, original: '10', dirty: '8' }] } } },
+}, async () => {
+  const report = await analyze(transaction, 'eth', { safeInfo, simulate: true });
+  assert.equal(report.simulation.balanceDataIncompleteCount, 0);
+  assert.deepEqual(report.effects.filter(effect => effect.kind === 'native_balance').map(effect => [effect.before, effect.after]), [['10', '8']]);
+}));
+
 test('insufficient signatures and a failed hash prevent simulation requests', async () => withTenderlyStub({}, async requests => {
   const unsigned = await analyze({ ...transaction, signatures: null }, 'eth', { safeInfo: { ...safeInfo, threshold: 2 }, simulate: true });
   assert.match(unsigned.simulation.unavailable, /Insufficient standard EOA signatures/);

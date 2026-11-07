@@ -9,6 +9,11 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
   const url = `http://127.0.0.1:${server.address().port}/api/inspect`;
   const post = (payload, headers = {}) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(payload) });
   try {
+    for (const suffix of ['/', '/?', `/?hash=0x${'a'.repeat(64)}`]) {
+      const landing = await fetch(`http://127.0.0.1:${server.address().port}${suffix}`);
+      assert.equal(landing.status, 200);
+      assert.match(await landing.text(), /Safe Tx Lens/);
+    }
     const coverage = await fetch(`http://127.0.0.1:${server.address().port}/api/network-coverage`);
     assert.equal(coverage.status, 200);
     const snapshot = await coverage.json();

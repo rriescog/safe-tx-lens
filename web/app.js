@@ -13,6 +13,8 @@ const status = document.getElementById('status');
 const submit = document.getElementById('submit');
 const watch = document.getElementById('watch');
 const jsonFile = document.getElementById('json-file');
+const independentChecks = document.getElementById('independent-checks');
+const independentChecksGuide = independentChecks.innerHTML;
 const publicMode = document.body.dataset.publicMode === 'true';
 const communityMode = document.body.dataset.communityMode === 'true';
 const publicFacing = publicMode || communityMode;
@@ -109,6 +111,16 @@ function updateWizard() {
 }
 inputMode.addEventListener('change', updateWizard);
 updateWizard();
+// A copied local link may include a transaction hash in its query string.
+// Prefill only a valid hash and require an explicit review click, so merely
+// opening a link cannot consume the shared upstream quota.
+const linkQuery = new URL(globalThis.location?.search ?? '', 'http://localhost/').searchParams;
+const linkedInput = linkQuery.get('hash') ?? linkQuery.get('tx') ?? linkQuery.get('input') ?? [...linkQuery.keys()][0];
+if (/^0x[0-9a-fA-F]{64}$/.test(linkedInput ?? '')) {
+  input.value = linkedInput;
+  updateWizard();
+  status.textContent = 'Transaction hash loaded from the link. Select Review transaction to inspect it.';
+}
 
 function esc(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]); }
 function pill(value) { return `<span class="pill ${esc(String(value).toLowerCase())}">${esc(value)}</span>`; }
@@ -139,8 +151,7 @@ function flowHtml(node, path, labels) {
 function crossCheckHtml(r) {
   const names = { eth: 'ethereum', gno: 'gnosis', pol: 'polygon', arb1: 'arbitrum', oeth: 'optimism', base: 'base', sep: 'sepolia', bnb: 'bsc', avax: 'avalanche' };
   const command = names[r.network] ? `./safe_hashes.sh --network ${names[r.network]} --address ${r.transaction.safe} --nonce ${r.transaction.nonce}` : null;
-  const hashes = r.hashComponents ? `<div class="field-grid">${field('Domain hash', r.hashComponents.domainHash)}${field('Message hash', r.hashComponents.messageHash)}${field('Safe transaction hash', r.calculatedHash)}</div>` : '<p class="meta">Complete Safe transaction fields are required to calculate hash components.</p>';
-  return `<p class="meta">Compare these locally calculated values with <a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">pcaversaccio's separate hash calculator</a>. Its standard mode also retrieves transaction fields from Safe Transaction Service, so this checks the calculation with another implementation, not the data source. Its interactive mode accepts manually supplied fields. This app does not run or bundle that separate AGPL tool.</p>${hashes}${command ? `<p class="meta">Run in a separate checkout of that project:</p><code class="cross-check-command">${esc(command)}</code>` : ''}`;
+  return `<ol><li>Compare this hash on your signing device: <code class="mono">${esc(r.hash)}</code></li><li>Run <a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">pcaversaccio’s separate calculator</a>${command ? `:<code class="cross-check-command">${esc(command)}</code>` : '.'}</li><li>Check target code and execution effects through a separately trusted source.</li></ol><details><summary>What this second calculation checks</summary><p>Its standard mode also retrieves fields from Safe Transaction Service. It checks the hash calculation with another implementation, not the data source. Its interactive mode accepts manually supplied fields. This app does not run or bundle that separate AGPL tool.</p></details>`;
 }
 function verificationHtml(r) {
   const sources = { safe_api: 'Safe Transaction Service', safe_gateway: 'Safe Client Gateway', onchain_execution: 'Onchain execution via RPC', tenderly_monitor: 'Tenderly monitor snapshot', tenderly_storage: 'Imported monitor JSON' };
@@ -155,21 +166,46 @@ function verificationHtml(r) {
   const localStep = step(2, 'Local EIP-712 calculation', local?.status ?? 'unavailable', 'Calculated locally from the transaction fields. If those fields and the embedded hash both came from Safe, a pass proves consistency, not an independent source of the fields.');
   const contractStep = step(3, 'Safe contract calculation by RPC', contract?.status ?? 'unavailable', contract ? 'Called getTransactionHash on the Safe contract through the selected RPC. This is independent of Safe Transaction Service if the RPC is separately trusted.' : 'No contract hash result is available. The transaction has only the local calculation and any supplied reference hash.');
   const stateSource = r.safeState?.source ? `Signer and threshold state came from ${r.safeState.source === 'safe_api' ? 'Safe Transaction Service' : esc(r.safeState.source)}; this report does not independently validate every API confirmation.` : 'Signer and threshold state was not available; API confirmations are not independently verified here.';
-  return `<p class="meta"><strong>Transaction fields:</strong> ${esc(source)}. ${stateSource}</p>${requestStep}${localStep}${contractStep}<p class="meta">A matching hash does not prove the target code, signer approvals, or execution outcome. Review the decoded calls and target bytecode before signing.</p>`;
+  const rpc = r.rpc?.kind === 'public' ? `${r.rpc.label}. This is a shared public endpoint; you did not provide an RPC key.` : r.rpc?.label ?? 'RPC provider not reported by this version.';
+  return `<p class="meta"><strong>Transaction fields:</strong> ${esc(source)}. ${stateSource}</p><p class="meta"><strong>Onchain RPC:</strong> ${esc(rpc)}${r.rpc?.kind === 'none' ? '' : ' Its responses are independent of Safe Transaction Service only if you trust this RPC separately.'}</p>${requestStep}${localStep}${contractStep}<p class="meta">A matching hash does not prove the target code, signer approvals, or execution outcome. Review the decoded calls and target bytecode before signing.</p>`;
+}
+function targetVerificationSummary(r) {
+  const checks = r.targetChecks ?? [];
+  if (!r.targetVerificationAttempted && !checks.length) return { tone: 'unverified', label: 'Bytecode check not run', detail: 'No target runtime bytecode has been compared yet.' };
+  const targets = checks.flatMap(check => check.proxy ? [check, check.proxy.implementationCode ?? { status: 'unavailable' }] : [check]);
+  if (!targets.length) return { tone: 'unavailable', label: 'Bytecode check unavailable', detail: 'The check ran but returned no target results.' };
+  const matched = targets.filter(target => ['verified', 'verified_current'].includes(target.status)).length;
+  const selectorMismatch = targets.some(target => target.abiSelectors?.some(selector => !selector.present));
+  if (targets.some(target => target.status === 'mismatch')) return { tone: 'fail', label: `Bytecode mismatch · ${matched}/${targets.length} matched`, detail: 'At least one RPC runtime bytecode differs from the verified source. Review before signing.' };
+  if (matched !== targets.length) return { tone: 'warning', label: `Bytecode check incomplete · ${matched}/${targets.length} matched`, detail: 'One or more targets or proxy implementations could not be matched with verified source.' };
+  if (selectorMismatch) return { tone: 'warning', label: `Bytecode matched, ABI selector mismatch · ${matched}/${targets.length}`, detail: 'At least one decoded function selector is absent from the matching verified ABI. Treat that function label as unconfirmed.' };
+  if (targets.some(target => target.status === 'verified_current')) return { tone: 'warning', label: `Bytecode matched current state · ${matched}/${targets.length}`, detail: 'Historical bytecode was unavailable. This does not establish what code was present at execution.' };
+  return { tone: 'pass', label: `Verified bytecode · ${matched}/${targets.length}`, detail: 'Every inspected runtime bytecode matched Sourcify verified source at the checked block. This does not prove the code is safe.' };
 }
 function targetChecksHtml(r) {
   const checks = r.targetChecks ?? [];
+  const summary = targetVerificationSummary(r);
   const rows = checks.map(check => {
     const proxy = check.proxy ? `<p>ERC-1967 implementation: <span class="mono">${esc(check.proxy.implementation)}</span> · ${esc(check.proxy.implementationCode?.status ?? 'unavailable')}${check.proxy.implementationCode?.bytecodeHash ? ` · <span class="mono">${esc(check.proxy.implementationCode.bytecodeHash)}</span>` : ''}</p>` : '';
     const abi = check.abiSelectors?.length ? `<p>Selectors in verified ABI: ${check.abiSelectors.map(item => `${esc(item.selector)} ${item.present ? 'yes' : 'no'}`).join(' · ')}</p>` : check.abiWarning ? `<p>${esc(check.abiWarning)}</p>` : '';
     return `<div class="item">${pill(check.status)}<div class="item-content"><strong class="mono">${esc(check.address)}</strong><p>${esc(check.reason)} · block ${esc(check.blockTag)}${check.bytecodeHash ? `<br>Runtime bytecode: <span class="mono">${esc(check.bytecodeHash)}</span>` : ''}${check.source ? `<br><a href="${esc(check.source)}" target="_blank" rel="noopener noreferrer">Inspect verified source</a>` : ''}</p>${abi}${proxy}</div></div>`;
   }).join('');
-  const complete = checks.length > 0 && checks.every(check => ['verified', 'verified_current'].includes(check.status) && (!check.proxy || ['verified', 'verified_current'].includes(check.proxy.implementationCode?.status)));
-  const action = publicMode ? '<p class="meta">Run the local tool to verify target bytecode with your own provider.</p>' : '<div class="simulation-action"><button type="button" id="verify-targets">Verify all target bytecode</button><p>Uses this network’s RPC and Sourcify. ERC-1967 implementations are inspected separately. Other proxy patterns and code changes during execution need manual review.</p></div>';
-  return `<div class="notice">${checks.length ? complete ? 'Matching verified runtime bytecode was found for every inspected target. This does not prove the code is safe.' : 'Source verification is incomplete. Inspect every unverified target before signing.' : 'Target code has not been checked yet.'}</div>${rows}${action}`;
+  const action = publicMode ? '<p class="meta">Run the local tool to verify target bytecode with your own provider.</p>' : summary.tone === 'pass' ? '' : `<div class="simulation-action"><button type="button" id="verify-targets">${checks.length ? 'Retry bytecode verification' : 'Verify target bytecode'}</button><p>Uses this network’s RPC and Sourcify. ERC-1967 implementations are inspected separately. Other proxy patterns and code changes during execution need manual review.</p></div>`;
+  return `<div class="verification-summary verification-${summary.tone}">${pill(summary.tone)}<div><strong>${esc(summary.label)}</strong><p>${esc(summary.detail)}</p></div></div>${rows}${action}`;
+}
+function effectHtml(effect) {
+  const asset = effect.kind === 'asset_transfer';
+  const title = effect.kind === 'native_balance' ? 'Native balance (wei)' : asset ? `${effect.label || 'Asset'} transfer` : `${effect.kind} · ${effect.label || 'storage slot'}`;
+  const hasValues = effect.before != null && effect.after != null && effect.before !== '' && effect.after !== '';
+  const values = asset
+    ? `From ${esc(effect.before || 'unknown')} → To ${esc(effect.after || 'unknown')}${effect.amount ? `<br>Amount: ${esc(effect.amount)}` : '<br>Amount unavailable'}`
+    : hasValues ? `${esc(short(effect.before))} → ${esc(short(effect.after))}` : 'Before/after values unavailable';
+  const detail = !asset && hasValues ? `<details><summary>Full before and after values</summary><div class="raw mono">Before: ${esc(effect.before)}<br>After: ${esc(effect.after)}</div></details>` : '';
+  return `<div class="item">${pill(effect.severity)}<div class="item-content"><strong>${esc(title)}</strong><p class="mono">${esc(effect.address || 'Address unavailable')}<br>${values}</p>${detail}</div></div>`;
 }
 function reportHtml(r) {
   const tx = r.transaction;
+  const safeUrl = `https://app.safe.global/home?safe=${encodeURIComponent(`${r.network}:${tx.safe}`)}`;
   const evidence = r.evidence?.source === 'onchain_execution'
     ? `<div class="notice" style="margin:16px 28px 0"><strong>Verified from ${esc(r.network)} onchain execution</strong> · block ${esc(r.evidence.blockNumber)}${r.evidence.blockTime ? ` · ${esc(r.evidence.blockTime)}` : ''}<br>Execution transaction: <span class="mono">${esc(r.evidence.executionHash)}</span>. ${r.evidence.discoveredBy === 'etherscan_index' ? 'Located through an indexed Safe event. ' : ''}The call graph comes from its execTransaction calldata. State changes below require a separate trace or simulation.</div>`
     : ['safe_api', 'safe_gateway'].includes(r.evidence?.source)
@@ -183,11 +219,13 @@ function reportHtml(r) {
   const riskHtml = `${confidence}<div class="risk-summary"><div>${pill(r.risk.level)}<strong>${esc(r.risk.reviewPriority)} review priority</strong><span>${esc(r.risk.impactLevel)} potential impact</span></div><p>Priority reflects the possible impact of the decoded calls. It does not say the transaction is malicious or prove what will happen onchain.</p></div>${riskReasons}`;
   const checks = r.checks.map(c => `<div class="item">${pill(c.status)}<div class="item-content"><strong>${esc(c.name)}</strong><p class="mono">${esc(c.detail)}</p></div></div>`).join('');
   const findings = r.findings.length ? r.findings.map(f => `<div class="item">${pill(f.severity)}<div class="item-content"><strong>${esc(f.code)} · call ${esc(f.path)}</strong><p>${esc(f.message)}</p></div></div>`).join('') : '<p class="meta">No known intent pattern matched. This does not establish safety.</p>';
-  const emptyEffects = r.simulation?.unavailable ? 'Simulation was unavailable, so no state change was measured.' : r.simulation && r.simulation.stateDiffAvailable === false ? 'The simulation provider did not return a storage diff. Absence of a diff is not evidence of no change.' : r.simulation ? 'The simulation returned no storage, balance, or asset changes in its response.' : 'No simulation or execution trace has measured these changes yet.';
-  const effects = r.effects.length ? r.effects.map(e => `<div class="item">${pill(e.severity)}<div class="item-content"><strong>${esc(e.kind)} · ${esc(e.label ?? '')}</strong><p class="mono">${esc(e.address)}<br>${esc(short(e.before))} → ${esc(short(e.after))}${e.amount ? `<br>Amount: ${esc(e.amount)}` : ''}</p><details><summary>Full before and after values</summary><div class="raw mono">Before: ${esc(e.before)}<br>After: ${esc(e.after)}</div></details></div></div>`).join('') : `<div class="state-empty"><strong>No measured state change</strong><p>${esc(emptyEffects)}</p></div>`;
-  const sim = r.simulation ? r.simulation.unavailable ? `<div class="notice">Simulation unavailable: ${esc(r.simulation.unavailable)}</div>` : `<div class="item">${pill(r.simulation.success === true ? 'pass' : r.simulation.success === false ? 'fail' : 'unavailable')}<div class="item-content"><strong>${r.simulation.success === true ? 'Safe execution succeeded in simulation' : r.simulation.success === false ? 'Safe execution failed in simulation' : 'EVM completed; Safe inner result unverified'}</strong><p>Block: ${esc(r.simulation.blockNumber)}${r.simulation.error ? ` · ${esc(r.simulation.error)}` : ''}${r.simulation.url ? ` · <a href="${esc(r.simulation.url)}" target="_blank" rel="noopener noreferrer">Open Tenderly trace</a>` : ''}</p></div></div>` : '<p class="meta">Simulation has not been run for this transaction.</p>';
+  const emptyEffects = r.simulation?.unavailable ? 'Simulation was unavailable, so no state change was measured.' : r.simulation && r.simulation.stateDiffAvailable === false ? 'The simulation provider did not return a storage diff. Absence of a diff is not evidence of no change.' : r.simulation ? 'The simulation returned no complete storage, balance, or asset changes in its response.' : 'No simulation or execution trace has measured these changes yet.';
+  const incompleteBalances = r.simulation?.balanceDataIncompleteCount ? `<div class="notice">Tenderly returned ${esc(r.simulation.balanceDataIncompleteCount)} balance-change record(s) without complete before/after values. They are omitted here; inspect the Tenderly trace for details.</div>` : '';
+  const effects = `${incompleteBalances}${r.effects.length ? r.effects.map(effectHtml).join('') : `<div class="state-empty"><strong>No measured state changes available</strong><p>${esc(emptyEffects)}</p></div>`}`;
+  const sim = r.simulation ? r.simulation.unavailable ? `<div class="notice">Simulation unavailable: ${esc(r.simulation.unavailable)}</div>` : `<div class="item">${pill(r.simulation.success === true ? 'pass' : r.simulation.success === false ? 'fail' : 'unavailable')}<div class="item-content"><strong>${r.simulation.success === true ? 'Safe execution succeeded in simulation' : r.simulation.success === false ? 'Safe execution failed in simulation' : 'EVM completed; Safe inner result unverified'}</strong><p>Block: ${esc(r.simulation.blockNumber)}${r.simulation.error ? ` · ${esc(r.simulation.error)}` : ''}${!publicFacing && r.simulation.url ? ` · <a href="${esc(r.simulation.url)}" target="_blank" rel="noopener noreferrer">Open Tenderly trace (project access required)</a>` : ''}</p><p>The measured effects shown here come from Tenderly’s API response. A dashboard trace saved in the service’s project is not publicly accessible unless its owner enables sharing.</p></div></div>` : '<p class="meta">Simulation has not been run for this transaction.</p>';
   const simulateAction = publicMode ? '<p class="meta">Simulation is available in the local tool with your own Tenderly credentials.</p>' : communityMode && !simulationEnabled ? '<p class="meta">Simulation is not configured for this public service. Decode and hash checks remain available.</p>' : `<div class="simulation-action"><button type="button" id="run-simulation">${r.simulation ? 'Run simulation again' : 'Run simulation and inspect state changes'}</button><p>Sends this transaction's calldata and signatures to the configured Tenderly project. The saved simulation covers one chain state and execution path.</p></div>`;
-  return `<div class="report-header"><div class="report-heading">${pill(r.status)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(tx.isExecuted ? 'Executed transaction' : 'Pending proposal')} on ${esc(r.network)}</span></div><div class="hash-line mono">${esc(r.hash)}</div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('Where the data comes from · three hash checks', verificationHtml(r))}${section('What this transaction can do', `${riskHtml}${flow}`)}${section('Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('Target bytecode and verified source', targetChecksHtml(r))}${section('State changes measured by simulation or execution', effects)}${section('Checks and simulation', `${checks}${sim}${simulateAction}`)}${section('Independent hash cross-check', crossCheckHtml(r))}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', tx.isExecuted ? (tx.isSuccessful ? 'Executed successfully' : 'Executed, failed') : 'Offchain proposal')}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}<details class="technical"><summary>Technical details: decoded arguments and raw calldata</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`;
+  const bytecodeStatus = targetVerificationSummary(r);
+  return `<div class="report-header"><div class="safe-identity"><span>SAFE MULTISIG · ${esc(r.network)}</span><a href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="Open Safe ${esc(tx.safe)} on Safe Global">${esc(tx.safe)} ↗</a></div><div class="report-heading">${pill(r.status)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(tx.isExecuted ? 'Executed transaction' : 'Pending proposal')} on ${esc(r.network)}</span></div><div class="hash-line mono">${esc(r.hash)}</div><div class="header-verification">${pill(bytecodeStatus.tone)}<span>${esc(bytecodeStatus.label)}</span></div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('1 · Evidence and hash checks', verificationHtml(r))}${section('2 · What this transaction can do', `${riskHtml}${flow}`)}${section('3 · Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('4 · Target bytecode and verified source', targetChecksHtml(r))}${section('5 · Measured effects and simulation', `${effects}${checks}${sim}${simulateAction}`)}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', tx.isExecuted ? (tx.isSuccessful ? 'Executed successfully' : 'Executed, failed') : 'Offchain proposal')}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}<details class="technical"><summary>Technical details: decoded arguments and raw calldata</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`;
 }
 function queueHtml(result) {
   const title = result.scope === 'history' ? 'Executed history' : result.scope === 'both' ? 'Pending and executed' : 'Pending proposals';
@@ -209,6 +247,7 @@ function showTransactionReport(result) {
   activeReportEvidence = result.evidence ?? null;
   activeReportTargetChecks = result.targetChecks ?? null;
   report.innerHTML = reportHtml(result);
+  independentChecks.innerHTML = crossCheckHtml(result);
   report.querySelector('#run-simulation')?.addEventListener('click', event => {
     event.currentTarget.disabled = true;
     inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, simulate: true });
@@ -232,8 +271,9 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
     if (!response.ok) throw new Error(result.error ?? 'Inspection failed');
     report.classList.remove('empty');
     document.body.classList.add('has-report');
-    if (result.kind === 'builder') { report.innerHTML = builderHtml(result); status.textContent = 'Builder JSON decoded'; }
+    if (result.kind === 'builder') { independentChecks.innerHTML = independentChecksGuide; report.innerHTML = builderHtml(result); status.textContent = 'Builder JSON decoded'; }
     else if (result.kind === 'queue') {
+      independentChecks.innerHTML = independentChecksGuide;
       if (result.availability === 'unavailable') { report.innerHTML = queueHtml(result); status.textContent = 'Queue source unavailable'; return; }
       let exitNotice = '';
       if (silent) {
@@ -269,7 +309,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
         row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
       });
     } else { if (priorHash?.toLowerCase() === result.hash?.toLowerCase()) { if (priorEvidence) result.evidence = priorEvidence; if (priorTargetChecks?.length) result.targetChecks = priorTargetChecks; } showTransactionReport(result); status.textContent = simulate ? 'Simulation reviewed' : 'Inspection complete'; if (watch.checked) { watch.checked = false; clearInterval(timer); timer = null; } }
-  } catch (error) { status.textContent = 'Inspection failed'; report.innerHTML = `<div class="empty"><h2>Could not inspect</h2><p>${esc(error.message)}</p></div>`; }
+  } catch (error) { independentChecks.innerHTML = independentChecksGuide; status.textContent = 'Inspection failed'; report.innerHTML = `<div class="empty"><h2>Could not inspect</h2><p>${esc(error.message)}</p></div>`; }
   finally { submit.disabled = false; }
 }
 form.addEventListener('submit', event => { event.preventDefault(); inspect(); });

@@ -2,6 +2,21 @@
 
 Read-only inspection for Safe multisig proposals. Give it a Safe transaction hash, an onchain execution hash, a Safe URL, a Safe address, or transaction JSON. It recalculates the EIP-712 hash, recursively opens supported nested calls, rates review priority from the decoded action and observed effects, and optionally simulates the actual `execTransaction` through Tenderly. The CLI can poll a Safe's offchain queue; the local UI and MCP server expose the same analysis.
 
+## Why
+
+A compromised multisig interface can show a benign description while presenting different calldata for approval. Safe Tx Lens helps a team compare the Safe hash, complete transaction fields, nested calls, target bytecode, and optional simulation before signing. The signing device's displayed hash and an independently obtained reference are critical parts of that review.
+
+## How to use the review
+
+1. Paste a Safe transaction hash, onchain execution hash, Safe address, Safe URL, or JSON export. For a Safe address, choose queued proposals or executed history and then select a transaction.
+2. Check the source and time of the transaction fields. Compare the recalculated hash with the exact hash shown on your signing device.
+3. Follow the decoded call graph and proposed changes. Check whether target bytecode verification actually ran and whether it matched source at the relevant block.
+4. If configured, run one simulation and read only the state changes the provider returned. Use a separate implementation and a separately trusted source for the final review.
+
+The UI includes a walkthrough that illustrates this sequence without making an API request.
+
+The hosted interface and its Safe, RPC, Sourcify, and Tenderly providers are additional trust boundaries. For a stronger independent check, install the source on infrastructure you control, select an RPC you trust separately, and compare results with another implementation. This repository is currently private while the service is being prepared for a public MIT-licensed release; a hosted report is not a safety guarantee.
+
 **This is an aid for human review, not a proof of safety.** A matching hash proves the supplied fields hash to the expected value. It does not prove target bytecode is benign. A successful simulation covers one chain state and one execution path. Verify the hash on a hardware wallet and inspect every critical call independently.
 
 **Decoding is not proof of behavior.** For a selected transaction, the tool reads runtime bytecode from that chain's RPC and compares its hash with Sourcify's verified runtime bytecode. It checks selectors against the matching ABI and follows ERC-1967 implementation slots. Missing source, a bytecode mismatch, and unavailable historical RPC state stay visible. Other proxy patterns, delegatecall semantics, and code changes within a transaction need independent review. It does not decompile arbitrary EVM bytecode.
@@ -68,7 +83,7 @@ The network suffixes are `ETH` (Ethereum, chain 1), `POL` (Polygon PoS, 137), `G
 
 Ethereum and Polygon PoS had working Safe indexing, pending and history endpoints, and matching public RPC chain IDs in the [dated network probe](docs/NETWORK-COVERAGE.md). That probe did **not** establish that every transaction, contract, or historical block can be verified. For a dependable public service, dedicated Ethereum and Polygon RPC endpoints, caching, provider failure handling, and end-to-end tests must be added to hosted mode before claiming that standard. A paid RPC plan alone does not change the present hosted configuration.
 
-[Safe Builder](https://safe.global/plans) provides a free authenticated plan with a monthly quota; Safe lists it for prototyping and its Growth plan for production. For simulation, set the Tenderly variables above, then use `--simulate` with CLI `inspect` or select the simulation button for one report in the UI. A simulation is saved in the configured Tenderly project and the report links to its trace.
+[Safe Builder](https://safe.global/plans) provides a free authenticated plan with a monthly quota; Safe lists it for prototyping and its Growth plan for production. For simulation, set the Tenderly variables above, then use `--simulate` with CLI `inspect` or select the simulation button for one report in the UI. A simulation is saved in the configured Tenderly project. The local UI links to its trace for project members; the public UI shows returned effects but does not publish a private project URL. Tenderly simulations require an explicit sharing action before anyone can open them publicly.
 
 In the UI, open one transaction and select **Run simulation and inspect state changes**. This sends that transaction's calldata and signatures to the configured Tenderly project. The report separates decoded intent from storage, balance, and asset changes returned by the simulation. If signatures are insufficient, hash verification fails, or the provider omits the state diff, it reports that limit rather than claiming no changes. Simulation is opt-in per transaction so browsing a Safe queue does not submit dozens of simulations.
 

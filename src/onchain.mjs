@@ -18,8 +18,16 @@ export const PUBLIC_RPC = Object.freeze({
   avax: 'https://avalanche-c-chain-rpc.publicnode.com',
 });
 
+export function rpcDetailsFor(network, override) {
+  if (override !== undefined && override !== null) return { url: override, kind: override ? 'custom' : 'none', label: override ? 'Custom RPC configured for this request' : 'No RPC used' };
+  const configured = process.env[`RPC_URL_${network.toUpperCase()}`];
+  if (configured) return { url: configured, kind: 'configured', label: `RPC configured for ${network}` };
+  const publicUrl = PUBLIC_RPC[network];
+  return publicUrl ? { url: publicUrl, kind: 'public', label: `PublicNode (${new URL(publicUrl).host})` } : { url: null, kind: 'none', label: 'No RPC configured for this network' };
+}
+
 export function rpcFor(network, override) {
-  return override ?? process.env[`RPC_URL_${network.toUpperCase()}`] ?? PUBLIC_RPC[network] ?? null;
+  return rpcDetailsFor(network, override).url;
 }
 
 export async function findRecentExecutionBySafeHash(safe, safeHash, network = 'eth', options = {}) {
@@ -90,7 +98,7 @@ export async function analyzeExecutionHash(hash, network = 'eth', options = {}) 
     if (calculateHash(raw, network).toLowerCase() === raw.safeTxHash.toLowerCase()) { matched = true; break; }
   }
   if (!matched) throw new Error('Could not recover Safe nonce from the execution event within 5,000 recent nonces');
-  const report = await analyze(raw, network, { ...options, rpcUrl, verifyTargets: options.verifyTargets ?? true, targetProvider: options.targetProvider ?? provider });
+  const report = await analyze(raw, network, { ...options, rpcUrl, rpcProvenance: options.rpcProvenance ?? (options.provider ? { kind: 'custom', label: 'RPC provider supplied by caller' } : rpcDetailsFor(network, options.rpcUrl)), verifyTargets: options.verifyTargets ?? true, targetProvider: options.targetProvider ?? provider });
   const block = await provider.getBlock(receipt.blockNumber);
   return { ...report, evidence: { source: 'onchain_execution', executionHash: hash, blockNumber: receipt.blockNumber, blockTime: block ? new Date(block.timestamp * 1000).toISOString() : null } };
 }
