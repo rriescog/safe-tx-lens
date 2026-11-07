@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve } from './resolve.mjs';
+import { analyze } from './analyze.mjs';
 import { parseInput } from './inputs.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
 import { publicQuota } from './public-quota.mjs';
@@ -79,6 +80,9 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
   if (publicMode && communityMode) throw new Error('Choose public demo or community mode');
   const publicFacing = publicMode || communityMode;
   const supportConfig = publicSupportConfig();
+  const demoTransaction = JSON.parse(await readFile(fileURLToPath(new URL('../web/demo-transaction.json', import.meta.url)), 'utf8'));
+  const demoReport = await analyze(demoTransaction, 'eth', { fetchState: false, verifyTargets: false });
+  demoReport.evidence = { source: 'bundled_example', executionHash: demoTransaction.transactionHash, blockNumber: demoTransaction.blockNumber };
   let simulationEnabled = false;
   if (publicFacing) {
     let origin;
@@ -118,6 +122,12 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
     if (req.method === 'GET' && req.url === '/healthz') return reply(res, 200, { ok: true });
     if (req.method === 'GET' && req.url === '/favicon.ico') return reply(res, 204, '');
     if (req.method === 'GET' && req.url === '/api/public-config') return reply(res, 200, supportConfig);
+    if (req.method === 'GET' && req.url === '/api/demo') return reply(res, 200, demoReport);
+    if (req.method === 'GET' && req.url === '/manifest.webmanifest') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/manifest.webmanifest', import.meta.url)), 'utf8'), 'application/manifest+json');
+    if (req.method === 'GET' && req.url === '/sw.js') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/sw.js', import.meta.url)), 'utf8'), 'text/javascript', { 'Service-Worker-Allowed': '/' });
+    if (req.method === 'GET' && req.url === '/web/offline.html') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/offline.html', import.meta.url)), 'utf8'), 'text/html');
+    const appIcon = req.method === 'GET' ? /^\/web\/icons\/icon-(192|512)\.png$/.exec(req.url ?? '') : null;
+    if (appIcon) return reply(res, 200, await readFile(fileURLToPath(new URL(`../web/icons/icon-${appIcon[1]}.png`, import.meta.url))), 'image/png');
     if (req.method === 'GET' && req.url === '/api/network-coverage') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/network-coverage.json', import.meta.url)), 'utf8'), 'application/json');
     // Query strings identify a UI deep link, not a different route. Keep the
     // root page available for /?hash=... and even an empty trailing ?.
@@ -126,6 +136,8 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
     if (req.method === 'GET' && req.url === '/web/style.css') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/style.css', import.meta.url)), 'utf8'), 'text/css');
     const icon = req.method === 'GET' ? /^\/web\/assets\/chains\/([a-z0-9]+)\.png$/.exec(req.url ?? '') : null;
     if (icon && Object.hasOwn(CHAINS, icon[1])) return reply(res, 200, await readFile(fileURLToPath(new URL(`../web/assets/chains/${icon[1]}.png`, import.meta.url))), 'image/png');
+    const brandIcon = req.method === 'GET' ? /^\/web\/assets\/chains\/(kat|xlayer)\.svg$/.exec(req.url ?? '') : null;
+    if (brandIcon) return reply(res, 200, await readFile(fileURLToPath(new URL(`../web/assets/chains/${brandIcon[1]}.svg`, import.meta.url)), 'utf8'), 'image/svg+xml');
     if (req.method === 'POST' && req.url === '/api/inspect') {
       try {
         const origin = req.headers.origin;

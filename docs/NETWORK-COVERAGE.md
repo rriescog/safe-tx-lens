@@ -2,7 +2,7 @@
 
 Last live probe: **2026-11-07 11:18 UTC**. This is a dated observation, not a promise of future availability.
 
-The probe made **30 authenticated Safe Transaction Service requests**, paced by 600 ms and capped at three per named network. It stopped automatically if Safe returned HTTP 429 or its remaining quota fell below 100. Nine public RPC endpoints were checked once each with `eth_chainId`; Polygon zkEVM had no configured RPC. The Safe key and quota headers are not published in the UI snapshot.
+The original probe made **30 authenticated Safe Transaction Service requests**, paced by 600 ms and capped at three per named network. It stopped automatically if Safe returned HTTP 429 or its remaining quota fell below 100. Nine public RPC endpoints were checked once each with `eth_chainId`. The unavailable legacy chain from that probe is excluded from the supported network list. The Safe key and quota headers are not published in the UI snapshot.
 
 | Network | Chain ID | Safe indexer | Pending endpoint | History endpoint | RPC chain ID |
 | --- | ---: | --- | --- | --- | --- |
@@ -13,7 +13,6 @@ The probe made **30 authenticated Safe Transaction Service requests**, paced by 
 | Optimism | 10 | 200, synced | 200 | 200 | Matched |
 | Base | 8453 | 200, synced | 200 | 200 | Matched |
 | Sepolia | 11155111 | 200, synced | 200 | 200 | Matched |
-| Polygon zkEVM | 1101 | 404 | 404 | 404 | No default RPC |
 | BNB Chain | 56 | 200, synced | 200 | 200 | Matched |
 | Avalanche | 43114 | 200, synced | 200 | 200 | Matched |
 
@@ -24,13 +23,13 @@ Two Agglayer rollups were added after that probe. At **2026-11-07 12:14 UTC**, t
 | [Katana](https://docs.katana.network/katana/technical-reference/network-information/) | 747474 | 200, synced | 200 | 200 | Matched |
 | [X Layer](https://web3.okx.com/it/onchainos/dev-docs/xlayer/developer/rpc-endpoints/rpc-endpoints) | 196 | 200, synced | 200 | 200 | Matched |
 
-The pending and history calls used the zero address with `limit=1`. Their empty `results` arrays prove those endpoints answered with the expected list format; they do **not** prove that a particular Safe or transaction exists, that a pending proposal is recoverable, or that decoding and historical state verification work for every contract. A 404 for Polygon zkEVM means the configured Safe Transaction Service alias did not serve these endpoints during this probe. A supplied transaction JSON can still be decoded locally for chain 1101; onchain checks require an explicit RPC.
+The pending and history calls used the zero address with `limit=1`. Their empty `results` arrays prove those endpoints answered with the expected list format; they do **not** prove that a particular Safe or transaction exists, that a pending proposal is recoverable, or that decoding and historical state verification work for every contract.
 
 One separate end-to-end sample used the public [Polygon PoS Council Safe](https://docs.polygon.technology/pos/reference/commit-chain-multisigs) on Ethereum with `limit=1` for each scope. Safe Transaction Service returned pending nonce 243 and executed nonce 244; both locally recomputed Safe hashes matched the returned hashes. This sample spent four additional Safe requests and does not validate the other eight available networks' individual transactions.
 
 For another EVM chain ID, the tool can ask Safe Client Gateway for the selected chain and recompute the Safe hash if complete transaction fields are returned. Such chains are **not** part of this probe or auto-discovery and must not be shown as covered until tested.
 
-Run the bounded probe again with the current twelve-network list (at most 36 Safe requests) with:
+Run the bounded probe again with the current eleven-network list (at most 33 Safe requests) with:
 
 ```sh
 npm run check:networks -- --live --snapshot web/network-coverage.json

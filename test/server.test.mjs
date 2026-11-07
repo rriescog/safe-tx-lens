@@ -31,11 +31,41 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
     const coverage = await fetch(`http://127.0.0.1:${server.address().port}/api/network-coverage`);
     assert.equal(coverage.status, 200);
     const snapshot = await coverage.json();
-    assert.equal(snapshot.networks.length, 12);
-    assert.equal(snapshot.networks.find(row => row.network === 'zkevm').pending, 'not_available');
+    assert.equal(snapshot.networks.length, 11);
+    assert.equal(snapshot.networks.some(row => row.network === 'zkevm'), false);
     assert.equal(snapshot.networks.find(row => row.network === 'kat').pending, 'available');
     assert.equal(snapshot.networks.find(row => row.network === 'xlayer').rpc, 'available');
     assert.doesNotMatch(JSON.stringify(snapshot), /SAFE_API_KEY|safeQuotaRemaining/);
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const manifestResponse = await fetch(`${origin}/manifest.webmanifest`);
+    assert.equal(manifestResponse.status, 200);
+    const manifest = await manifestResponse.json();
+    assert.equal(manifest.display, 'standalone');
+    assert.deepEqual(manifest.icons.map(icon => icon.sizes), ['192x192', '512x512']);
+    const worker = await (await fetch(`${origin}/sw.js`)).text();
+    assert.match(worker, /event\.request\.mode !== 'navigate'/);
+    assert.match(worker, /fetch\(event\.request\)/);
+    const offline = await (await fetch(`${origin}/web/offline.html`)).text();
+    assert.match(offline, /No transaction report was stored/);
+    for (const size of [192, 512]) {
+      const icon = await fetch(`${origin}/web/icons/icon-${size}.png`);
+      assert.equal(icon.status, 200);
+      assert.equal(icon.headers.get('content-type'), 'image/png; charset=utf-8');
+      assert.ok((await icon.arrayBuffer()).byteLength > 100);
+    }
+    const demoResponse = await fetch(`${origin}/api/demo`);
+    assert.equal(demoResponse.status, 200);
+    const demo = await demoResponse.json();
+    assert.equal(demo.evidence.source, 'bundled_example');
+    assert.equal(demo.evidence.executionHash, '0x7fa90051644c1dc76f1a8cbf8402ff401781a5a65c5601b40827b7a6193b86a0');
+    assert.equal(demo.transaction.nonce, '474');
+    assert.equal(demo.calculatedHash, demo.transaction.safeTxHash);
+    assert.doesNotMatch(JSON.stringify(demo), /tenderly_monitor|safe_api/);
+    for (const name of ['kat', 'xlayer']) {
+      const logo = await fetch(`${origin}/web/assets/chains/${name}.svg`);
+      assert.equal(logo.status, 200);
+      assert.match(await logo.text(), /<svg/);
+    }
     const plan = { chainId: '1', meta: {}, transactions: [{ to: SAFE, value: '0', data: '0x' }] };
     const valid = await post({ input: plan, network: 'eth' });
     assert.equal(valid.status, 200);

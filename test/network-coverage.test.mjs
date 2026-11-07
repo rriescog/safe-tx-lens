@@ -67,5 +67,5 @@ test('network probe distinguishes a wrong RPC chain from Safe availability', asy
   const result = await probeNetworks({ request, credentials, pause });
   assert.equal(result.networks[0].safe.indexing.status, 'indexer_lagging');
   assert.equal(result.networks[0].rpc.status, 'wrong_chain');
-  assert.equal(result.networks.find(row => row.network === 'zkevm').rpc.status, 'not_configured');
+  assert.equal(result.networks.some(row => row.network === 'zkevm'), false);
 });

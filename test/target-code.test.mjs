@@ -28,7 +28,7 @@ test('target verification reports mismatches, missing code, unavailable RPC and 
   assert.equal(mismatch[0].status, 'mismatch');
   const empty = await inspectTargetCode(call, 'eth', { provider: provider({ code: '0x' }), sourceLookup });
   assert.equal(empty[0].status, 'no_code');
-  const unavailable = await inspectTargetCode(call, 'zkevm');
+  const unavailable = await inspectTargetCode(call, '1101');
   assert.equal(unavailable[0].status, 'unavailable');
   const wrongChain = await inspectTargetCode(call, 'eth', { provider: provider({ chainId: 100n }) });
   assert.match(wrongChain[0].reason, /RPC chain/);

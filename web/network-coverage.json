@@ -1,6 +1,6 @@
 {
   "checkedAt": "2026-11-07T12:14:49Z",
-  "method": "Original ten networks checked at 11:18 UTC; Katana and X Layer checked at 12:14 UTC. Authenticated Safe indexing, pending and history with an empty address, plus RPC eth_chainId.",
+  "method": "Named networks checked with authenticated Safe indexing, pending and history endpoints using an empty address, plus public RPC eth_chainId; Katana and X Layer checked separately at 12:14 UTC.",
   "networks": [
     {
       "network": "eth",
@@ -57,14 +57,6 @@
       "pending": "available",
       "history": "available",
       "rpc": "available"
-    },
-    {
-      "network": "zkevm",
-      "chainId": 1101,
-      "indexing": "not_available",
-      "pending": "not_available",
-      "history": "not_available",
-      "rpc": "not_configured"
     },
     {
       "network": "bnb",

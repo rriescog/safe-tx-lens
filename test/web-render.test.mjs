@@ -48,20 +48,22 @@ test('deep link prefills only a valid transaction hash without fetching data', (
   assert.equal(invalid.elements.get('input').value, '');
 });
 
-test('one-click real example selects Ethereum and runs the normal inspection', async () => {
+test('one-click saved example selects Ethereum and opens a locally decoded report', async () => {
   const page = ui();
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
   const review = await analyze(tx, 'eth', { fetchState: false });
   const requests = [];
-  page.context.fetch = async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true, json: async () => review }; };
+  review.evidence = { source: 'bundled_example' };
+  page.context.fetch = async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => review }; };
   page.elements.get('try-example').on_click();
   await new Promise(done => setImmediate(done));
   assert.equal(page.elements.get('input').value, '0x7fa90051644c1dc76f1a8cbf8402ff401781a5a65c5601b40827b7a6193b86a0');
   assert.equal(page.elements.get('network').value, 'eth');
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].network, 'eth');
-  assert.equal(requests[0].input, page.elements.get('input').value);
-  assert.equal(page.elements.get('status').textContent, 'Inspection complete');
+  assert.equal(requests[0].url, '/api/demo');
+  assert.equal(requests[0].options, undefined);
+  assert.match(page.elements.get('report').innerHTML, /Saved example/);
+  assert.equal(page.elements.get('status').textContent, 'Saved example decoded locally · no live lookup');
 });
 
 test('verification panel distinguishes supplied data, a user hash, local calculation, and RPC', async () => {
@@ -409,7 +411,7 @@ test('web report marks unavailable verification and simulation outcomes explicit
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
   const base = await analyze(tx, 'eth', { fetchState: false });
   const variants = [
-    { ...base, network: 'zkevm', hashComponents: null, evidence: { source: 'safe_gateway', retrievedAt: 'now' }, simulation: { unavailable: 'quota' }, effects: [], targetChecks: [], findings: [] },
+    { ...base, network: '1101', hashComponents: null, evidence: { source: 'safe_gateway', retrievedAt: 'now' }, simulation: { unavailable: 'quota' }, effects: [], targetChecks: [], findings: [] },
     { ...base, transaction: { ...base.transaction, isExecuted: true, isSuccessful: false, operation: 1 }, simulation: { success: false, blockNumber: 7, error: 'revert', stateDiffAvailable: false }, effects: [], targetChecks: [{ address: tx.to, status: 'unverified', reason: 'missing', blockTag: 'latest', abiWarning: 'no ABI' }] },
     { ...base, transaction: { ...base.transaction, isExecuted: true, isSuccessful: true }, simulation: { success: null, blockNumber: 7, stateDiffAvailable: true }, effects: [], targetChecks: [{ address: tx.to, status: 'verified_current', reason: 'matched', blockTag: 7, proxy: { implementation: tx.safe, implementationCode: { status: 'unverified' } } }] },
   ];

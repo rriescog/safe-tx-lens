@@ -19,6 +19,30 @@ const publicMode = document.body.dataset.publicMode === 'true';
 const communityMode = document.body.dataset.communityMode === 'true';
 const publicFacing = publicMode || communityMode;
 const simulationEnabled = document.body.dataset.simulationEnabled === 'true';
+// Duplicate the visual tracks only. Screen readers see one set of networks and
+// one set of empty sponsorship places; the copies never claim real sponsors.
+for (const id of ['network-track', 'sponsor-track']) {
+  const track = document.getElementById(id);
+  if (track?.children?.length) for (const item of [...track.children]) {
+    const clone = item.cloneNode(true);
+    clone.setAttribute('aria-hidden', 'true');
+    track.appendChild(clone);
+  }
+}
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if (typeof window !== 'undefined') {
+  let installPrompt = null;
+  const installButton = document.getElementById('install-app');
+  window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; installButton.hidden = false; });
+  installButton.addEventListener('click', async () => {
+    if (!installPrompt) return;
+    const prompt = installPrompt;
+    installPrompt = null;
+    installButton.hidden = true;
+    await prompt.prompt();
+  });
+  window.addEventListener('appinstalled', () => { installPrompt = null; installButton.hidden = true; });
+}
 // Wallet addresses come only from validated server configuration. Build the
 // DOM with text nodes so addresses and labels cannot become HTML instructions.
 fetch('/api/public-config').then(response => response.ok ? response.json() : null).then(config => {
@@ -113,15 +137,21 @@ function updateWizard() {
 inputMode.addEventListener('change', updateWizard);
 updateWizard();
 document.getElementById('try-example').addEventListener('click', () => {
-  // An actual Safe execution hash avoids relying on the Safe offchain quota
-  // for the first-run example. The normal inspection path still verifies it.
+  // The bundled public example is decoded locally. It never spends a Safe or
+  // RPC request, and its evidence label must not imply a live verification.
   importedJson = null;
   inputMode.value = 'hash';
   input.value = '0x7fa90051644c1dc76f1a8cbf8402ff401781a5a65c5601b40827b7a6193b86a0';
   network.value = 'eth';
   document.getElementById('custom-chain-group').hidden = true;
   updateWizard();
-  inspect();
+  status.textContent = 'Opening the saved example…';
+  fetch('/api/demo').then(response => response.ok ? response.json() : Promise.reject(new Error('Example unavailable'))).then(result => {
+    report.classList.remove('empty');
+    document.body.classList.add('has-report');
+    showTransactionReport(result);
+    status.textContent = 'Saved example decoded locally · no live lookup';
+  }).catch(() => { status.textContent = 'Could not open the saved example'; });
 });
 // A copied local link may include a transaction hash in its query string.
 // Prefill only a valid hash and require an explicit review click, so merely
@@ -163,10 +193,10 @@ function flowHtml(node, path, labels) {
 function crossCheckHtml(r) {
   const names = { eth: 'ethereum', gno: 'gnosis', pol: 'polygon', arb1: 'arbitrum', oeth: 'optimism', base: 'base', sep: 'sepolia', bnb: 'bsc', avax: 'avalanche' };
   const command = names[r.network] ? `./safe_hashes.sh --network ${names[r.network]} --address ${r.transaction.safe} --nonce ${r.transaction.nonce}` : null;
-  return `<ol><li>Compare this hash on your signing device: <code class="mono">${esc(r.hash)}</code></li><li>Run <a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">pcaversaccio’s separate calculator</a>${command ? `:<code class="cross-check-command">${esc(command)}</code>` : '.'}</li><li>Check target code and execution effects through a separately trusted source.</li></ol><details><summary>What this second calculation checks</summary><p>Its standard mode also retrieves fields from Safe Transaction Service. It checks the hash calculation with another implementation, not the data source. Its interactive mode accepts manually supplied fields. This app does not run or bundle that separate AGPL tool.</p></details>`;
+  return `<ol><li>Compare this hash on your signing device: <code class="mono">${esc(r.hash)}</code></li><li>Optional external check: open <a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">pcaversaccio’s GitHub project ↗</a>${command ? ` and run this command yourself:<code class="cross-check-command">${esc(command)}</code>` : '.'} Safe Tx Lens does not run it or import its results.</li><li>Check target code and execution effects through a separately trusted source.</li></ol><details><summary>What the external calculator checks</summary><p>Its standard mode also retrieves fields from Safe Transaction Service. It checks the hash calculation with another implementation, not the data source. Its interactive mode accepts manually supplied fields. This app does not run or bundle that separate AGPL tool.</p></details>`;
 }
 function verificationHtml(r) {
-  const sources = { safe_api: 'Safe Transaction Service', safe_gateway: 'Safe Client Gateway', onchain_execution: 'Onchain execution via RPC', tenderly_monitor: 'Tenderly monitor snapshot', tenderly_storage: 'Imported monitor JSON' };
+  const sources = { safe_api: 'Safe Transaction Service', safe_gateway: 'Safe Client Gateway', onchain_execution: 'Onchain execution via RPC', bundled_example: 'Saved public Ethereum example bundled with this app; no live lookup', tenderly_monitor: 'Tenderly monitor snapshot', tenderly_storage: 'Imported monitor JSON' };
   const source = sources[r.evidence?.source] ?? (r.transaction?.lookupSource ? 'External transaction source' : 'Supplied JSON');
   const local = r.checks.find(check => check.name === 'Local EIP-712 hash');
   const contract = r.checks.find(check => check.name.startsWith('Safe contract hash'));
@@ -232,6 +262,8 @@ function reportHtml(r, retryNote = '') {
   const safeUrl = safeUiKnown ? `https://app.safe.global/home?safe=${encodeURIComponent(`${r.network === 'xlayer' ? 'okb' : r.network}:${tx.safe}`)}` : `https://katanascan.com/address/${encodeURIComponent(tx.safe)}`;
   const evidence = r.evidence?.source === 'onchain_execution'
     ? `<div class="notice" style="margin:16px 28px 0"><strong>Verified from ${esc(r.network)} onchain execution</strong> · block ${esc(r.evidence.blockNumber)}${r.evidence.blockTime ? ` · ${esc(r.evidence.blockTime)}` : ''}<br>Execution transaction: <span class="mono">${esc(r.evidence.executionHash)}</span>. ${r.evidence.discoveredBy === 'etherscan_index' ? 'Located through an indexed Safe event. ' : ''}The call graph comes from its execTransaction calldata. State changes below require a separate trace or simulation.</div>`
+    : r.evidence?.source === 'bundled_example'
+      ? '<div class="notice demo-notice"><strong>Saved example · decoded locally</strong><br>This is public transaction data bundled with the app, not a fresh RPC or Safe Service result. Use your own hash and a live lookup for an actual review.</div>'
     : ['safe_api', 'safe_gateway'].includes(r.evidence?.source)
       ? `<div class="notice" style="margin:16px 28px 0"><strong>Fetched live from ${r.evidence.source === 'safe_api' ? 'Safe Transaction Service' : 'Safe Client Gateway'}</strong> · ${esc(r.evidence.retrievedAt)}<br>The Safe address, nonce, target and calldata came from this source. The EIP-712 hash is recalculated locally; check the RPC result and any limitations below.</div>`
       : '';

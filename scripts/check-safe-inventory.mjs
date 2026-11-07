@@ -11,7 +11,7 @@ if (!inventoryPath || !/^\d+$/.test(requestedCount) || Number(requestedCount) < 
   console.error('Usage: node scripts/check-safe-inventory.mjs <inventory.json> [count] [network,network...]');
   process.exitCode = 2;
 } else {
-  const chain = new Map([[1, 'eth'], [100, 'gno'], [137, 'pol'], [42161, 'arb1'], [10, 'oeth'], [8453, 'base'], [11155111, 'sep'], [1101, 'zkevm'], [56, 'bnb'], [43114, 'avax']]);
+  const chain = new Map([[1, 'eth'], [100, 'gno'], [137, 'pol'], [42161, 'arb1'], [10, 'oeth'], [8453, 'base'], [11155111, 'sep'], [747474, 'kat'], [196, 'xlayer'], [56, 'bnb'], [43114, 'avax']]);
   const networks = requestedNetworks ? new Set(requestedNetworks.split(',')) : null;
   if (networks && [...networks].some(network => ![...chain.values()].includes(network))) throw new Error('Unknown network filter');
   const document = JSON.parse(await readFile(inventoryPath, 'utf8'));
