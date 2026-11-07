@@ -210,7 +210,12 @@ test('web inspector opens a report, handles unavailable queues and shows API err
   page.context.fetch = async () => ({ ok: false, json: async () => ({ error: '<unsafe>' }) });
   await page.evaluate('inspect()');
   assert.match(page.elements.get('report').innerHTML, /&lt;unsafe&gt;/);
-  assert.match(page.elements.get('status').textContent, /Inspection failed · <unsafe>/);
+  assert.equal(page.elements.get('status').textContent, 'Sorry, we could not complete the inspection');
+  page.context.fetch = async () => ({ ok: false, json: async () => ({ code: 'SERVICE_ERROR', error: 'Temporary failure', incidentId: '<private-ref>' }) });
+  await page.evaluate('inspect()');
+  assert.match(page.elements.get('report').innerHTML, /Reference:/);
+  assert.match(page.elements.get('report').innerHTML, /&lt;private-ref&gt;/);
+  assert.doesNotMatch(page.elements.get('report').innerHTML, /<private-ref>/);
 });
 
 test('web form handles empty input, malformed JSON and an API error without a message', async () => {
@@ -225,7 +230,7 @@ test('web form handles empty input, malformed JSON and an API error without a me
   page.elements.get('input').value = '0x123';
   page.context.fetch = async () => ({ ok: false, json: async () => ({}) });
   await page.evaluate('inspect({verifyTargets:false})');
-  assert.match(page.elements.get('report').innerHTML, /Inspection failed/);
+  assert.match(page.elements.get('report').innerHTML, /Sorry, something went wrong/);
   page.elements.get('input').value = 'https://app.safe.global/home';
   page.elements.get('load-pending').on_click();
   assert.match(page.elements.get('status').textContent, /Enter a Safe multisig address/);

@@ -5,7 +5,8 @@ import { serve } from '../src/server.mjs';
 const SAFE = '0x1111111111111111111111111111111111111111';
 
 test('local API accepts an offline plan, rejects cross-origin posts, and limits simulation to one transaction', async () => {
-  const server = await serve({ port: 0 });
+  const incidents = [];
+  const server = await serve({ port: 0, incidentReporter: event => incidents.push(event) });
   const url = `http://127.0.0.1:${server.address().port}/api/inspect`;
   const post = (payload, headers = {}) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(payload) });
   try {
@@ -14,6 +15,19 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
       assert.equal(landing.status, 200);
       assert.match(await landing.text(), /Safe Tx Lens/);
     }
+    const missingPage = await fetch(`http://127.0.0.1:${server.address().port}/missing-page?private-marker`, { headers: { accept: 'text/html' } });
+    assert.equal(missingPage.status, 404);
+    const errorHtml = await missingPage.text();
+    assert.match(errorHtml, /We recorded the issue/);
+    assert.match(errorHtml, /Open the inspector/);
+    assert.doesNotMatch(errorHtml, /Not found|private-marker/);
+    const missingApi = await fetch(`http://127.0.0.1:${server.address().port}/api/missing?private-marker`);
+    assert.equal(missingApi.status, 404);
+    const errorJson = await missingApi.json();
+    assert.equal(errorJson.code, 'ROUTE_UNAVAILABLE');
+    assert.match(errorJson.incidentId, /^[0-9a-f-]{36}$/);
+    assert.doesNotMatch(JSON.stringify(incidents), /private-marker/);
+    assert.equal(incidents.length, 2);
     const coverage = await fetch(`http://127.0.0.1:${server.address().port}/api/network-coverage`);
     assert.equal(coverage.status, 200);
     const snapshot = await coverage.json();
@@ -42,7 +56,8 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
 });
 
 test('upstream Safe quota failure is a service error with a machine-readable code', async () => {
-  const server = await serve({ port: 0, rpcUrl: '' });
+  const incidents = [];
+  const server = await serve({ port: 0, rpcUrl: '', incidentReporter: event => incidents.push(event) });
   const original = globalThis.fetch;
   const safeKey = process.env.SAFE_API_KEY;
   const etherscanKey = process.env.ETHERSCAN_API_KEY;
@@ -53,7 +68,11 @@ test('upstream Safe quota failure is a service error with a machine-readable cod
   try {
     const response = await original(`http://127.0.0.1:${server.address().port}/api/inspect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ input: `0x${'ab'.repeat(32)}`, network: 'eth' }) });
     assert.equal(response.status, 503);
-    assert.equal((await response.json()).code, 'UPSTREAM_LIMITED');
+    const failure = await response.json();
+    assert.equal(failure.code, 'UPSTREAM_LIMITED');
+    assert.match(failure.error, /recorded this interruption/);
+    assert.equal(incidents[0].incidentId, failure.incidentId);
+    assert.doesNotMatch(JSON.stringify(incidents), /0x[0-9a-f]{64}/i);
   } finally {
     globalThis.fetch = original;
     if (safeKey === undefined) delete process.env.SAFE_API_KEY; else process.env.SAFE_API_KEY = safeKey;

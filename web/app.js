@@ -269,8 +269,13 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
   try {
     const isJson = selectedInputMode() === 'json';
     const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? selectedNetwork(), scope: scope.value, simulate, verifyTargets, safeAddress: isJson ? safeAddress.value.trim() || undefined : undefined, safeHash: isJson ? safeHash.value.trim() || undefined : undefined }) });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error ?? 'Inspection failed');
+    const result = await response.json().catch(() => null);
+    if (!result || !response.ok) {
+      const failure = new Error(result?.error ?? 'The service returned an unexpected response. Please retry.');
+      failure.code = result?.code ?? 'SERVICE_ERROR';
+      failure.incidentId = result?.incidentId ?? null;
+      throw failure;
+    }
     report.classList.remove('empty');
     document.body.classList.add('has-report');
     if (result.kind === 'builder') { independentChecks.innerHTML = independentChecksGuide; report.innerHTML = builderHtml(result); status.textContent = 'Builder JSON decoded'; }
@@ -311,7 +316,12 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
         row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
       });
     } else { if (priorHash?.toLowerCase() === result.hash?.toLowerCase()) { if (priorEvidence) result.evidence = priorEvidence; if (priorTargetChecks?.length) result.targetChecks = priorTargetChecks; } showTransactionReport(result); status.textContent = simulate ? 'Simulation reviewed' : 'Inspection complete'; if (watch.checked) { watch.checked = false; clearInterval(timer); timer = null; } }
-  } catch (error) { independentChecks.innerHTML = independentChecksGuide; status.textContent = `Inspection failed · ${error.message}`; report.innerHTML = `<div class="empty"><h2>Could not inspect</h2><p>${esc(error.message)}</p></div>`; }
+  } catch (error) {
+    independentChecks.innerHTML = independentChecksGuide;
+    const recorded = error.incidentId ? `<p class="meta">We recorded this issue to improve the service. Reference: <code>${esc(error.incidentId)}</code></p>` : '';
+    status.textContent = error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'Check the input or network' : 'Sorry, we could not complete the inspection';
+    report.innerHTML = `<div class="empty"><h2>${error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'We could not inspect this input' : 'Sorry, something went wrong'}</h2><p>${esc(error.message)}</p>${recorded}</div>`;
+  }
   finally { submit.disabled = false; }
 }
 form.addEventListener('submit', event => { event.preventDefault(); inspect(); });

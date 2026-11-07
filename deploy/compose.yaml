@@ -2,6 +2,11 @@ services:
   app:
     image: ${IMAGE:?Set the immutable GHCR image digest}
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       PUBLIC_ORIGIN: https://${DOMAIN:?Set DOMAIN}
       SAFE_API_KEY_FILE: /run/secrets/safe_api_key

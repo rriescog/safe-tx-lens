@@ -11,6 +11,7 @@ import { isIP } from 'node:net';
 import { validateInspectionRequest } from './input-boundary.mjs';
 import { CHAINS } from './chains.mjs';
 import { publicSupportConfig } from './support.mjs';
+import { randomUUID } from 'node:crypto';
 
 const htmlPath = fileURLToPath(new URL('../web/index.html', import.meta.url));
 
@@ -51,14 +52,28 @@ export function redactPrivateSimulationUrl(result) {
   return result;
 }
 
-function inspectionFailure(res, error) {
+function inspectionFailure(res, error, recordIncident) {
   const message = String(error.message ?? 'Inspection failed').slice(0, 600);
   const upstreamLimited = /Safe API 429|Safe Client Gateway 429|Safe API rate limit or quota is cooling down|Safe API quota is exhausted|monthly quota exhausted/i.test(message);
   const upstreamFailed = /Safe API 5\d\d|Safe Client Gateway 5\d\d|Safe Client Gateway 403|Safe API 403/i.test(message);
-  return reply(res, upstreamLimited || upstreamFailed ? 503 : 400, { error: message, code: upstreamLimited ? 'UPSTREAM_LIMITED' : upstreamFailed ? 'UPSTREAM_UNAVAILABLE' : 'INSPECTION_FAILED' });
+  if (upstreamLimited || upstreamFailed) {
+    const incidentId = recordIncident(upstreamLimited ? 'upstream_limit' : 'upstream_unavailable', 503);
+    return reply(res, 503, { error: upstreamLimited ? 'Sorry, the transaction source is at its request limit. Please retry later or choose another input. We recorded this interruption to improve the service.' : 'Sorry, the transaction source is unavailable. Please retry later or use a transaction JSON export. We recorded this interruption to improve the service.', code: upstreamLimited ? 'UPSTREAM_LIMITED' : 'UPSTREAM_UNAVAILABLE', incidentId });
+  }
+  if (/Safe API 404|Safe Client Gateway 404|For an offchain proposal without Safe API access/i.test(message)) {
+    return reply(res, 422, { error: 'We could not retrieve this transaction from the available Safe sources. Check the network, try a Safe URL, or import its transaction JSON.', code: 'TRANSACTION_UNAVAILABLE' });
+  }
+  const expectedInputError = error instanceof SyntaxError || /^(Invalid |Input |Unrecognized |Enter |Select |The hash or address does not reveal|Execution transaction was not found|An RPC URL is required|Unsupported |Safe URL|No Transaction Service alias)/i.test(message);
+  if (expectedInputError) return reply(res, 400, { error: message, code: 'INVALID_OR_UNAVAILABLE_INPUT' });
+  const incidentId = recordIncident('inspection_unexpected', 500);
+  return reply(res, 500, { error: 'Sorry, something went wrong while inspecting this transaction. We recorded the issue to improve the service. Please try again, or provide a Safe URL or transaction JSON.', code: 'INSPECTION_ERROR', incidentId });
 }
 
-export async function serve({ port = 4173, rpcUrl, publicMode = false, communityMode = false, publicOrigin, quotaFile = '/data/public-quota.json', dailyLimit = 5, communityQuotaFile = '/data/community-quota.json', communityDailyUnits = 600, communityMonthlyUnits = 10000, communityClientDailyRequests = 20, credentialReader = localCredentials } = {}) {
+function errorPage(incidentId) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Page unavailable · Safe Tx Lens</title><link rel="stylesheet" href="/web/style.css"></head><body><header class="masthead"><div class="brand"><span class="mark" aria-hidden="true">◎</span><span>Safe Tx Lens</span></div></header><main class="error-page"><p class="kicker">We are sorry</p><h1>Something went wrong.</h1><p>We could not open this page. We recorded the issue so we can improve the service. Your transaction data was not included in this notice.</p><p class="meta">Reference: <code>${incidentId}</code></p><a href="/">Open the inspector</a></main></body></html>`;
+}
+
+export async function serve({ port = 4173, rpcUrl, publicMode = false, communityMode = false, publicOrigin, quotaFile = '/data/public-quota.json', dailyLimit = 5, communityQuotaFile = '/data/community-quota.json', communityDailyUnits = 600, communityMonthlyUnits = 10000, communityClientDailyRequests = 20, credentialReader = localCredentials, incidentReporter = event => console.error(JSON.stringify(event)) } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid port');
   if (publicMode && communityMode) throw new Error('Choose public demo or community mode');
   const publicFacing = publicMode || communityMode;
@@ -78,6 +93,15 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
   const quota = publicMode ? publicQuota({ file: quotaFile, dailyLimit }) : null;
   const community = communityMode ? communityQuota({ file: communityQuotaFile, dailyUnits: communityDailyUnits, monthlyUnits: communityMonthlyUnits, clientDailyRequests: communityClientDailyRequests }) : null;
   const mcp = communityMode ? communityMcpHandler() : null;
+  // The report deliberately excludes URL, IP, hash, calldata and credentials.
+  // A reference ID lets the operator correlate a user's report with this log.
+  const recordIncident = (category, status) => {
+    const incidentId = randomUUID();
+    const event = { event: 'safe_tx_lens_incident', incidentId, at: new Date().toISOString(), category, status };
+    try { incidentReporter(event); }
+    catch { console.error(JSON.stringify(event)); }
+    return incidentId;
+  };
   let html = (await readFile(htmlPath, 'utf8')).replace('<body>', `<body data-public-mode="${publicMode}" data-community-mode="${communityMode}" data-simulation-enabled="${simulationEnabled}">`);
   if (publicFacing) {
     // Remove local-only controls and environment details from the HTML itself.
@@ -89,8 +113,9 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
       html = html.replace('<option value="both">Both (20 of each)</option>', '');
     }
   }
-  const server = createServer(async (req, res) => {
+  const handler = async (req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') return reply(res, 200, { ok: true });
+    if (req.method === 'GET' && req.url === '/favicon.ico') return reply(res, 204, '');
     if (req.method === 'GET' && req.url === '/api/public-config') return reply(res, 200, supportConfig);
     if (req.method === 'GET' && req.url === '/api/network-coverage') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/network-coverage.json', import.meta.url)), 'utf8'), 'application/json');
     // Query strings identify a UI deep link, not a different route. Keep the
@@ -139,7 +164,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
         // read-only and does not consume simulation quota or share calldata.
         const result = await resolve(payload.input, payload.network ?? 'eth', { rpcUrl, simulate: payload.simulate === true, verifyTargets: payload.verifyTargets !== false, limit: 20, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
         return reply(res, 200, result);
-      } catch (error) { return inspectionFailure(res, error); }
+      } catch (error) { return inspectionFailure(res, error, recordIncident); }
     }
     if (communityMode && req.url === '/mcp' && req.method === 'POST') {
       try {
@@ -165,9 +190,20 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           const responseBody = await result.text();
           return reply(res, result.status, responseBody, result.headers.get('content-type')?.split(';')[0] ?? 'application/json');
         } finally { community.release(); }
-      } catch (error) { return reply(res, 400, { error: error.message }); }
+      } catch (error) { return inspectionFailure(res, error, recordIncident); }
     }
-    reply(res, 404, { error: 'Not found' });
+    const incidentId = recordIncident('unknown_route', 404);
+    if (req.method === 'GET' && req.headers.accept?.includes('text/html')) return reply(res, 404, errorPage(incidentId), 'text/html');
+    return reply(res, 404, { error: 'Sorry, we could not open that route. We recorded the issue to improve the service.', code: 'ROUTE_UNAVAILABLE', incidentId });
+  };
+  const server = createServer((req, res) => {
+    handler(req, res).catch(() => {
+      const incidentId = recordIncident('request_unexpected', 500);
+      if (res.headersSent) return res.destroy();
+      return req.method === 'GET' && req.headers.accept?.includes('text/html')
+        ? reply(res, 500, errorPage(incidentId), 'text/html')
+        : reply(res, 500, { error: 'Sorry, something went wrong. We recorded the issue to improve the service.', code: 'SERVICE_ERROR', incidentId });
+    });
   });
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
