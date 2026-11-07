@@ -1,6 +1,6 @@
 # Safe Tx Lens
 
-Read-only, open-source inspection for Safe multisig proposals. Give it a Safe transaction hash, an onchain execution hash, a Safe URL, a Safe address, or transaction JSON. It recalculates the EIP-712 hash, recursively opens supported nested calls, rates review priority from the decoded action and observed effects, and optionally simulates the actual `execTransaction` through Tenderly. The CLI can poll a Safe's offchain queue; the local UI and MCP server expose the same analysis.
+Read-only inspection for Safe multisig proposals. Give it a Safe transaction hash, an onchain execution hash, a Safe URL, a Safe address, or transaction JSON. It recalculates the EIP-712 hash, recursively opens supported nested calls, rates review priority from the decoded action and observed effects, and optionally simulates the actual `execTransaction` through Tenderly. The CLI can poll a Safe's offchain queue; the local UI and MCP server expose the same analysis.
 
 **This is an aid for human review, not a proof of safety.** A matching hash proves the supplied fields hash to the expected value. It does not prove target bytecode is benign. A successful simulation covers one chain state and one execution path. Verify the hash on a hardware wallet and inspect every critical call independently.
 

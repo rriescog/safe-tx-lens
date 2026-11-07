@@ -109,11 +109,12 @@ jobs:
           DEPLOY_TENDERLY_ACCOUNT: ${{ vars.DEPLOY_TENDERLY_ACCOUNT }}
           DEPLOY_TENDERLY_PROJECT: ${{ vars.DEPLOY_TENDERLY_PROJECT }}
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+          GHCR_READ_USER: ${{ github.repository_owner }}
           IMAGE: ${{ needs.publish.outputs.image }}
         run: |
           ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p "$HOME/safe-tx-lens"'
           scp -o StrictHostKeyChecking=yes deploy/compose.yaml deploy/compose.tenderly.yaml deploy/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:safe-tx-lens/"
-          printf '%s' "$GHCR_READ_TOKEN" | ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" 'docker login ghcr.io -u web3security --password-stdin >/dev/null'
+          printf '%s' "$GHCR_READ_TOKEN" | ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_READ_USER' --password-stdin >/dev/null"
           ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- '$DEPLOY_DOMAIN' '$IMAGE' '$DEPLOY_TENDERLY_ENABLED' '$DEPLOY_TENDERLY_ACCOUNT' '$DEPLOY_TENDERLY_PROJECT'" <<'REMOTE'
           set -euo pipefail
           domain="$1"

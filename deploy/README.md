@@ -9,7 +9,7 @@ Optional Tenderly simulation is invoked only by the web user on one selected tra
 ## Provision
 
 1. Prepare a Linux VPS with Docker Engine and Compose, inbound 80/443, a DNS A/AAAA record, and a non-root deploy user with Docker permission.
-2. Create a dedicated Safe Builder API key for this community service. Do not reuse the current personal or Polygon key. On the VPS, place its value in `~/safe-tx-lens/safe-api-key` with permissions `0600`; this file is mounted as a Docker secret and is never copied from the repository or put into GitHub Actions logs.
+2. Create a dedicated Safe Builder API key for this service. On the VPS, place its value in `~/safe-tx-lens/safe-api-key` with permissions `0600`; this file is mounted as a Docker secret and is never copied from the repository or put into GitHub Actions logs.
 3. Set GitHub repository variables `DEPLOY_ENABLED=true`, `DEPLOY_DOMAIN`, `DEPLOY_HOST`, `DEPLOY_USER`; set secrets `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`, `GHCR_READ_TOKEN`. Leave `DEPLOY_ENABLED` unset until the VPS, DNS, and dedicated key exist.
 4. To enable simulation, create a dedicated community Tenderly project and put its access key in `~/safe-tx-lens/tenderly-access-key` with permissions `0600`. Set repository variables `DEPLOY_TENDERLY_ENABLED=true`, `DEPLOY_TENDERLY_ACCOUNT`, and `DEPLOY_TENDERLY_PROJECT`. CI then includes `compose.tenderly.yaml` on each deployment. The default Compose file leaves Tenderly off.
 
