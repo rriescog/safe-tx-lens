@@ -57,12 +57,12 @@ test('one-click saved example selects Ethereum and opens a locally decoded repor
   page.context.fetch = async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => review }; };
   page.elements.get('try-example').on_click();
   await new Promise(done => setImmediate(done));
-  assert.equal(page.elements.get('input').value, '0x7fa90051644c1dc76f1a8cbf8402ff401781a5a65c5601b40827b7a6193b86a0');
+  assert.equal(page.elements.get('input').value, '0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b');
   assert.equal(page.elements.get('network').value, 'eth');
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, '/api/demo');
   assert.equal(requests[0].options, undefined);
-  assert.match(page.elements.get('report').innerHTML, /Saved example/);
+  assert.match(page.elements.get('report').innerHTML, /Saved PoS Council example/);
   assert.equal(page.elements.get('status').textContent, 'Saved example decoded locally · no live lookup');
 });
 

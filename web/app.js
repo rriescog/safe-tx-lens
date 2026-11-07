@@ -141,7 +141,7 @@ document.getElementById('try-example').addEventListener('click', () => {
   // RPC request, and its evidence label must not imply a live verification.
   importedJson = null;
   inputMode.value = 'hash';
-  input.value = '0x7fa90051644c1dc76f1a8cbf8402ff401781a5a65c5601b40827b7a6193b86a0';
+  input.value = '0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b';
   network.value = 'eth';
   document.getElementById('custom-chain-group').hidden = true;
   updateWizard();
@@ -263,7 +263,7 @@ function reportHtml(r, retryNote = '') {
   const evidence = r.evidence?.source === 'onchain_execution'
     ? `<div class="notice" style="margin:16px 28px 0"><strong>Verified from ${esc(r.network)} onchain execution</strong> · block ${esc(r.evidence.blockNumber)}${r.evidence.blockTime ? ` · ${esc(r.evidence.blockTime)}` : ''}<br>Execution transaction: <span class="mono">${esc(r.evidence.executionHash)}</span>. ${r.evidence.discoveredBy === 'etherscan_index' ? 'Located through an indexed Safe event. ' : ''}The call graph comes from its execTransaction calldata. State changes below require a separate trace or simulation.</div>`
     : r.evidence?.source === 'bundled_example'
-      ? '<div class="notice demo-notice"><strong>Saved example · decoded locally</strong><br>This is public transaction data bundled with the app, not a fresh RPC or Safe Service result. Use your own hash and a live lookup for an actual review.</div>'
+      ? `<div class="notice demo-notice"><strong>Saved PoS Council example · decoded locally</strong><br>This is public transaction data bundled with the app, not a fresh RPC or Safe Service result. <a href="https://etherscan.io/tx/${esc(r.evidence.executionHash)}" target="_blank" rel="noopener noreferrer">View the Ethereum execution ↗</a> Use your own hash and a live lookup for an actual review.</div>`
     : ['safe_api', 'safe_gateway'].includes(r.evidence?.source)
       ? `<div class="notice" style="margin:16px 28px 0"><strong>Fetched live from ${r.evidence.source === 'safe_api' ? 'Safe Transaction Service' : 'Safe Client Gateway'}</strong> · ${esc(r.evidence.retrievedAt)}<br>The Safe address, nonce, target and calldata came from this source. The EIP-712 hash is recalculated locally; check the RPC result and any limitations below.</div>`
       : '';
