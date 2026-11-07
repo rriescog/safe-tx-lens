@@ -66,8 +66,12 @@ test('verification panel distinguishes supplied data, a user hash, local calcula
   page.context.sample = { ...report, safeState: { source: 'safe_api' } };
   assert.match(page.evaluate('verificationHtml(sample)'), /does not independently validate every API confirmation/);
   page.context.sample = { ...report, evidence: undefined, checks: [report.checks[0]], safeState: null };
-  assert.match(page.evaluate('verificationHtml(sample)'), /No separate Safe transaction hash was supplied/);
-  assert.match(page.evaluate('verificationHtml(sample)'), /No contract hash result is available/);
+  assert.match(page.evaluate('verificationHtml(sample)'), /No hash was independently supplied/);
+  assert.match(page.evaluate('verificationHtml(sample)'), /no usable RPC was available/);
+  page.context.sample = { ...report, evidence: { source: 'onchain_execution', executionHash: report.hash }, transaction: { ...report.transaction, safeTxHash: report.hash, isExecuted: true }, checks: [{ name: 'Local EIP-712 hash', status: 'pass', detail: report.hash }, { name: 'Safe contract hash at pre-execution block', status: 'unavailable', detail: 'historical state unavailable' }] };
+  assert.match(page.evaluate('verificationHtml(sample)'), /Hash in the onchain Safe event/);
+  assert.match(page.evaluate('verificationHtml(sample)'), /historical state unavailable/);
+  assert.match(page.evaluate('verificationHtml(sample)'), /archive-capable RPC/);
   assert.match(page.evaluate('crossCheckHtml(sample)'), /not the data source/);
 });
 
@@ -77,12 +81,14 @@ test('bytecode status and RPC provenance distinguish completed, partial, and unr
   const base = { network: 'eth', targetVerificationAttempted: false, targetChecks: [] };
   page.context.sample = base;
   assert.match(page.evaluate('targetChecksHtml(sample)'), /Bytecode check not run/);
-  assert.match(page.evaluate('targetChecksHtml(sample)'), /Verify target bytecode/);
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /Check target bytecode/);
   page.context.sample = { ...base, targetVerificationAttempted: true, targetChecks: [{ address: target, status: 'verified', reason: 'matched', blockTag: 'latest' }] };
   assert.match(page.evaluate('targetChecksHtml(sample)'), /Verified bytecode · 1\/1/);
   assert.doesNotMatch(page.evaluate('targetChecksHtml(sample)'), /id="verify-targets"/);
   page.context.sample = { ...base, targetVerificationAttempted: true, targetChecks: [{ address: target, status: 'verified_current', reason: 'current only', blockTag: 'latest' }] };
-  assert.match(page.evaluate('targetChecksHtml(sample)'), /current state/);
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /Current bytecode matches/);
+  assert.match(page.evaluate('targetChecksHtml(sample)'), /To verify code at execution time/);
+  assert.doesNotMatch(page.evaluate('targetChecksHtml(sample)'), /id="verify-targets"/);
   page.context.sample = { ...base, targetVerificationAttempted: true, targetChecks: [{ address: target, status: 'verified', reason: 'matched', blockTag: 'latest', abiSelectors: [{ selector: '0x12345678', present: false }] }] };
   assert.match(page.evaluate('targetChecksHtml(sample)'), /ABI selector mismatch/);
   page.context.sample = { ...base, targetVerificationAttempted: true, targetChecks: [{ address: target, status: 'mismatch', reason: 'different bytecode', blockTag: 'latest' }] };
@@ -351,6 +357,7 @@ test('report actions can rerun simulation and target verification for the select
   }
   assert.equal(requests[1].simulate, true);
   assert.equal(requests[2].verifyTargets, true);
+  assert.match(page.elements.get('report').innerHTML, /Checked again: no new bytecode evidence/);
 });
 
 test('web report renders transaction evidence, target verification, effects, and technical details', async () => {
@@ -393,7 +400,7 @@ test('web report marks unavailable verification and simulation outcomes explicit
   const html = variants.map(variant => { page.context.sample = variant; return page.evaluate('reportHtml(sample)'); });
   assert.match(html[0], /Safe Client Gateway/);
   assert.match(html[0], /Simulation unavailable: quota/);
-  assert.match(html[0], /No separate Safe transaction hash was supplied/);
+  assert.match(html[0], /No hash was independently supplied/);
   assert.match(html[1], /Safe execution failed in simulation/);
   assert.match(html[1], /storage diff/);
   assert.match(html[1], /no ABI/);
