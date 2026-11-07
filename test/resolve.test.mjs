@@ -45,7 +45,7 @@ test('a bare Safe address lists every discovered network instead of silently cho
     const network = parsed.pathname.match(/\/tx-service\/([^/]+)\//)?.[1];
     if (!transactions[network]) return new Response('not found', { status: 404 });
     if (parsed.pathname.endsWith(`/safes/${SAFE}/`)) return new Response(JSON.stringify({ address: SAFE, nonce: 3, threshold: 1, owners: [SAFE] }), { status: 200 });
-    if (parsed.pathname.endsWith(`/safes/${SAFE}/multisig-transactions/`)) return new Response(JSON.stringify({ results: [transactions[network]], next: null }), { status: 200 });
+    if (parsed.pathname.endsWith(`/safes/${SAFE}/multisig-transactions/`)) return new Response(JSON.stringify({ count: 1, results: [transactions[network]], next: null }), { status: 200 });
     return new Response('not found', { status: 404 });
   };
   try {

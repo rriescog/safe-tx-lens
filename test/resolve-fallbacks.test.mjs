@@ -28,7 +28,7 @@ async function withSources({ records = {}, safePages = false } = {}, run) {
     if (value.includes('api.safe.global')) {
       if (!safePages) return new Response('unavailable', { status: 503 });
       if (value.endsWith(`/safes/${tx.safe}/`)) return new Response(JSON.stringify({ address: tx.safe, nonce: tx.nonce, threshold: 1, owners: [tx.safe] }), { status: 200 });
-      if (value.includes(`/safes/${tx.safe}/multisig-transactions/`)) return new Response(JSON.stringify({ results: [tx], next: null }), { status: 200 });
+      if (value.includes(`/safes/${tx.safe}/multisig-transactions/`)) return new Response(JSON.stringify({ count: 1, results: [tx], next: null }), { status: 200 });
       if (value.endsWith(`/multisig-transactions/${tx.safeTxHash}/`)) return new Response(JSON.stringify(tx), { status: 200 });
     }
     return new Response('unavailable', { status: 503 });

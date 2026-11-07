@@ -11,7 +11,7 @@ globalThis.fetch = async url => {
   if (path.includes(`/safes/${tx.safe}/multisig-transactions/`)) {
     queueCalls++;
     if (queueCalls >= 3) process.exit(0);
-    return new Response(JSON.stringify({ results: queueCalls === 1 ? [tx] : [], next: null }), { status: 200 });
+    return new Response(JSON.stringify({ count: queueCalls === 1 ? 1 : 0, results: queueCalls === 1 ? [tx] : [], next: null }), { status: 200 });
   }
   if (path.endsWith(`/multisig-transactions/${tx.safeTxHash}/`)) return new Response(JSON.stringify(process.env.TEST_WATCH_OUTCOME === 'executed'
     ? { ...tx, isExecuted: true, isSuccessful: true }

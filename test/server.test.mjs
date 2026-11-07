@@ -9,6 +9,12 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
   const url = `http://127.0.0.1:${server.address().port}/api/inspect`;
   const post = (payload, headers = {}) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(payload) });
   try {
+    const coverage = await fetch(`http://127.0.0.1:${server.address().port}/api/network-coverage`);
+    assert.equal(coverage.status, 200);
+    const snapshot = await coverage.json();
+    assert.equal(snapshot.networks.length, 10);
+    assert.equal(snapshot.networks.find(row => row.network === 'zkevm').pending, 'not_available');
+    assert.doesNotMatch(JSON.stringify(snapshot), /SAFE_API_KEY|safeQuotaRemaining/);
     const plan = { chainId: '1', meta: {}, transactions: [{ to: SAFE, value: '0', data: '0x' }] };
     const valid = await post({ input: plan, network: 'eth' });
     assert.equal(valid.status, 200);
@@ -24,6 +30,20 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
     const malformed = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
     assert.equal(malformed.status, 400);
   } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
+test('upstream Safe quota failure is a service error with a machine-readable code', async () => {
+  const server = await serve({ port: 0, rpcUrl: '' });
+  const original = globalThis.fetch;
+  globalThis.fetch = async url => new Response('{}', { status: String(url).includes('api.safe.global') ? 429 : 403, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '60' } });
+  try {
+    const response = await original(`http://127.0.0.1:${server.address().port}/api/inspect`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ input: `0x${'ab'.repeat(32)}`, network: 'eth' }) });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, 'UPSTREAM_LIMITED');
+  } finally {
+    globalThis.fetch = original;
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 });

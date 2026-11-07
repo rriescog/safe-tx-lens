@@ -43,6 +43,13 @@ function denied(res, ticket) {
   return reply(res, 429, { error, retryAfterSeconds: seconds }, 'application/json', { 'Retry-After': String(seconds) });
 }
 
+function inspectionFailure(res, error) {
+  const message = String(error.message ?? 'Inspection failed').slice(0, 600);
+  const upstreamLimited = /Safe API 429|Safe Client Gateway 429|Safe API rate limit or quota is cooling down|monthly quota exhausted/i.test(message);
+  const upstreamFailed = /Safe API 5\d\d|Safe Client Gateway 5\d\d|Safe Client Gateway 403|Safe API 403/i.test(message);
+  return reply(res, upstreamLimited || upstreamFailed ? 503 : 400, { error: message, code: upstreamLimited ? 'UPSTREAM_LIMITED' : upstreamFailed ? 'UPSTREAM_UNAVAILABLE' : 'INSPECTION_FAILED' });
+}
+
 export async function serve({ port = 4173, rpcUrl, publicMode = false, communityMode = false, publicOrigin, quotaFile = '/data/public-quota.json', dailyLimit = 5, communityQuotaFile = '/data/community-quota.json', communityDailyUnits = 600, communityMonthlyUnits = 10000, communityClientDailyRequests = 20, credentialReader = localCredentials } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid port');
   if (publicMode && communityMode) throw new Error('Choose public demo or community mode');
@@ -77,6 +84,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
   const server = createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') return reply(res, 200, { ok: true });
     if (req.method === 'GET' && req.url === '/api/public-config') return reply(res, 200, supportConfig);
+    if (req.method === 'GET' && req.url === '/api/network-coverage') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/network-coverage.json', import.meta.url)), 'utf8'), 'application/json');
     if (req.method === 'GET' && req.url === '/') return reply(res, 200, html, 'text/html');
     if (req.method === 'GET' && req.url === '/web/app.js') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/app.js', import.meta.url)), 'utf8'), 'text/javascript');
     if (req.method === 'GET' && req.url === '/web/style.css') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/style.css', import.meta.url)), 'utf8'), 'text/css');
@@ -120,7 +128,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
         // read-only and does not consume simulation quota or share calldata.
         const result = await resolve(payload.input, payload.network ?? 'eth', { rpcUrl, simulate: payload.simulate === true, verifyTargets: payload.verifyTargets !== false, limit: 20, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
         return reply(res, 200, result);
-      } catch (error) { return reply(res, 400, { error: error.message }); }
+      } catch (error) { return inspectionFailure(res, error); }
     }
     if (communityMode && req.url === '/mcp' && req.method === 'POST') {
       try {

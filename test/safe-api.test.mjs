@@ -34,8 +34,8 @@ test('a hash lookup records the live source and queue pages preserve their cover
   assert.equal(options.headers.Authorization, 'Bearer test-only-safe-key');
   const path = String(url);
   if (path.includes('/multisig-transactions/' + HASH + '/')) return new Response(JSON.stringify({ safe: SAFE, safeTxHash: HASH }), { status: 200 });
-  if (path.endsWith(`/safes/${SAFE}/`)) return new Response(JSON.stringify({ address: SAFE, nonce: 8, owners: [SAFE], threshold: 1 }), { status: 200 });
-  if (path.includes('/multisig-transactions/?')) return new Response(JSON.stringify({ results: [{ safeTxHash: HASH, nonce: 8 }], next: 'next-page' }), { status: 200 });
+  if (path.endsWith(`/safes/${SAFE}/`)) return new Response(JSON.stringify({ address: SAFE, nonce: '8', owners: [SAFE], threshold: 1 }), { status: 200 });
+  if (path.includes('/multisig-transactions/?')) return new Response(JSON.stringify({ count: 2, results: [{ safeTxHash: HASH, nonce: 8 }], next: 'next-page' }), { status: 200 });
   throw new Error(`Unexpected request: ${path}`);
 }, async () => {
   const transaction = await fetchTransaction(HASH, 'eth');
@@ -64,11 +64,20 @@ test('an API failure does not silently turn an unavailable queue into an empty o
   await assert.rejects(() => fetchSafeTransactions(SAFE, 'eth', 'pending', 0), /limit/);
 }));
 
+test('a malformed successful Safe response cannot masquerade as an empty queue', async () => withFetch(async url => {
+  const value = String(url);
+  if (value.includes('safe-client.safe.global')) return new Response(JSON.stringify({ results: null }), { status: 200 });
+  if (value.endsWith(`/safes/${SAFE}/`)) return new Response(JSON.stringify({ address: SAFE, nonce: '0', owners: [SAFE], threshold: 1 }), { status: 200 });
+  return new Response(JSON.stringify({ results: null, count: 0 }), { status: 200 });
+}, async () => {
+  await assert.rejects(() => fetchSafeTransactions(SAFE, 'eth', 'pending', 1), /invalid transaction list.*incomplete Safe state/);
+}));
+
 test('lowercase inventory addresses are checksummed before Safe API lookup', async () => withFetch(async url => {
   const checksum = getAddress('0xc74efc7fdb3bec9c6930e91ffdf761b160df79db');
   assert.match(String(url), new RegExp(`/safes/${checksum}/`));
   if (String(url).endsWith(`/safes/${checksum}/`)) return new Response(JSON.stringify({ address: checksum, nonce: 0, owners: [], threshold: 1 }), { status: 200 });
-  return new Response(JSON.stringify({ results: [], next: null }), { status: 200 });
+  return new Response(JSON.stringify({ count: 0, results: [], next: null }), { status: 200 });
 }, async () => {
   const queue = await fetchSafeTransactions('0xc74efc7fdb3bec9c6930e91ffdf761b160df79db', 'eth', 'pending', 1);
   assert.equal(queue.source, 'safe_api');
@@ -103,7 +112,7 @@ test('fetchQueue uses the pending scope and anonymous quota fails closed', async
   await withFetch(async url => {
     const path = String(url);
     if (path.endsWith(`/safes/${SAFE}/`)) return new Response(JSON.stringify({ address: SAFE, nonce: 0, threshold: 1, owners: [] }), { status: 200 });
-    return new Response(JSON.stringify({ results: [], next: null }), { status: 200 });
+    return new Response(JSON.stringify({ count: 0, results: [], next: null }), { status: 200 });
   }, async () => {
     const queue = await fetchQueue(SAFE, 'eth');
     assert.equal(queue.transactions.length, 0);
@@ -115,6 +124,19 @@ test('fetchQueue uses the pending scope and anonymous quota fails closed', async
     await assert.rejects(() => safeGet('eth', `/safes/${SAFE}/`, ''), /anonymous monthly quota exhausted/);
     await assert.rejects(() => safeGet('eth', `/safes/${SAFE}/`, ''), /anonymous monthly quota exhausted/);
     assert.equal(requests, 1);
+  } finally { globalThis.fetch = original; }
+});
+
+test('authenticated Safe 429 opens a key-scoped cooldown without repeating upstream requests', async () => {
+  const original = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async () => { requests++; return new Response('{}', { status: 429, headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '60' } }); };
+  try {
+    await assert.rejects(() => safeGet('eth', `/safes/${SAFE}/`, 'quota-test-a'), /authenticated quota/);
+    await assert.rejects(() => safeGet('eth', `/safes/${SAFE}/`, 'quota-test-a'), /cooling down/);
+    assert.equal(requests, 1);
+    await assert.rejects(() => safeGet('eth', `/safes/${SAFE}/`, 'quota-test-b'), /authenticated quota/);
+    assert.equal(requests, 2);
   } finally { globalThis.fetch = original; }
 });
 

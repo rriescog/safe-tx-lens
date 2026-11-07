@@ -33,6 +33,23 @@ fetch('/api/public-config').then(response => response.ok ? response.json() : nul
     row.append(label, address, copy); host.append(row);
   }
 }).catch(() => {});
+fetch('/api/network-coverage').then(response => response.ok ? response.json() : null).then(snapshot => {
+  if (!snapshot?.networks || !Array.isArray(snapshot.networks)) return;
+  const note = document.getElementById('network-coverage-note');
+  const checked = new Date(snapshot.checkedAt);
+  note.textContent = `Endpoint probe: ${Number.isNaN(checked.getTime()) ? 'date unknown' : checked.toLocaleDateString()} · statuses can change. An empty test address checks endpoint availability, not a real Safe.`;
+  const byNetwork = new Map(snapshot.networks.map(row => [row.network, row]));
+  for (const card of document.querySelectorAll('.network-grid [data-network]')) {
+    const row = byNetwork.get(card.dataset.network);
+    if (!row) continue;
+    const label = document.createElement('span'); label.className = 'network-status';
+    const queue = row.pending === 'available' && row.history === 'available';
+    const rpc = row.rpc === 'available';
+    label.textContent = `${queue ? 'Safe queue + history' : 'Safe source unavailable'} · ${row.indexing === 'indexer_lagging' ? 'Indexer behind' : rpc ? 'RPC available' : 'RPC not verified'}`;
+    if (!queue || !rpc || row.indexing !== 'available') label.classList.add('limited');
+    card.append(label);
+  }
+}).catch(() => {});
 if (publicFacing) {
   if (communityMode) document.querySelector('.local-note').textContent = 'Public service: Safe lookups and hosted MCP share a usage budget. Simulation, when configured, runs only on request.';
   else {

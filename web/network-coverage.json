@@ -1,0 +1,86 @@
+{
+  "checkedAt": "2026-11-07T11:18:14.468Z",
+  "method": "Authenticated Safe Transaction Service indexing, pending and history endpoints with an empty test address; RPC eth_chainId",
+  "networks": [
+    {
+      "network": "eth",
+      "chainId": 1,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "gno",
+      "chainId": 100,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "pol",
+      "chainId": 137,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "arb1",
+      "chainId": 42161,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "oeth",
+      "chainId": 10,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "base",
+      "chainId": 8453,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "sep",
+      "chainId": 11155111,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "zkevm",
+      "chainId": 1101,
+      "indexing": "not_available",
+      "pending": "not_available",
+      "history": "not_available",
+      "rpc": "not_configured"
+    },
+    {
+      "network": "bnb",
+      "chainId": 56,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    },
+    {
+      "network": "avax",
+      "chainId": 43114,
+      "indexing": "available",
+      "pending": "available",
+      "history": "available",
+      "rpc": "available"
+    }
+  ]
+}
