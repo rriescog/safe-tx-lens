@@ -157,7 +157,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           const ticket = quota.take();
           if (!ticket.allowed) return reply(res, 429, { error: ticket.reason === 'busy' ? 'Public demo is busy; retry shortly' : 'Public demo daily request budget reached; use the CLI locally' });
           try {
-            return reply(res, 200, await resolve(payload.input, payload.network ?? 'eth', { simulate: false, fetchState: false, verifyTargets: false, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash }));
+            return reply(res, 200, await resolve(payload.input, payload.network ?? 'eth', { simulate: false, fetchState: false, verifyTargets: false, decodeCandidates: payload.decodeCandidates === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash }));
           } finally { quota.release(); }
         }
         if (communityMode) {
@@ -170,13 +170,13 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           const ticket = community.take(clientIp, cost, { simulation: payload.simulate === true });
           if (!ticket.allowed) return denied(res, ticket);
           try {
-            const result = await resolve(payload.input, payload.network ?? 'auto', { simulate: payload.simulate === true, fetchState: false, verifyTargets: payload.verifyTargets === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
+            const result = await resolve(payload.input, payload.network ?? 'auto', { simulate: payload.simulate === true, fetchState: false, verifyTargets: payload.verifyTargets === true, decodeCandidates: payload.decodeCandidates === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
             return reply(res, 200, redactPrivateSimulationUrl(result));
           } finally { community.release(); }
         }
         // Simulation is an explicit UI action. The ordinary inspection path stays
         // read-only and does not consume simulation quota or share calldata.
-        const result = await resolve(payload.input, payload.network ?? 'eth', { rpcUrl, simulate: payload.simulate === true, verifyTargets: payload.verifyTargets !== false, limit: 20, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
+        const result = await resolve(payload.input, payload.network ?? 'eth', { rpcUrl, simulate: payload.simulate === true, verifyTargets: payload.verifyTargets !== false, decodeCandidates: payload.decodeCandidates === true, limit: 20, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
         return reply(res, 200, result);
       } catch (error) { return inspectionFailure(res, error, recordIncident); }
     }

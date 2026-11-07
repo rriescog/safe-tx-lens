@@ -111,6 +111,16 @@ test('web renderer escapes untrusted calldata and addresses', () => {
   assert.doesNotMatch(page.evaluate('callHtml({to:"<img>",value:"0",operation:0,data:"0x",children:[]})'), /<img>/);
 });
 
+test('4byte candidate appears as a tentative decode in the call tree', () => {
+  const page = ui();
+  const node = { to: '0x2222222222222222222222222222222222222222', value: '0', operation: 0, data: '0x12345678', selector: '0x12345678', method: 'setDelay(uint256)', args: [{ name: 'arg0', value: '60' }], decodeBasis: 'selector_candidate', children: [], stage: 'schedule' };
+  page.context.sample = node;
+  const html = page.evaluate('callHtml(sample)');
+  assert.match(html, /Candidate signature/);
+  assert.match(html, /not verified against the called contract/);
+  assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /Candidate/);
+});
+
 test('public UI disables wallet monitoring and labels its owner-key limitations', () => {
   const page = ui({ publicMode: true });
   assert.equal(page.elements.get('network').value, 'eth');

@@ -21,8 +21,8 @@ export function communityMcpHandler() {
         return { isError: true, content: [{ type: 'text', text: error.message }] };
       }
     });
-    register('inspect', 'Inspect a Safe hash, execution hash, URL, or address on supported networks.', { input: z.string().min(1).max(262144), network }, ({ input, network }) => resolve(input, network, { limit: 5, verifyTargets: parseInput(input, network).kind !== 'safe', fetchState: false }));
-    register('inspect_json', 'Decode a supplied Safe transaction or Builder export.', { transaction: z.record(z.string(), z.unknown()), network }, ({ transaction, network }) => resolve(transaction, network === 'auto' ? 'eth' : network, { limit: 5, verifyTargets: true, fetchState: false }));
+    register('inspect', 'Inspect a Safe hash, execution hash, URL, or address on supported networks.', { input: z.string().min(1).max(262144), network }, ({ input, network }) => resolve(input, network, { limit: 5, verifyTargets: parseInput(input, network).kind !== 'safe', decodeCandidates: true, fetchState: false }));
+    register('inspect_json', 'Decode a supplied Safe transaction or Builder export.', { transaction: z.record(z.string(), z.unknown()), network }, ({ transaction, network }) => resolve(transaction, network === 'auto' ? 'eth' : network, { limit: 5, verifyTargets: true, decodeCandidates: true, fetchState: false }));
     register('list_pending', 'List up to five queued proposals for a Safe.', { safe: z.string().min(1).max(512), network }, ({ safe, network }) => resolve(safe, network, { scope: 'pending', limit: 5, verifyTargets: false, fetchState: false }));
     register('list_history', 'List up to five executed transactions for a Safe.', { safe: z.string().min(1).max(512), network }, ({ safe, network }) => resolve(safe, network, { scope: 'history', limit: 5, verifyTargets: false, fetchState: false }));
     return server;

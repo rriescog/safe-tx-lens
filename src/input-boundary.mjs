@@ -12,7 +12,7 @@ export function validateInspectionRequest(payload) {
   const network = payload.network ?? 'eth';
   if (network !== 'auto') chainId(network);
   if (!['pending', 'history', 'both'].includes(payload.scope ?? 'pending')) throw new Error('Invalid transaction scope');
-  for (const key of ['simulate', 'verifyTargets']) if (payload[key] !== undefined && typeof payload[key] !== 'boolean') throw new Error(`Invalid ${key}`);
+  for (const key of ['simulate', 'verifyTargets', 'decodeCandidates']) if (payload[key] !== undefined && typeof payload[key] !== 'boolean') throw new Error(`Invalid ${key}`);
   if (payload.safeAddress !== undefined && (!isAddress(payload.safeAddress) || payload.safeAddress.length !== 42)) throw new Error('Invalid Safe address');
   if (payload.safeHash !== undefined && (typeof payload.safeHash !== 'string' || !HASH.test(payload.safeHash))) throw new Error('Invalid Safe hash');
   const input = payload.input;

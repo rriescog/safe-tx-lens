@@ -125,7 +125,7 @@ try {
     if (!flags._[0]) throw new Error(`${command} needs an input`);
     let input = flags._[0];
     if (input.startsWith('@')) input = JSON.parse(await readFile(input.slice(1), 'utf8'));
-    const options = { rpcUrl: flags.rpc ?? process.env.RPC_URL, simulate: flags.simulate, monitorFallback: flags['monitor-fallback'] === true, scope: flags.scope, safeAddress: flags['safe-address'], safeHash: flags['safe-hash'] };
+    const options = { rpcUrl: flags.rpc ?? process.env.RPC_URL, simulate: flags.simulate, decodeCandidates: command === 'inspect', monitorFallback: flags['monitor-fallback'] === true, scope: flags.scope, safeAddress: flags['safe-address'], safeHash: flags['safe-hash'] };
     if (command === 'inspect') printReport(await resolve(input, flags.network ?? (typeof input === 'string' && /^0x(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(input) ? 'auto' : 'eth'), options), flags.json);
     else await watch(input, flags.network ?? 'eth', options, Number(flags.interval ?? 30), flags.once);
   } else throw new Error(`Unknown command ${command}`);

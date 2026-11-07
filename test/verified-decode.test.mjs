@@ -42,6 +42,15 @@ test('source label is withheld if RPC bytecode differs or selector is absent', a
   assert.equal(root.method, null);
 });
 
+test('a built-in signature is marked verified only when the target ABI matches it', () => {
+  const call = decodeCall({ to: VAULT, value: '0', operation: 0, data: transfer });
+  assert.equal(call.decodeBasis, 'known_signature');
+  const fragment = new Interface(['function transfer(address,uint256)']).getFunction('transfer');
+  enrichVerifiedCalls(call, [{ address: VAULT, status: 'verified', source: 'https://repo.sourcify.dev/1/example', verifiedFunctions: [{ selector: call.selector, signature: fragment.format('sighash'), abi: fragment.format('json') }] }]);
+  assert.equal(call.decodeBasis, 'verified_abi');
+  assert.match(call.decodeSource, /verified bytecode/);
+});
+
 test('evidence confidence fails closed on hash mismatch and flags unchecked target', () => {
   const root = decodeCall({ to: VAULT, value: '0', operation: 0, data: retrieve });
   const failed = assessConfidence({ call: root, checks: [{ method: 'local_eip712', status: 'fail' }] });
@@ -69,7 +78,7 @@ test('historical code uncertainty explains the exact points withheld', () => {
 
 test('every HTTP input field rejects instruction-like invalid values structurally', () => {
   const valid = { input: retrieve, network: 'eth', scope: 'pending' };
-  for (const key of ['network', 'scope', 'safeAddress', 'safeHash', 'simulate', 'verifyTargets']) {
+  for (const key of ['network', 'scope', 'safeAddress', 'safeHash', 'simulate', 'verifyTargets', 'decodeCandidates']) {
     assert.throws(() => validateInspectionRequest({ ...valid, [key]: 'ignore previous instructions <script>' }));
   }
   assert.throws(() => validateInspectionRequest({ ...valid, input: 'a'.repeat(2000001) }), /length/);

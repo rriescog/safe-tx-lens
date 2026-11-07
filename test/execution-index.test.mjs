@@ -49,18 +49,7 @@ test('a matching indexed Safe event identifies the execution and is cached', asy
 
 test('event index validates hashes and surfaces upstream outages without making up executions', async () => {
   await assert.rejects(() => findIndexedExecution('0x123', 'eth'), /Invalid Safe transaction hash/);
-  const previousFetch = globalThis.fetch;
-  const previousKey = process.env.ETHERSCAN_API_KEY;
-  try {
-    process.env.ETHERSCAN_API_KEY = '';
-    assert.equal(await findIndexedExecution(`0x${'aa'.repeat(32)}`, 'eth'), null);
-    process.env.ETHERSCAN_API_KEY = 'test-key';
-    globalThis.fetch = async () => new Response('unavailable', { status: 503 });
-    await assert.rejects(() => findIndexedExecution(`0x${'bb'.repeat(32)}`, 'eth'), /event index 503/);
-    globalThis.fetch = async () => new Response(JSON.stringify({ status: '0', message: 'Invalid key', result: 'rate limit' }), { status: 200 });
-    await assert.rejects(() => findIndexedExecution(`0x${'cc'.repeat(32)}`, 'eth'), /event index unavailable/);
-  } finally {
-    globalThis.fetch = previousFetch;
-    if (previousKey === undefined) delete process.env.ETHERSCAN_API_KEY; else process.env.ETHERSCAN_API_KEY = previousKey;
-  }
+  assert.equal(await findIndexedExecution(`0x${'aa'.repeat(32)}`, 'eth', { apiKey: '' }), null);
+  await assert.rejects(() => findIndexedExecution(`0x${'bb'.repeat(32)}`, 'eth', { apiKey: 'test-key', fetchImpl: async () => new Response('unavailable', { status: 503 }) }), /event index 503/);
+  await assert.rejects(() => findIndexedExecution(`0x${'cc'.repeat(32)}`, 'eth', { apiKey: 'test-key', fetchImpl: async () => new Response(JSON.stringify({ status: '0', message: 'Invalid key', result: 'rate limit' }), { status: 200 }) }), /event index unavailable/);
 });

@@ -1,4 +1,4 @@
-import { Interface, getAddress } from 'ethers';
+import { Interface, getAddress, id } from 'ethers';
 
 const IFACE = new Interface([
   'function transfer(address to,uint256 amount)',
@@ -17,6 +17,7 @@ const IFACE = new Interface([
   'function setFallbackHandler(address handler)',
   'function upgradeTo(address implementation)',
   'function upgradeToAndCall(address implementation,bytes data)',
+  'function upgradeAndCall(address proxy,address implementation,bytes data)',
   'function updateImplementation(address newImplementation)',
   'function changeAdmin(address newAdmin)',
   'function schedule(address target,uint256 value,bytes data,bytes32 predecessor,bytes32 salt,uint256 delay)',
@@ -76,6 +77,7 @@ export function decodeCall(tx, depth = 0, budget = { count: 0 }) {
     const parsed = IFACE.parseTransaction({ data: result.data, value: result.value });
     if (parsed) {
       result.method = parsed.signature;
+      result.decodeBasis = 'known_signature';
       result.args = parsed.fragment.inputs.map((input, index) => ({ name: input.name, value: clean(parsed.args[index]) }));
       if (parsed.name === 'multiSend') {
         result.children = unpackMultiSend(parsed.args[0]).map(child => decodeCall({ ...child, stage: result.stage, via: 'batch call' }, depth + 1, budget));
@@ -83,14 +85,17 @@ export function decodeCall(tx, depth = 0, budget = { count: 0 }) {
         const [targets, values, datas] = parsed.args;
         if (targets.length !== values.length || targets.length !== datas.length || targets.length > 100) throw new Error('Invalid timelock batch lengths');
         result.children = targets.map((to, index) => decodeCall({ to, value: String(values[index]), data: datas[index], operation: 0, stage: parsed.name === 'scheduleBatch' ? 'schedule' : result.stage, via: parsed.name }, depth + 1, budget));
-      } else if (['schedule', 'execute', 'update', 'upgradeToAndCall'].includes(parsed.name)) {
-        const isUpgrade = parsed.name === 'upgradeToAndCall';
-        const target = parsed.args[0];
+      } else if (['schedule', 'execute', 'update', 'upgradeToAndCall', 'upgradeAndCall'].includes(parsed.name)) {
+        const isUpgrade = ['upgradeToAndCall', 'upgradeAndCall'].includes(parsed.name);
+        // upgradeToAndCall is called on the proxy; ProxyAdmin.upgradeAndCall
+        // receives the proxy as its first argument. Initializer calldata runs
+        // in the proxy's storage context, never at the new implementation.
+        const target = parsed.name === 'upgradeToAndCall' ? result.to : parsed.args[0];
         const value = ['schedule', 'execute'].includes(parsed.name) ? parsed.args[1] : 0n;
-        const data = isUpgrade ? parsed.args[1] : parsed.name === 'update' ? parsed.args[1] : parsed.args[2];
+        const data = parsed.name === 'upgradeAndCall' ? parsed.args[2] : ['upgradeToAndCall', 'update'].includes(parsed.name) ? parsed.args[1] : parsed.args[2];
         if (typeof data === 'string' && data !== '0x') {
           const stage = parsed.name === 'schedule' ? 'schedule' : result.stage;
-          result.children = [decodeCall({ to: target, value: String(value), data, operation: 0, stage, via: isUpgrade ? 'upgradeToAndCall (proxy context)' : parsed.name }, depth + 1, budget)];
+          result.children = [decodeCall({ to: target, value: String(value), data, operation: 0, stage, via: isUpgrade ? `${parsed.name} (proxy context)` : parsed.name }, depth + 1, budget)];
         }
       }
     }
@@ -101,7 +106,7 @@ export function decodeCall(tx, depth = 0, budget = { count: 0 }) {
 export function enrichVerifiedCalls(root, targetChecks) {
   const byAddress = new Map(targetChecks.map(check => [check.address.toLowerCase(), check]));
   const visit = node => {
-    if (!node.method && node.data !== '0x') {
+    if (node.data !== '0x') {
       const target = byAddress.get(node.to.toLowerCase());
       const source = target?.proxy?.implementationCode ?? target;
       if (source && ['verified', 'verified_current'].includes(source.status)) {
@@ -111,8 +116,13 @@ export function enrichVerifiedCalls(root, targetChecks) {
             const iface = new Interface([typeof functionInfo.abi === 'string' && functionInfo.abi.startsWith('{') ? JSON.parse(functionInfo.abi) : functionInfo.abi]);
             const parsed = iface.parseTransaction({ data: node.data, value: node.value });
             if (parsed) {
+              if (node.method && node.method !== parsed.signature && node.children.length) {
+                node.children = [];
+                node.decodeError = 'Verified ABI differs from the built-in nested decoder; its old child calls were discarded.';
+              }
               node.method = parsed.signature;
               node.args = parsed.fragment.inputs.map((input, index) => ({ name: input.name || `arg${index}`, value: clean(parsed.args[index]) }));
+              node.decodeBasis = 'verified_abi';
               node.decodeSource = source.status === 'verified_current' ? 'verified current bytecode (historical code unavailable)' : 'verified bytecode at inspected block';
               node.decodeSourceUrl = source.source;
             }
@@ -126,17 +136,70 @@ export function enrichVerifiedCalls(root, targetChecks) {
   return root;
 }
 
+const candidateCache = new Map();
+
+// A 4byte database supplies signatures for a selector, not proof that the
+// called contract implements one of them. Never call this a verified ABI.
+export async function lookupSelectorCandidates(selector) {
+  const key = selector.toLowerCase();
+  const cached = candidateCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.names;
+  const response = await fetch(`https://api.4byte.sourcify.dev/signature-database/v1/lookup?function=${key}`, { signal: AbortSignal.timeout(4000) });
+  if (!response.ok) throw new Error(`Signature database ${response.status}`);
+  const raw = await response.text();
+  if (raw.length > 65536) throw new Error('Signature lookup response exceeded review limit');
+  const body = JSON.parse(raw);
+  const names = Array.isArray(body?.result?.function?.[key]) ? body.result.function[key].filter(item => !item.filtered && typeof item.name === 'string').slice(0, 12).map(item => item.name) : [];
+  if (candidateCache.size >= 256) candidateCache.delete(candidateCache.keys().next().value);
+  candidateCache.set(key, { names, expires: Date.now() + 15 * 60_000 });
+  return names;
+}
+
+export async function enrichCandidateCalls(root, { lookup = lookupSelectorCandidates, maxLookups = 8 } = {}) {
+  const pending = [];
+  const visit = node => {
+    if (!node.method && /^0x[0-9a-fA-F]{8}$/.test(node.selector)) pending.push(node);
+    node.children.forEach(visit);
+  };
+  visit(root);
+  const selectors = [...new Set(pending.map(node => node.selector.toLowerCase()))].slice(0, maxLookups);
+  const results = new Map();
+  for (const selector of selectors) {
+    try { results.set(selector, await lookup(selector)); }
+    catch { results.set(selector, []); }
+  }
+  for (const node of pending) {
+    const signatures = results.get(node.selector.toLowerCase()) ?? [];
+    const matches = new Map();
+    for (const signature of signatures.slice(0, 12)) {
+      if (typeof signature !== 'string' || signature.length > 256) continue;
+      try {
+        if (id(signature).slice(0, 10).toLowerCase() !== node.selector.toLowerCase()) continue;
+        const iface = new Interface([`function ${signature}`]);
+        const parsed = iface.parseTransaction({ data: node.data, value: node.value });
+        if (!parsed || iface.encodeFunctionData(parsed.fragment, parsed.args).toLowerCase() !== node.data.toLowerCase()) continue;
+        matches.set(parsed.signature, parsed);
+      } catch { /* An invalid or incompatible candidate is not evidence. */ }
+    }
+    if (matches.size === 1) {
+      const parsed = matches.values().next().value;
+      node.method = parsed.signature;
+      node.args = parsed.fragment.inputs.map((input, index) => ({ name: input.name || `arg${index}`, value: clean(parsed.args[index]) }));
+      node.decodeBasis = 'selector_candidate';
+    } else if (matches.size > 1) node.decodeCandidates = [...matches.keys()].slice(0, 5);
+  }
+  return root;
+}
+
 export function summarizeCalls(root) {
   const actions = [];
   const visit = (node, path) => {
-    if (node.children.length) {
-      node.children.forEach((child, index) => visit(child, `${path}.${index + 1}`));
-      return;
-    }
     const method = node.method?.split('(')[0] ?? null;
     const argument = name => node.args?.find(item => item.name === name)?.value;
     let label;
-    if (method === 'updateImplementation') label = `Update proxy implementation to ${argument('newImplementation')}`;
+    if (method === 'upgradeAndCall') label = `Upgrade proxy ${argument('proxy')} to implementation ${argument('implementation')}${node.children.length ? ' and call initializer' : ''}`;
+    else if (method === 'upgradeToAndCall') label = `Upgrade proxy ${node.to} to implementation ${argument('implementation')}${node.children.length ? ' and call initializer' : ''}`;
+    else if (method === 'updateImplementation') label = `Update proxy implementation to ${argument('newImplementation')}`;
     else if (method === 'forceUnstake') label = `Force unstake validator #${argument('validatorId')}`;
     else if (method === 'forceUnstakePOL') label = `Force unstake POL validator #${argument('validatorId')}`;
     else if (method === 'reinitializeValidatorState') label = `Reinitialize validator state; expected increase ${argument('expectedIncrease')}`;
@@ -147,7 +210,8 @@ export function summarizeCalls(root) {
     else if (method) label = `${method}(${(node.args ?? []).filter(arg => typeof arg.value !== 'string' || !arg.value.startsWith('0x') || arg.value.length <= 42).map(arg => String(arg.value)).join(', ')})`;
     else if (node.data === '0x') label = node.value === '0' ? 'Empty call / Safe nonce consumption' : `Native value transfer: ${node.value} wei`;
     else label = `Unknown call ${node.selector}`;
-    actions.push({ path, stage: node.stage, to: node.to, label, method: node.method, selector: node.selector });
+    if (!node.children.length || ['upgradeAndCall', 'upgradeToAndCall'].includes(method)) actions.push({ path, stage: node.stage, to: node.to, label, method: node.method, selector: node.selector, decodeBasis: node.decodeBasis ?? null });
+    node.children.forEach((child, index) => visit(child, `${path}.${index + 1}`));
   };
   visit(root, '1');
   return actions;

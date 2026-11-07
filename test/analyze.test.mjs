@@ -56,6 +56,29 @@ test('MultiSend rejects truncated records and exposes nested calls', () => {
   assert.equal(decoded.children[0].to, TARGET);
 });
 
+test('ProxyAdmin upgradeAndCall exposes proxy, implementation, and initializer as critical actions', async () => {
+  const admin = '0x4444444444444444444444444444444444444444';
+  const proxy = '0x5555555555555555555555555555555555555555';
+  const implementation = '0x6666666666666666666666666666666666666666';
+  const iface = new Interface(['function upgradeAndCall(address proxy,address implementation,bytes data)']);
+  const initializer = new Interface(['function reinitializeValidatorState(uint256 expectedIncrease)']).encodeFunctionData('reinitializeValidatorState', [123n]);
+  const report = await analyze({ ...tx, to: admin, data: iface.encodeFunctionData('upgradeAndCall', [proxy, implementation, initializer]) }, 'eth', { fetchState: false });
+  assert.equal(report.call.method, 'upgradeAndCall(address,address,bytes)');
+  assert.equal(report.call.children[0].to, proxy);
+  assert.equal(report.call.children[0].method, 'reinitializeValidatorState(uint256)');
+  assert.ok(report.actions.some(action => action.label.includes(`Upgrade proxy ${proxy} to implementation ${implementation}`)));
+  assert.equal(report.risk.reviewPriority, 'critical');
+});
+
+test('upgradeToAndCall decodes initializer in the proxy context', () => {
+  const proxy = '0x5555555555555555555555555555555555555555';
+  const implementation = '0x6666666666666666666666666666666666666666';
+  const iface = new Interface(['function upgradeToAndCall(address implementation,bytes data)']);
+  const initializer = new Interface(['function reinitializeValidatorState(uint256 expectedIncrease)']).encodeFunctionData('reinitializeValidatorState', [123n]);
+  const call = decodeCall({ to: proxy, value: '0', operation: 0, data: iface.encodeFunctionData('upgradeToAndCall', [implementation, initializer]) });
+  assert.equal(call.children[0].to, proxy);
+});
+
 test('Safe URL parser uses the embedded network and hash', () => {
   const hash = `0x${'a'.repeat(64)}`;
   const parsed = parseInput(`https://app.safe.global/transactions/tx?safe=pol:${SAFE}&id=multisig_${SAFE}_${hash}`, 'eth');

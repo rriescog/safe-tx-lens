@@ -177,11 +177,18 @@ function argValue(arg, call) {
   }
   return JSON.stringify(arg.value);
 }
+function decodeEvidence(call) {
+  if (call.decodeSource) return `<div class="decode-source">ABI from ${esc(call.decodeSource)}${call.decodeSourceUrl ? ` · <a href="${esc(call.decodeSourceUrl)}" target="_blank" rel="noopener noreferrer">source</a>` : ''}. Function name does not prove behavior.</div>`;
+  if (call.decodeBasis === 'selector_candidate') return '<div class="decode-source">Candidate signature from Sourcify 4byte. Arguments fit the calldata, but this is not verified against the called contract. Inspect target bytecode before relying on the name.</div>';
+  if (call.decodeCandidates?.length) return `<div class="decode-source">Ambiguous selector candidates: ${esc(call.decodeCandidates.join(' · '))}. No function was chosen.</div>`;
+  if (call.decodeBasis === 'known_signature') return '<div class="decode-source">Known ABI signature; target behavior still requires bytecode verification.</div>';
+  return '';
+}
 function callHtml(call) {
   const title = call.method ?? (call.data === '0x' ? 'Native transfer or nonce-only call' : `Unknown ${call.selector}`);
   const args = call.args?.length ? `<div>${call.args.map(arg => `<div class="arg"><span>${esc(arg.name)}</span><span>${esc(argValue(arg, call))}</span></div>`).join('')}</div>` : '';
   const children = call.children?.length ? `<div class="call-children">${call.children.map(callHtml).join('')}</div>` : '';
-  return `<div class="call"><div class="call-title">${esc(title)} ${call.operation === 1 ? pill('DELEGATECALL') : ''} ${call.stage === 'schedule' ? pill('scheduled') : ''}</div><div class="call-detail mono">${call.via ? `${esc(call.via)} · ` : ''}To ${esc(call.to)} · ${esc(call.value)} wei</div>${call.decodeSource ? `<div class="decode-source">ABI from ${esc(call.decodeSource)}${call.decodeSourceUrl ? ` · <a href="${esc(call.decodeSourceUrl)}" target="_blank" rel="noopener noreferrer">source</a>` : ''}. Function name does not prove behavior.</div>` : ''}${args}${call.decodeError ? `<p class="notice danger">Decode error: ${esc(call.decodeError)}</p>` : ''}${children}<details><summary>Raw calldata</summary><div class="raw">${esc(call.data)}</div></details></div>`;
+  return `<div class="call"><div class="call-title">${esc(title)} ${call.operation === 1 ? pill('DELEGATECALL') : ''} ${call.stage === 'schedule' ? pill('scheduled') : ''}</div><div class="call-detail mono">${call.via ? `${esc(call.via)} · ` : ''}To ${esc(call.to)} · ${esc(call.value)} wei</div>${decodeEvidence(call)}${args}${call.decodeError ? `<p class="notice danger">Decode error: ${esc(call.decodeError)}</p>` : ''}${children}<details><summary>Raw calldata</summary><div class="raw">${esc(call.data)}</div></details></div>`;
 }
 function section(title, body) { return `<section class="report-section"><h3>${esc(title)}</h3>${body}</section>`; }
 function flowHtml(node, path, labels) {
@@ -189,7 +196,7 @@ function flowHtml(node, path, labels) {
   const title = labels.get(path) ?? method;
   const kind = /^schedule/.test(method) || node.stage === 'schedule' ? 'Schedule' : /^execute/.test(method) ? 'Execute' : node.operation === 1 ? 'Delegatecall' : 'Call';
   const children = node.children?.length ? `<ul class="flow-children">${node.children.map((child, i) => flowHtml(child, `${path}.${i + 1}`, labels)).join('')}</ul>` : '';
-  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong>${esc(title)}</strong><span class="flow-address mono">${esc(node.to)}</span>${node.token ? `<span class="token-identity">${esc(node.token.amount ?? 'Raw amount unavailable')} ${esc(node.token.symbol)} · ${esc(node.token.address)}<small>Symbol and decimals reported by the contract via RPC; identity unverified.</small></span>` : ''}${node.decodeSource ? `<span class="flow-evidence">Verified ABI · ${esc(node.decodeSource)}</span>` : ''}</div></div>${children}</li>`;
+  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong>${esc(title)}</strong><span class="flow-address mono">${esc(node.to)}</span>${node.token ? `<span class="token-identity">${esc(node.token.amount ?? 'Raw amount unavailable')} ${esc(node.token.symbol)} · ${esc(node.token.address)}<small>Symbol and decimals reported by the contract via RPC; identity unverified.</small></span>` : ''}${node.decodeSource ? `<span class="flow-evidence">Verified ABI · ${esc(node.decodeSource)}</span>` : node.decodeBasis === 'selector_candidate' ? '<span class="flow-evidence">Candidate signature · target unverified</span>' : ''}</div></div>${children}</li>`;
 }
 function graphElements(r) {
   const elements = [{ data: { id: 'safe', label: `Safe nonce ${r.transaction.nonce}`, detail: `Safe ${r.transaction.safe}`, kind: 'safe' } }];
@@ -382,7 +389,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
   if (!silent) { submit.disabled = true; status.textContent = simulate ? 'Simulating Safe execution and measuring state changes…' : 'Inspecting Safe data and recalculating hashes…'; }
   try {
     const isJson = selectedInputMode() === 'json';
-    const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? selectedNetwork(), scope: scope.value, simulate, verifyTargets, safeAddress: isJson ? safeAddress.value.trim() || undefined : undefined, safeHash: isJson ? safeHash.value.trim() || undefined : undefined }) });
+    const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? selectedNetwork(), scope: scope.value, simulate, verifyTargets, decodeCandidates: true, safeAddress: isJson ? safeAddress.value.trim() || undefined : undefined, safeHash: isJson ? safeHash.value.trim() || undefined : undefined }) });
     const result = await response.json().catch(() => null);
     if (!result || !response.ok) {
       const failure = new Error(result?.error ?? 'The service returned an unexpected response. Please retry.');

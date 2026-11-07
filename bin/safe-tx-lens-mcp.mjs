@@ -28,19 +28,19 @@ serveStdio(() => {
     title: 'Inspect Safe transaction or Safe address',
     description: 'Inspect a Safe transaction hash, onchain execution transaction hash, Safe URL, or Safe address. Auto-detects supported networks from available sources; a Safe URL specifies its network. Pending offchain hashes require a proposal source.',
     inputSchema: z.object({ input: z.string().min(1), ...COMMON_AUTO }), annotations,
-  }, output(({ input, network, rpcUrl, simulate }) => resolve(input, network, { rpcUrl, simulate })));
+  }, output(({ input, network, rpcUrl, simulate }) => resolve(input, network, { rpcUrl, simulate, decodeCandidates: true })));
 
   server.registerTool('inspect_json', {
     title: 'Inspect exported Safe transaction JSON',
     description: 'Analyze a Safe transaction object or a Safe Transaction Builder export supplied by the caller. Builder JSON is decoded as a plan without claiming an unverifiable Safe hash.',
     inputSchema: z.object({ transaction: z.record(z.string(), z.unknown()), safeAddress: z.string().optional(), safeHash: z.string().optional(), ...COMMON }), annotations,
-  }, output(({ transaction, safeAddress, safeHash, network, rpcUrl, simulate }) => resolve(transaction, network, { rpcUrl, simulate, safeAddress, safeHash, fetchState: Boolean(rpcUrl || simulate) })));
+  }, output(({ transaction, safeAddress, safeHash, network, rpcUrl, simulate }) => resolve(transaction, network, { rpcUrl, simulate, decodeCandidates: true, safeAddress, safeHash, fetchState: Boolean(rpcUrl || simulate) })));
 
   server.registerTool('inspect_execution', {
     title: 'Inspect executed Safe transaction by onchain hash',
     description: 'Reconstruct and verify a Safe execTransaction from its onchain Ethereum transaction hash and receipt; no Safe API key required.',
     inputSchema: z.object({ hash: z.string().regex(/^0x[0-9a-fA-F]{64}$/), ...COMMON }), annotations,
-  }, output(({ hash, network, rpcUrl, simulate }) => analyzeExecutionHash(hash, network, { rpcUrl, simulate })));
+  }, output(({ hash, network, rpcUrl, simulate }) => analyzeExecutionHash(hash, network, { rpcUrl, simulate, decodeCandidates: true })));
 
   server.registerTool('list_pending', {
     title: 'List pending Safe proposals',

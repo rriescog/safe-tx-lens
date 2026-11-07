@@ -16,9 +16,9 @@ export function assessConfidence({ call, checks = [], targetChecks = [], simulat
   const visit = node => { nodes.push(node); node.children?.forEach(visit); };
   visit(call);
   const meaningful = nodes.filter(node => node.data && node.data !== '0x');
-  const decoded = meaningful.filter(node => node.method);
+  const decoded = meaningful.filter(node => node.method && node.decodeBasis !== 'selector_candidate');
   if (meaningful.length && decoded.length === meaningful.length) { score += 1; reasons.push('Every call selector in the graph has been decoded.'); }
-  else { reasons.push(meaningful.length ? `${meaningful.length - decoded.length} call selector(s) remain undecoded.` : 'No call selector was available to decode.'); gaps.push({ points: 1, label: 'Decode every call selector in the nested call graph.' }); }
+  else { reasons.push(meaningful.length ? `${meaningful.length - decoded.length} call selector(s) remain undecoded by a verified or built-in ABI; a 4byte candidate does not close this gap.` : 'No call selector was available to decode.'); gaps.push({ points: 1, label: 'Decode every call selector in the nested call graph with a verified or built-in ABI.' }); }
   const called = targetChecks.filter(target => target.selectors?.length);
   const verified = called.filter(target => ['verified', 'verified_current'].includes(target.status) && (!target.proxy || ['verified', 'verified_current'].includes(target.proxy.implementationCode?.status)));
   if (called.length && verified.length === called.length) { score += 2; reasons.push('Every called target with calldata has matching verified runtime bytecode.'); }

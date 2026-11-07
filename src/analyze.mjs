@@ -1,6 +1,6 @@
 import { Interface, JsonRpcProvider, TypedDataEncoder, getAddress, id, isAddress } from 'ethers';
 import { chainId } from './chains.mjs';
-import { decodeCall, enrichVerifiedCalls, summarizeCalls } from './decode.mjs';
+import { decodeCall, enrichCandidateCalls, enrichVerifiedCalls, summarizeCalls } from './decode.mjs';
 import { assessConfidence } from './confidence.mjs';
 import { assessRisk } from './risk.mjs';
 import { fetchTransaction, safeGet } from './safe-api.mjs';
@@ -68,7 +68,8 @@ export function classifyIntent(call) {
     if (node.operation === 1) add('critical', 'DELEGATECALL', 'Delegatecall runs target code in the Safe storage context; inspect target bytecode and simulation.');
     if (node.value !== '0') add('info', 'NATIVE_VALUE', `Sends ${node.value} wei from the Safe.`);
     if (!method && node.data !== '0x') add('warning', 'UNKNOWN_SELECTOR', `Selector ${node.selector} has no locally verified ABI. A label from an API would not prove behavior.`);
-    if (['upgradeTo', 'upgradeToAndCall', 'updateImplementation', 'changeAdmin'].includes(method)) add('critical', 'UPGRADE', `Possible implementation or admin change: ${method}.`);
+    if (node.decodeBasis === 'selector_candidate') add('warning', 'SELECTOR_CANDIDATE', `Selector ${node.selector} was decoded from a 4byte signature candidate; the signature has not been matched to this target's bytecode or verified ABI.`);
+    if (['upgradeTo', 'upgradeToAndCall', 'upgradeAndCall', 'updateImplementation', 'changeAdmin'].includes(method)) add('critical', 'UPGRADE', `Possible implementation or admin change: ${method}.`);
     if (['addOwnerWithThreshold', 'removeOwner', 'swapOwner', 'changeThreshold', 'enableModule', 'disableModule', 'setGuard', 'setFallbackHandler'].includes(method)) add('critical', 'SAFE_AUTHORITY', `Safe authority change: ${method}.`);
     if (['approve', 'increaseAllowance', 'setApprovalForAll'].includes(method)) add('warning', 'APPROVAL', `Approval or operator change: ${method}.`);
     if (['transfer', 'transferFrom'].includes(method)) add('info', 'TOKEN_TRANSFER', `Token transfer intent: ${method}.`);
@@ -266,6 +267,7 @@ export async function analyze(raw, network = 'eth', options = {}) {
   // bytecode on the selected chain and compare Sourcify's verified runtime.
   const targetChecks = options.verifyTargets ? await inspectTargetCode(call, network, { rpcUrl: options.rpcUrl, provider: options.targetProvider, blockTag: tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest', sourceLookup: options.sourceLookup }) : [];
   enrichVerifiedCalls(call, targetChecks);
+  if (options.decodeCandidates) await enrichCandidateCalls(call, { lookup: options.selectorLookup });
   if (options.enrichTokens) await enrichTokenCalls(call, network, { rpcUrl: options.rpcUrl, provider: options.tokenProvider });
   const actions = summarizeCalls(call);
   const findings = classifyIntent(call);

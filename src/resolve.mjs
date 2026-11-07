@@ -95,7 +95,7 @@ export async function resolve(input, network = 'eth', options = {}) {
       // Safe Transaction Service expects a Safe transaction hash instead, so
       // querying it here wastes quota and can mask a transient RPC failure.
       const rpcProvenance = rpcDetailsFor(detected.network, options.rpcUrl);
-      const settings = { ...options, rpcUrl: rpcProvenance.url, rpcProvenance, verifyTargets: options.verifyTargets ?? true, enrichTokens: options.enrichTokens ?? true };
+      const settings = { ...options, rpcUrl: rpcProvenance.url, rpcProvenance, verifyTargets: options.verifyTargets ?? true, decodeCandidates: options.decodeCandidates ?? false, enrichTokens: options.enrichTokens ?? true };
       for (let attempt = 0; attempt < 2; attempt++) {
         try { return await (options.analyzeExecution ?? analyzeExecutionHash)(parsed.hash, detected.network, settings); }
         catch (error) {
@@ -116,7 +116,7 @@ export async function resolve(input, network = 'eth', options = {}) {
     };
   }
   const rpcProvenance = rpcDetailsFor(parsed.network, options.rpcUrl);
-  const settings = { ...options, rpcUrl: rpcProvenance.url, rpcProvenance, verifyTargets: options.verifyTargets ?? true, enrichTokens: options.enrichTokens ?? true };
+  const settings = { ...options, rpcUrl: rpcProvenance.url, rpcProvenance, verifyTargets: options.verifyTargets ?? true, decodeCandidates: options.decodeCandidates ?? false, enrichTokens: options.enrichTokens ?? true };
   if (parsed.kind === 'hash') {
     let safeError;
     try { return await analyzeHash(parsed.hash, parsed.network, { ...settings, expectedSafe: parsed.expectedSafe }); }
@@ -187,7 +187,7 @@ export async function resolve(input, network = 'eth', options = {}) {
       if (part === 'pending' && page.source === 'safe_api_untrusted') warnings.push('Showing unsigned 1/1 records from Safe Transaction Service. These records have no trusted owner signature; independently compare the complete fields and Safe hash before signing.');
       if (part === 'pending' && Number(page.safe?.threshold) === 1 && !page.transactions.length) warnings.push('No published 1/1 proposal was returned. If the first signature has not been submitted, import the complete Safe transaction JSON to review it before signing; a hash alone cannot reveal unindexed calldata.');
       for (const tx of page.transactions) {
-        const report = await analyze(tx, parsed.network, { ...settings, verifyTargets: false, enrichTokens: false, safeInfo: page.safe });
+        const report = await analyze(tx, parsed.network, { ...settings, verifyTargets: false, decodeCandidates: false, enrichTokens: false, safeInfo: page.safe });
         reports.push({ ...report, evidence: { source: page.source, retrievedAt: new Date().toISOString() } });
       }
     } catch (error) {
