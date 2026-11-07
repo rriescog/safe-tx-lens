@@ -13,8 +13,6 @@ const status = document.getElementById('status');
 const submit = document.getElementById('submit');
 const watch = document.getElementById('watch');
 const jsonFile = document.getElementById('json-file');
-const independentChecks = document.getElementById('independent-checks');
-const independentChecksGuide = independentChecks.innerHTML;
 const publicMode = document.body.dataset.publicMode === 'true';
 const communityMode = document.body.dataset.communityMode === 'true';
 const publicFacing = publicMode || communityMode;
@@ -190,11 +188,6 @@ function flowHtml(node, path, labels) {
   const children = node.children?.length ? `<ul class="flow-children">${node.children.map((child, i) => flowHtml(child, `${path}.${i + 1}`, labels)).join('')}</ul>` : '';
   return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong>${esc(title)}</strong><span class="flow-address mono">${esc(node.to)}</span>${node.decodeSource ? `<span class="flow-evidence">Verified ABI · ${esc(node.decodeSource)}</span>` : ''}</div></div>${children}</li>`;
 }
-function crossCheckHtml(r) {
-  const names = { eth: 'ethereum', gno: 'gnosis', pol: 'polygon', arb1: 'arbitrum', oeth: 'optimism', base: 'base', sep: 'sepolia', bnb: 'bsc', avax: 'avalanche', kat: 'katana', xlayer: 'xlayer' };
-  const command = names[r.network] ? `./safe_hashes.sh --network ${names[r.network]} --address ${r.transaction.safe} --nonce ${r.transaction.nonce}` : null;
-  return `<ol><li>Compare this hash on your signing device: <code class="mono">${esc(r.hash)}</code></li><li>Run <a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">pcaversaccio’s utility ↗</a> separately${command ? `:<code class="cross-check-command">${esc(command)}</code>` : '.'} It also recalculates the hash and can simulate with your RPC. This report does not run or import it.</li><li>Check target code and execution effects through a separately trusted source.</li></ol><details><summary>What an agreeing hash proves</summary><p>Both tools can use fields from Safe Transaction Service. An agreeing EIP-712 calculation checks the arithmetic, not the data source. Use manually verified fields in its interactive mode for a stronger independent check.</p></details>`;
-}
 function verificationHtml(r) {
   const sources = { safe_api: 'Safe Transaction Service', safe_gateway: 'Safe Client Gateway', onchain_execution: 'Onchain execution via RPC', bundled_example: 'Saved public Ethereum example bundled with this app; no live lookup', tenderly_monitor: 'Tenderly monitor snapshot', tenderly_storage: 'Imported monitor JSON' };
   const source = sources[r.evidence?.source] ?? (r.transaction?.lookupSource ? 'External transaction source' : 'Supplied JSON');
@@ -303,7 +296,6 @@ function showTransactionReport(result, retryNote = '') {
   activeReportEvidence = result.evidence ?? null;
   activeReportTargetChecks = result.targetChecks ?? null;
   report.innerHTML = reportHtml(result, retryNote);
-  independentChecks.innerHTML = crossCheckHtml(result);
   report.querySelector('#run-simulation')?.addEventListener('click', event => {
     event.currentTarget.disabled = true;
     inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, simulate: true });
@@ -333,9 +325,8 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
     }
     report.classList.remove('empty');
     document.body.classList.add('has-report');
-    if (result.kind === 'builder') { independentChecks.innerHTML = independentChecksGuide; report.innerHTML = builderHtml(result); status.textContent = 'Builder JSON decoded'; }
+    if (result.kind === 'builder') { report.innerHTML = builderHtml(result); status.textContent = 'Builder JSON decoded'; }
     else if (result.kind === 'queue') {
-      independentChecks.innerHTML = independentChecksGuide;
       if (result.availability === 'unavailable') { report.innerHTML = queueHtml(result); status.textContent = 'Queue source unavailable'; return; }
       let exitNotice = '';
       if (silent) {
@@ -372,7 +363,6 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
       });
     } else { if (priorHash?.toLowerCase() === result.hash?.toLowerCase()) { if (priorEvidence) result.evidence = priorEvidence; if (priorTargetChecks?.length) result.targetChecks = priorTargetChecks; } const retryNote = retryTargets ? JSON.stringify(previousTargetChecks) === JSON.stringify(result.targetChecks) ? 'Checked again: no new bytecode evidence. This RPC and Sourcify returned the same result. Review the reason below or use another trusted RPC locally.' : 'Checked again: bytecode evidence changed. Review the updated status and contract details below.' : ''; showTransactionReport(result, retryNote); status.textContent = retryTargets ? 'Bytecode check completed' : simulate ? 'Simulation reviewed' : 'Inspection complete'; if (watch.checked) { watch.checked = false; clearInterval(timer); timer = null; } }
   } catch (error) {
-    independentChecks.innerHTML = independentChecksGuide;
     const recorded = error.incidentId ? `<p class="meta">We recorded this issue to improve the service. Reference: <code>${esc(error.incidentId)}</code></p>` : '';
     status.textContent = error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'Check the input or network' : 'Sorry, we could not complete the inspection';
     report.innerHTML = `<div class="empty"><h2>${error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'We could not inspect this input' : 'Sorry, something went wrong'}</h2><p>${esc(error.message)}</p>${recorded}</div>`;

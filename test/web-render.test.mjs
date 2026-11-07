@@ -9,6 +9,17 @@ import { analyzeBuilderExport } from '../src/builder.mjs';
 const sourcePath = pathResolve('web/app.js');
 const source = await readFile(sourcePath, 'utf8');
 
+test('recommended projects appear only in the dark footer', async () => {
+  const html = await readFile(pathResolve('web/index.html'), 'utf8');
+  const css = await readFile(pathResolve('web/style.css'), 'utf8');
+  const [main, footer] = html.split('</main>');
+  assert.doesNotMatch(main, /pcaversaccio|external-panel|independent-checks/);
+  assert.match(footer, /<footer class="site-footer">/);
+  assert.match(footer, /Other recommended projects/);
+  assert.match(footer, /github\.com\/pcaversaccio\/safe-tx-hashes-util/);
+  assert.match(css, /footer\.site-footer\{[^}]*background:#102734/);
+});
+
 function ui({ publicMode = false, search = '' } = {}) {
   const elements = new Map();
   const selectors = new Map();
@@ -90,7 +101,6 @@ test('verification panel distinguishes supplied data, a user hash, local calcula
   assert.match(page.evaluate('verificationHtml(sample)'), /Hash in the onchain Safe event/);
   assert.match(page.evaluate('verificationHtml(sample)'), /historical state unavailable/);
   assert.match(page.evaluate('verificationHtml(sample)'), /archive-capable RPC/);
-  assert.match(page.evaluate('crossCheckHtml(sample)'), /not the data source/);
 });
 
 test('bytecode status and RPC provenance distinguish completed, partial, and unrun checks', () => {
@@ -146,7 +156,7 @@ test('public report opens without requesting bulk target verification', async ()
   assert.equal(requested.safeAddress, undefined);
   assert.equal(requested.safeHash, undefined);
   assert.match(page.elements.get('report').innerHTML, /Evidence and hash checks/);
-  assert.match(page.elements.get('independent-checks').innerHTML, /Outside|pcaversaccio/);
+  assert.doesNotMatch(page.elements.get('report').innerHTML, /pcaversaccio/);
   assert.doesNotMatch(page.elements.get('report').innerHTML, /id="verify-targets"/);
 });
 

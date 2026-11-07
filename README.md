@@ -151,21 +151,9 @@ Normal hash and Safe address lookups never read monitor snapshots. A local CLI c
 
 `watch` polls the first 100 pending proposals, reports new proposals and confirmation-count changes, and fetches the final status when a tracked proposal leaves the queue. It is a local process, not a hosted 24/7 monitor. The UI displays up to 20 pending proposals per refresh and marks when a tracked proposal leaves the queue. The interface never submits a transaction or a signature.
 
-## Prior work and design choices
+## External services
 
-This project builds on ideas from [pcaversaccio's Safe transaction hash utility](https://github.com/pcaversaccio/safe-tx-hashes-util), the [Cyfrin fork](https://github.com/Cyfrin/safe-tx-hashes), and [OpenZeppelin Safe Utils](https://github.com/OpenZeppelin/safe-utils). The report shows its EIP-712 domain and message hashes and a command for pcaversaccio's separate implementation. Its standard mode also retrieves the fields from Safe Transaction Service, so agreement is a calculation cross-check, not independent evidence for the fields; its interactive mode can use manually supplied fields. That AGPL-licensed script is not bundled or run by this MIT project. The workflow follows [SEAL's secure multisig verification guidance](https://github.com/security-alliance/frameworks/blob/develop/docs/pages/wallet-security/signing-and-verification/secure-multisig-safe-verification.mdx). Safe's [Transaction Service](https://docs.safe.global/core-api/api-safe-transaction-service) supplies offchain proposals; Tenderly supplies optional execution traces. No code was copied from those projects.
-
-There is substantial overlap. pcaversaccio's utility already recalculates EIP-712 hashes, supports interactive entry of transaction fields, checks nested Safes, and offers RPC simulation. It also has a much larger list of named networks. Safe Tx Lens is **not** an improved replacement for that independent calculator.
-
-| Review task | pcaversaccio's utility | Safe Tx Lens |
-| --- | --- | --- |
-| Calculate and compare a Safe hash | Yes, including manual input | Yes; local calculation and optional Safe contract check through RPC |
-| Find a transaction from only its hash or browse a Safe's queue/history | Requires network, Safe address and nonce for standard transaction mode | Searches supported sources and offers a transaction picker; pending hashes require indexed offchain proposal data |
-| Decode nested calls and review target code | Its guidance explicitly recommends independent calldata decoding | Builds a call graph; checks verified source against runtime bytecode where supported and available |
-| Simulate | Optional `cast call --trace` with a supplied RPC | Optional Tenderly simulation with a measured state diff when returned; availability depends on service configuration |
-| Named network coverage | Larger list in its README | Eleven auto-discovery networks; other EVM chain IDs require explicit input and working sources |
-
-The practical reason to use this project is the guided investigation and evidence provenance around a transaction, especially when the reviewer starts with only a hash or Safe address. Use pcaversaccio's implementation separately for a second hash calculation. Agreement between tools that fetched the same fields from Safe Transaction Service is **not** independent confirmation of those fields. Neither tool replaces checking the hash on the signing device and independently reviewing critical calldata and code.
+[Safe Transaction Service](https://docs.safe.global/core-api/api-safe-transaction-service) supplies indexed offchain proposals. [Sourcify](https://docs.sourcify.dev/) supplies verified contract metadata. Optional simulations use Tenderly when configured. The application labels which evidence came from each service and which checks were performed locally.
 
 ## Security and limitations
 
