@@ -62,11 +62,21 @@ test('simulation reports missing storage data instead of claiming no changes', a
   assert.deepEqual(report.effects, []);
 }));
 
-test('simulation ignores balance summaries without measured before and after values', async () => withTenderlyStub({
+test('simulation treats balance summaries as summaries rather than missing native balance diffs', async () => withTenderlyStub({
   transaction: { status: true, output: outputTrue, transaction_info: { state_diff: [], balance_changes: [{ address: SAFE, amount: '5' }] } },
 }, async () => {
   const report = await analyze(transaction, 'eth', { safeInfo, simulate: true });
+  assert.equal(report.simulation.balanceSummaryCount, 1);
+  assert.equal(report.simulation.balanceDataIncompleteCount, 0);
+  assert.ok(!report.effects.some(effect => effect.kind === 'native_balance'));
+}));
+
+test('simulation still flags incomplete native balance diff records', async () => withTenderlyStub({
+  transaction: { status: true, output: outputTrue, transaction_info: { state_diff: [], call_trace: { balance_diff: [{ address: SAFE, original: '10' }] } } },
+}, async () => {
+  const report = await analyze(transaction, 'eth', { safeInfo, simulate: true });
   assert.equal(report.simulation.balanceDataIncompleteCount, 1);
+  assert.equal(report.simulation.balanceSummaryCount, 0);
   assert.ok(!report.effects.some(effect => effect.kind === 'native_balance'));
 }));
 

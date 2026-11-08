@@ -337,15 +337,57 @@ function targetChecksHtml(r, retryNote = '') {
   const summaryBadge = summary.tone === 'partial' ? '<span class="pill partial">Past code unchecked</span>' : summary.tone === 'unverified' ? '<span class="pill unverified">Not checked</span>' : pill(summary.tone);
   return `<div class="verification-summary verification-${summary.tone}">${summaryBadge}<div><strong>${esc(summary.label)}</strong><p>${esc(summary.detail)}</p></div></div>${abiNotice}${confirmedNotice}${routeNotice}${retryNote ? `<div class="next-step" role="status">${esc(retryNote)}</div>` : ''}${rows}${archiveNextStep}${action}`;
 }
-function effectHtml(effect) {
-  const asset = effect.kind === 'asset_transfer';
-  const title = effect.kind === 'native_balance' ? 'Native balance (wei)' : asset ? `${effect.label || 'Asset'} transfer` : `${effect.kind} · ${effect.label || 'storage slot'}`;
+function tokenMetadata(root) {
+  const tokens = new Map();
+  const visit = node => {
+    if (node.token?.address && /^[A-Za-z0-9.$_+-]{1,16}$/.test(node.token.symbol ?? '') && Number.isInteger(node.token.decimals) && node.token.decimals >= 0 && node.token.decimals <= 36) tokens.set(node.token.address.toLowerCase(), node.token);
+    for (const child of node.children ?? []) visit(child);
+  };
+  if (root) visit(root);
+  return tokens;
+}
+function formatRawToken(raw, token) {
+  if (!token || !/^\d{1,78}$/.test(String(raw))) return String(raw);
+  const digits = BigInt(raw).toString().padStart(token.decimals + 1, '0');
+  const whole = token.decimals ? digits.slice(0, -token.decimals) : digits;
+  const fraction = token.decimals ? digits.slice(-token.decimals).replace(/0+$/, '') : '';
+  return `${whole}${fraction ? `.${fraction}` : ''} ${token.symbol}`;
+}
+function mappedStorage(effect, token) {
+  if (effect.label !== 'balanceOf' || String(effect.before).length > 12000 || String(effect.after).length > 12000) return '';
+  try {
+    const before = JSON.parse(effect.before);
+    const after = JSON.parse(effect.after);
+    if (!before || !after || Array.isArray(before) || Array.isArray(after) || typeof before !== 'object' || typeof after !== 'object') return '';
+    const addresses = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+    if (addresses.length > 20 || !addresses.every(address => /^0x[0-9a-fA-F]{40}$/.test(address) && /^\d{1,78}$/.test(String(before[address] ?? '0')) && /^\d{1,78}$/.test(String(after[address] ?? '0')))) return '';
+    return `<div class="storage-map">${addresses.filter(address => String(before[address] ?? '0') !== String(after[address] ?? '0')).map(address => `<div><code>${esc(address)}</code><span>${esc(formatRawToken(before[address] ?? '0', token))} → ${esc(formatRawToken(after[address] ?? '0', token))}</span></div>`).join('')}</div>`;
+  } catch { return ''; }
+}
+function effectHtml(effect, tokens = new Map()) {
+  const token = tokens.get(String(effect.address).toLowerCase());
+  if (effect.kind === 'asset_transfer') {
+    const title = effect.label === 'Transfer' ? 'Token transfer' : `${effect.label || 'Asset'} transfer`;
+    return `<div class="item effect-transfer"><span class="pill info">movement</span><div class="item-content"><strong>${esc(title)}</strong><div class="effect-amount">${esc(effect.amount || 'Amount unavailable')}${token ? ` <span>${esc(token.symbol)}</span>` : ''}</div><div class="effect-parties"><div><small>From</small><code>${esc(effect.before || 'unknown')}</code></div><div><small>To</small><code>${esc(effect.after || 'unknown')}</code></div></div><p class="effect-source">Token contract ${esc(effect.address || 'unknown')}${token ? ' · symbol reported by contract via RPC; identity unverified' : ''}</p></div></div>`;
+  }
+  const title = effect.kind === 'native_balance' ? 'Native balance (wei)' : `${effect.label || 'Storage slot'} changed`;
   const hasValues = effect.before != null && effect.after != null && effect.before !== '' && effect.after !== '';
-  const values = asset
-    ? `From ${esc(effect.before || 'unknown')} → To ${esc(effect.after || 'unknown')}${effect.amount ? `<br>Amount: ${esc(effect.amount)}` : '<br>Amount unavailable'}`
-    : hasValues ? `${esc(short(effect.before))} → ${esc(short(effect.after))}` : 'Before/after values unavailable';
-  const detail = !asset && hasValues ? `<details><summary>Full before and after values</summary><div class="raw mono">Before: ${esc(effect.before)}<br>After: ${esc(effect.after)}</div></details>` : '';
-  return `<div class="item">${pill(effect.severity)}<div class="item-content"><strong>${esc(title)}</strong><p class="mono">${esc(effect.address || 'Address unavailable')}<br>${values}</p>${detail}</div></div>`;
+  const mapped = hasValues ? mappedStorage(effect, token) : '';
+  const values = hasValues ? `${esc(short(effect.before))} → ${esc(short(effect.after))}` : 'Before/after values unavailable';
+  const detail = hasValues ? `<details><summary>Raw before and after values</summary><div class="raw mono">Before: ${esc(effect.before)}<br>After: ${esc(effect.after)}</div></details>` : '';
+  return `<div class="item effect-storage">${pill(effect.severity)}<div class="item-content"><strong>${esc(title)}</strong><p class="mono">${esc(effect.address || 'Address unavailable')}${mapped ? '' : `<br>${values}`}</p>${mapped}${token && mapped ? '<p class="effect-source">Amounts use symbol and decimals reported by this contract via RPC; token identity is unverified.</p>' : ''}${detail}</div></div>`;
+}
+function measuredEffectsHtml(r, emptyText) {
+  const tokens = tokenMetadata(r.call);
+  const groups = [
+    ['Simulated asset movements', r.effects.filter(effect => effect.kind === 'asset_transfer')],
+    ['Simulated native balance changes', r.effects.filter(effect => effect.kind === 'native_balance')],
+    ['Simulated storage changes', r.effects.filter(effect => !['asset_transfer', 'native_balance'].includes(effect.kind))],
+  ].filter(([, effects]) => effects.length);
+  const main = groups.length ? `<p class="effect-intro">These are effects returned by one Tenderly simulation. A transfer shown here is an observed simulation result, not a separate safety warning or proof of the historical execution.</p>${groups.map(([title, effects]) => `<div class="effect-group"><h4>${title} <span>${effects.length}</span></h4>${effects.map(effect => effectHtml(effect, tokens)).join('')}</div>`).join('')}` : `<div class="state-empty"><strong>No measured state changes available</strong><p>${esc(emptyText)}</p></div>`;
+  const incomplete = r.simulation?.balanceDataIncompleteCount ? `<div class="notice">${esc(r.simulation.balanceDataIncompleteCount)} native balance diff record(s) lacked before/after values and were not shown as measured changes.</div>` : '';
+  const summaries = r.simulation?.balanceSummaryCount ? `<details class="effect-coverage"><summary>About ${esc(r.simulation.balanceSummaryCount)} additional Tenderly balance summaries</summary><p>Tenderly returned balance_change summaries without full balances before and after. They are not native balance diffs. The asset movements and storage changes above come from separate simulation fields.</p></details>` : '';
+  return `${main}${incomplete}${summaries}`;
 }
 function pendingCheckAction(kind) {
   if (kind === 'rpc' || kind === 'bytecode') {
@@ -415,14 +457,13 @@ function reportHtml(r, retryNote = '') {
   const checks = r.checks.map(c => `<div class="item">${pill(c.status)}<div class="item-content"><strong>${esc(c.name)}</strong><p class="mono">${esc(c.detail)}</p></div></div>`).join('');
   const findings = r.findings.length ? r.findings.map(f => `<div class="item">${pill(f.severity)}<div class="item-content"><strong>${esc(f.code)} · call ${esc(f.path)}</strong><p>${esc(f.message)}</p></div></div>`).join('') : '<p class="meta">No known intent pattern matched. This does not establish safety.</p>';
   const emptyEffects = r.simulation?.unavailable ? 'Simulation was unavailable, so no state change was measured.' : r.simulation && r.simulation.stateDiffAvailable === false ? 'The simulation provider did not return a storage diff. Absence of a diff is not evidence of no change.' : r.simulation ? 'The simulation returned no complete storage, balance, or asset changes in its response.' : 'No simulation or execution trace has measured these changes yet.';
-  const incompleteBalances = r.simulation?.balanceDataIncompleteCount ? `<div class="notice">Tenderly returned ${esc(r.simulation.balanceDataIncompleteCount)} balance-change record(s) without complete before/after values. They are omitted here; inspect the Tenderly trace for details.</div>` : '';
-  const effects = `${incompleteBalances}${r.effects.length ? r.effects.map(effectHtml).join('') : `<div class="state-empty"><strong>No measured state changes available</strong><p>${esc(emptyEffects)}</p></div>`}`;
+  const effects = measuredEffectsHtml(r, emptyEffects);
   const sim = r.simulation ? r.simulation.unavailable ? `<div class="notice">Simulation unavailable: ${esc(r.simulation.unavailable)}</div>` : `<div class="item">${pill(r.simulation.mode === 'conditional_threshold_override' ? 'warning' : r.simulation.success === true ? 'pass' : r.simulation.success === false ? 'fail' : 'unavailable')}<div class="item-content"><strong>${r.simulation.mode === 'conditional_threshold_override' ? 'Conditional preview with temporary 1-of-N threshold' : r.simulation.success === true ? 'Safe execution succeeded in simulation' : r.simulation.success === false ? 'Safe execution failed in simulation' : 'EVM completed; Safe inner result unverified'}</strong><p>Block: ${esc(r.simulation.blockNumber)}${r.simulation.error ? ` · ${esc(r.simulation.error)}` : ''}${!publicFacing && r.simulation.url ? ` · <a href="${esc(r.simulation.url)}" target="_blank" rel="noopener noreferrer">Open Tenderly trace (project access required)</a>` : ''}</p><p>${r.simulation.mode === 'conditional_threshold_override' ? 'Tenderly temporarily treated the Safe as 1-of-N and simulated an approved-hash signature from a verified owner. This previews one possible call path, not whether the actual owners will approve or the real Safe execution will pass. The override exists only inside this simulation.' : 'The measured effects shown here come from Tenderly’s API response.'} A dashboard trace saved in the service’s project is not publicly accessible unless its owner enables sharing.</p></div></div>` : '<p class="meta">Simulation has not been run for this transaction.</p>';
   const simulateAction = publicMode ? '<p class="meta">Simulation is available in the local tool with your own Tenderly credentials.</p>' : communityMode && !simulationEnabled ? '<p class="meta">Simulation is not configured for this public service. Decode and hash checks remain available.</p>' : `<div class="simulation-action"><button type="button" id="run-simulation">${r.simulation ? 'Run simulation again' : 'Run simulation and inspect state changes'}</button><p>Sends this transaction's calldata and signatures to the configured Tenderly project. The saved simulation covers one chain state and execution path.</p></div>`;
   const bytecodeStatus = targetVerificationSummary(r);
   const lifecycle = lifecycleStatus(r);
   const stage = lifecycle.detail;
-  return `<div class="report-header"><div class="safe-identity"><span>SAFE MULTISIG · ${esc(r.network)}</span><a href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${safeUiKnown ? 'Open Safe' : 'Open contract'} ${esc(tx.safe)} on ${safeUiKnown ? 'Safe Global' : 'KatanaScan'}">${esc(tx.safe)} ↗</a><small>${safeUiKnown ? 'Open in Safe' : 'Open in KatanaScan · Safe web UI availability not verified'}</small></div><div class="report-heading">${lifecycleBadge(lifecycle)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(stage)}</span></div><div class="hash-line mono">${esc(r.hash)}</div><div class="header-verification">${bytecodeStatus.tone === 'partial' ? '<span class="pill partial">Past code unchecked</span>' : pill(bytecodeStatus.tone)}<span>${esc(bytecodeStatus.label)}</span></div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('1 · Evidence and hash checks', verificationHtml(r))}${section('2 · What this transaction can do', `${riskHtml}${flow}<details class="technical"><summary>Technical details: decoded arguments and raw calldata for this call graph</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`)}${section('3 · Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('4 · Target bytecode and verified source', targetChecksHtml(r, retryNote))}${section('5 · Measured effects and simulation', `${effects}${checks}${sim}${simulateAction}`)}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', lifecycle.label)}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}`;
+  return `<div class="report-header"><div class="safe-identity"><span>SAFE MULTISIG · ${esc(r.network)}</span><a href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${safeUiKnown ? 'Open Safe' : 'Open contract'} ${esc(tx.safe)} on ${safeUiKnown ? 'Safe Global' : 'KatanaScan'}">${esc(tx.safe)} ↗</a><small>${safeUiKnown ? 'Open in Safe' : 'Open in KatanaScan · Safe web UI availability not verified'}</small></div><div class="report-heading">${lifecycleBadge(lifecycle)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(stage)}</span></div><div class="hash-line mono">${esc(r.hash)}</div><div class="header-verification">${bytecodeStatus.tone === 'partial' ? '<span class="pill partial">Past code unchecked</span>' : pill(bytecodeStatus.tone)}<span>${esc(bytecodeStatus.label)}</span></div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('1 · Evidence and hash checks', verificationHtml(r))}${section('2 · What this transaction can do', `${riskHtml}${flow}<details class="technical"><summary>Technical details: decoded arguments and raw calldata for this call graph</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`)}${section('3 · Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('4 · Target bytecode and verified source', targetChecksHtml(r, retryNote))}${section('5 · Measured effects and simulation', `${sim}${effects}${checks}${simulateAction}`)}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', lifecycle.label)}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}`;
 }
 function queueHtml(result) {
   const title = result.availability === 'absent' ? 'No Safe contract on this network' : result.scope === 'history' ? 'Executed history' : result.scope === 'both' ? 'Pending and executed' : 'Queued proposals';

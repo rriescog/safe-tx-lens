@@ -215,10 +215,10 @@ async function simulate(tx, network, safeInfo, options) {
       storageDiffs.push({ address: item.address, label: String(raw.key ?? 'raw slot'), from: stateValue(raw.original), to: stateValue(raw.dirty) });
     }
   }
-  // Tenderly may provide balance_changes as summaries without the original
-  // and dirty balances. Its call_trace.balance_diff contains the measured
-  // before/after values when available. Never invent empty values as a diff.
-  const balanceRecords = Array.isArray(info.call_trace?.balance_diff) ? info.call_trace.balance_diff : Array.isArray(info.balance_changes) ? info.balance_changes : Array.isArray(info.balance_diff) ? info.balance_diff : [];
+  // balance_changes are transfer summaries, not before/after native balances.
+  // Only balance_diff records may be displayed as measured balance changes.
+  const balanceRecords = Array.isArray(info.call_trace?.balance_diff) ? info.call_trace.balance_diff : Array.isArray(info.balance_diff) ? info.balance_diff : [];
+  const balanceSummaryCount = Array.isArray(info.balance_changes) ? info.balance_changes.length : 0;
   const balanceDiffs = [];
   let balanceDataIncompleteCount = 0;
   for (const record of balanceRecords) {
@@ -244,7 +244,7 @@ async function simulate(tx, network, safeInfo, options) {
     if (log.address?.toLowerCase() === tx.safe.toLowerCase() && topic === EXEC_SUCCESS_TOPIC) safeExecutionSuccess = true;
     if (log.address?.toLowerCase() === tx.safe.toLowerCase() && topic === EXEC_FAILURE_TOPIC) safeExecutionSuccess = false;
   }
-  return { mode: conditional ? 'conditional_threshold_override' : 'faithful', conditionalOwner, evmSuccess: transaction.status === true, safeExecutionSuccess, success: transaction.status === true && safeExecutionSuccess === true ? true : transaction.status === false || safeExecutionSuccess === false ? false : null, url: result.simulation?.id ? `https://dashboard.tenderly.co/${encodeURIComponent(account)}/${encodeURIComponent(project)}/simulator/${result.simulation.id}` : null, stateDiffAvailable: Array.isArray(info.state_diff), storageDiffs, balanceDiffs, balanceDataIncompleteCount, assetChanges, error: transaction.error_message ?? null, blockNumber: blockNumber ?? 'latest' };
+  return { mode: conditional ? 'conditional_threshold_override' : 'faithful', conditionalOwner, evmSuccess: transaction.status === true, safeExecutionSuccess, success: transaction.status === true && safeExecutionSuccess === true ? true : transaction.status === false || safeExecutionSuccess === false ? false : null, url: result.simulation?.id ? `https://dashboard.tenderly.co/${encodeURIComponent(account)}/${encodeURIComponent(project)}/simulator/${result.simulation.id}` : null, stateDiffAvailable: Array.isArray(info.state_diff), storageDiffs, balanceDiffs, balanceSummaryCount, balanceDataIncompleteCount, assetChanges, error: transaction.error_message ?? null, blockNumber: blockNumber ?? 'latest' };
 }
 
 export async function analyze(raw, network = 'eth', options = {}) {

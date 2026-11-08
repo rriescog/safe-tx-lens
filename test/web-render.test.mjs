@@ -357,7 +357,28 @@ test('simulation display does not fabricate empty native balance values', async 
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
   const report = await analyze(tx, 'eth', { fetchState: false, verifyTargets: false });
   page.context.sample = { ...report, simulation: { balanceDataIncompleteCount: 2, stateDiffAvailable: false }, effects: [] };
-  assert.match(page.evaluate('reportHtml(sample)'), /2 balance-change record\(s\) without complete before\/after values/);
+  assert.match(page.evaluate('reportHtml(sample)'), /2 native balance diff record\(s\) lacked before\/after values/);
+});
+
+test('Tenderly asset and mapped storage effects show readable amounts without false warnings', () => {
+  const page = ui();
+  const tokenAddress = '0x6b175474e89094c44da98b954eedeac495271d0f';
+  const holder = '0x1111111111111111111111111111111111111111';
+  const recipient = '0x2222222222222222222222222222222222222222';
+  page.context.tokens = new Map([[tokenAddress, { address: tokenAddress, symbol: 'DAI', decimals: 18 }]]);
+  page.context.sample = { kind: 'asset_transfer', severity: 'warning', label: 'Transfer', address: tokenAddress, before: holder, after: recipient, amount: '12.5' };
+  const movement = page.evaluate('effectHtml(sample, tokens)');
+  assert.match(movement, /Token transfer/);
+  assert.match(movement, /12.5 <span>DAI<\/span>/);
+  assert.doesNotMatch(movement, /pill warning|Transfer transfer/);
+  page.context.sample = { kind: 'storage', severity: 'info', label: 'balanceOf', address: tokenAddress, before: JSON.stringify({ [holder]: '12500000000000000000', [recipient]: '0' }), after: JSON.stringify({ [holder]: '0', [recipient]: '12500000000000000000' }) };
+  const storage = page.evaluate('effectHtml(sample, tokens)');
+  assert.match(storage, /12.5 DAI → 0 DAI/);
+  assert.match(storage, /Raw before and after values/);
+  page.context.sample = { simulation: { balanceSummaryCount: 4 }, call: { children: [] }, effects: [] };
+  const summary = page.evaluate('measuredEffectsHtml(sample, "No measured changes")');
+  assert.match(summary, /4 additional Tenderly balance summaries/);
+  assert.doesNotMatch(summary, /class="notice"/);
 });
 
 test('public report opens without requesting bulk target verification', async () => {
