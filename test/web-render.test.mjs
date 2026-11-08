@@ -119,7 +119,7 @@ test('4byte candidate appears as a tentative decode in the call tree', () => {
   const html = page.evaluate('callHtml(sample)');
   assert.match(html, /Candidate signature/);
   assert.match(html, /not verified against the called contract/);
-  assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /Candidate/);
+  assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /Possible function name/);
 });
 
 test('4byte fallback names its actual signature source in technical evidence', () => {
@@ -136,15 +136,18 @@ test('call tree leads with the decoded function and arguments, not a hand-writte
   page.context.sample = node;
   const html = page.evaluate('flowHtml(sample, "1", new Map([["1", "Force unstake validator #106"]]))');
   assert.match(html, /<strong class="flow-expression">forceUnstake\(validatorId: 106\)<\/strong>/);
-  assert.match(html, /Decoded signature: forceUnstake\(uint256\)/);
-  assert.match(html, /Interpretation: Force unstake validator #106/);
-  assert.ok(html.indexOf('flow-expression') < html.indexOf('Interpretation:'));
-  assert.match(html, /Known signature · target behavior requires code verification/);
+  assert.match(html, /Function signature: <code>forceUnstake\(uint256\)<\/code>/);
+  assert.match(html, /Likely meaning: Force unstake validator #106/);
+  assert.ok(html.indexOf('flow-expression') < html.indexOf('Likely meaning:'));
+  assert.match(html, /Known signature only/);
+  assert.match(html, /A built-in ABI decoded the calldata/);
+  assert.match(html, /<span>validatorId<\/span><code>106<\/code>/);
   const generic = { ...node, method: 'setWithdrawalDelay(uint256)', args: [{ name: 'newDelay', value: '7200' }] };
   page.context.sample = generic;
   assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /setWithdrawalDelay\(newDelay: 7200\)/);
   page.context.sample = { ...node, method: null, args: null };
   assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /Unknown selector 0x12345678/);
+  assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /Function unknown/);
 });
 
 test('the real nested PoS Council example renders its ABI call separately from the human summary', async () => {
@@ -153,8 +156,9 @@ test('the real nested PoS Council example renders its ABI call separately from t
   page.context.sample = await analyze(transaction, 'eth', { fetchState: false });
   const html = page.evaluate('reportHtml(sample)');
   assert.match(html, /<strong class="flow-expression">forceUnstake\(validatorId: 106\)<\/strong>/);
-  assert.match(html, /Decoded signature: forceUnstake\(uint256\)/);
-  assert.match(html, /Interpretation: Force unstake validator #106/);
+  assert.match(html, /Function signature: <code>forceUnstake\(uint256\)<\/code>/);
+  assert.match(html, /Likely meaning: Force unstake validator #106/);
+  assert.match(html, /Each call shows decoded calldata, its likely meaning, and how its function name was checked/);
   assert.doesNotMatch(html, /forceUnstakeValidator/);
 });
 
@@ -168,9 +172,37 @@ test('an arbitrary verified ABI function flows through analysis into the UI', as
   const sourceLookup = async () => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: '0x60016000' }, abi });
   page.context.sample = await analyze({ safe, to: target, nonce: 1, value: '0', data, operation: 0 }, 'eth', { fetchState: false, verifyTargets: true, targetProvider: provider, sourceLookup });
   const html = page.evaluate('reportHtml(sample)');
-  assert.match(html, /rotateTreasury\(newTreasury: 0x1111111111111111111111111111111111111111, epoch: 42, freeze: true\)/);
-  assert.match(html, /Decoded signature: rotateTreasury\(address,uint256,bool\)/);
-  assert.match(html, /Verified ABI · verified bytecode at inspected block/);
+  assert.match(html, /rotateTreasury\(newTreasury: 0x11111111…111111, epoch: 42, freeze: true\)/);
+  assert.match(html, /<span>newTreasury<\/span><code>&quot;0x1111111111111111111111111111111111111111&quot;<\/code>/);
+  assert.match(html, /Function signature: <code>rotateTreasury\(address,uint256,bool\)<\/code>/);
+  assert.match(html, /ABI matches checked code/);
+  assert.match(html, /ABI evidence: verified bytecode at inspected block/);
+});
+
+test('call source labels distinguish historical, current, explorer, proxy and database evidence', () => {
+  const page = ui();
+  const base = { method: 'foo(uint256)', data: '0x12345678' };
+  page.context.sample = base;
+  assert.equal(page.evaluate('callSource(sample).label'), 'ABI source unconfirmed');
+  for (const [basis, source, expected] of [
+    ['verified_abi', 'verified bytecode at inspected block', 'ABI matches checked code'],
+    ['verified_abi', 'verified current bytecode (historical code unavailable)', 'ABI matches current code'],
+    ['explorer_abi', 'Etherscan ABI', 'Explorer ABI only'],
+    ['proxy_candidate_abi', 'verified implementation ABI', 'Proxy route unconfirmed'],
+    ['selector_candidate', undefined, 'Possible function name'],
+  ]) {
+    page.context.sample = { ...base, decodeBasis: basis, decodeSource: source };
+    assert.equal(page.evaluate('callSource(sample).label'), expected);
+  }
+  page.context.sample = { ...base, method: null, data: '0x' };
+  assert.equal(page.evaluate('callSource(sample).label'), 'No function call');
+});
+
+test('source links reject unsafe schemes in both views', () => {
+  const page = ui();
+  page.context.sample = { to: '0x2222222222222222222222222222222222222222', value: '0', operation: 0, data: '0x12345678', selector: '0x12345678', method: 'foo(uint256)', args: [{ name: 'arg0', value: '1' }], decodeBasis: 'verified_abi', decodeSource: 'verified bytecode at inspected block', decodeSourceUrl: 'javascript:alert(1)', children: [] };
+  assert.doesNotMatch(page.evaluate('flowHtml(sample, "1", new Map())'), /href="javascript:/);
+  assert.doesNotMatch(page.evaluate('callHtml(sample)'), /href="javascript:/);
 });
 
 test('public UI disables wallet monitoring and labels its owner-key limitations', () => {
