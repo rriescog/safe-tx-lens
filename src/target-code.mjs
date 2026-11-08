@@ -6,6 +6,19 @@ export { sourcifyLookup };
 
 const IMPLEMENTATION_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
 const MAX_TARGETS = 32;
+// These exact runtime fingerprints were reviewed against the linked Sourcify
+// source. In both implementations, fallback delegatecalls the same address
+// returned by implementation(). A matching getter alone cannot prove this.
+const VERIFIED_GETTER_FALLBACKS = new Map([
+  ['0x16a91aacbcdd1004cdf64fae29bcb2647e0b8652868adba817af4db0944a9a69', { pattern: 'GovernanceProxy delegatecall fallback', source: 'https://repo.sourcify.dev/1/0x6e7a5820baD6cebA8Ef5ea69c0C92EbbDAc9CE48' }],
+  ['0x21e86e6f958f52aed4a68a4741a2ee6fce762ba95648aabb9fdb07b4647b6e9a', { pattern: 'StakeManagerProxy delegatecall fallback', source: 'https://repo.sourcify.dev/1/0x5e3Ef299fDDf15eAa0432E6e66473ace8c13D908' }],
+]);
+
+export function recognizeGetterFallback(check) {
+  if (check.status !== 'verified' || check.proxy?.standard !== 'implementation() fallback' || check.proxy.implementationCode?.status !== 'verified') return null;
+  const known = VERIFIED_GETTER_FALLBACKS.get(check.bytecodeHash?.toLowerCase());
+  return known ? { status: 'verified_at_block', pattern: known.pattern, source: known.source, blockTag: check.blockTag } : null;
+}
 
 function targets(root) {
   const found = new Map();
@@ -130,6 +143,8 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
         }
       } catch (error) { result.proxyCheck = `Implementation getter unavailable: ${error.shortMessage ?? error.message}`; }
     }
+    const forwarding = recognizeGetterFallback(result);
+    if (forwarding) result.proxy.forwarding = forwarding;
   }
   return result;
 }

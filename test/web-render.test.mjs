@@ -189,6 +189,7 @@ test('call source labels distinguish historical, current, explorer, proxy and da
     ['verified_abi', 'verified current bytecode (historical code unavailable)', 'ABI matches current code'],
     ['explorer_abi', 'Etherscan ABI', 'Explorer ABI only'],
     ['proxy_candidate_abi', 'verified implementation ABI', 'Proxy route unconfirmed'],
+    ['verified_proxy_abi', 'verified proxy delegatecall fallback', 'Proxy route checked at this block'],
     ['selector_candidate', undefined, 'Possible function name'],
   ]) {
     page.context.sample = { ...base, decodeBasis: basis, decodeSource: source };
@@ -196,6 +197,20 @@ test('call source labels distinguish historical, current, explorer, proxy and da
   }
   page.context.sample = { ...base, method: null, data: '0x' };
   assert.equal(page.evaluate('callSource(sample).label'), 'No function call');
+});
+
+test('bytecode panel distinguishes checked proxy forwarding from an inferred route', () => {
+  const page = ui();
+  const check = { address: '0x2222222222222222222222222222222222222222', status: 'verified', reason: 'Runtime matched', blockTag: 99, proxy: { standard: 'implementation() fallback', implementation: '0x3333333333333333333333333333333333333333', implementationCode: { status: 'verified' }, forwarding: { status: 'verified_at_block', pattern: 'reviewed delegatecall fallback', source: 'https://repo.sourcify.dev/1/0x2222222222222222222222222222222222222222', blockTag: 99 } } };
+  page.context.sample = { targetVerificationAttempted: true, targetChecks: [check], transaction: { isExecuted: true } };
+  const checked = page.evaluate('targetChecksHtml(sample)');
+  assert.match(checked, /Proxy route checked/);
+  assert.match(checked, /reviewed proxy fallback/);
+  assert.doesNotMatch(checked, /Check call path/);
+  page.context.sample.targetChecks[0].proxy.forwarding = undefined;
+  const inferred = page.evaluate('targetChecksHtml(sample)');
+  assert.match(inferred, /Check call path/);
+  assert.doesNotMatch(inferred, /reviewed proxy fallback/);
 });
 
 test('source links reject unsafe schemes in both views', () => {

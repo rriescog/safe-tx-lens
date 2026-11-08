@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Interface, keccak256 } from 'ethers';
-import { inspectTargetCode, sourcifyLookup } from '../src/target-code.mjs';
+import { inspectTargetCode, recognizeGetterFallback, sourcifyLookup } from '../src/target-code.mjs';
 import { analyze } from '../src/analyze.mjs';
 import { assessConfidence } from '../src/confidence.mjs';
 
@@ -76,6 +76,19 @@ test('verified fallback proxy follows its implementation getter before judging t
   assert.equal(review.call.decodeBasis, 'proxy_candidate_abi');
   assert.equal(review.findings.some(item => item.code === 'TARGET_ABI_MISMATCH'), false);
   assert.ok(assessConfidence({ call: review.call, checks: [], targetChecks: review.targetChecks, transaction: review.transaction }).gaps.some(gap => gap.kind === 'proxy'));
+});
+
+test('reviewed proxy route requires matching historical proxy and implementation bytecode', () => {
+  for (const bytecodeHash of [
+    '0x16a91aacbcdd1004cdf64fae29bcb2647e0b8652868adba817af4db0944a9a69',
+    '0x21e86e6f958f52aed4a68a4741a2ee6fce762ba95648aabb9fdb07b4647b6e9a',
+  ]) {
+    const check = { status: 'verified', bytecodeHash, blockTag: 99, proxy: { standard: 'implementation() fallback', implementationCode: { status: 'verified' } } };
+    assert.equal(recognizeGetterFallback(check).status, 'verified_at_block');
+    assert.equal(recognizeGetterFallback({ ...check, status: 'verified_current' }), null);
+    assert.equal(recognizeGetterFallback({ ...check, proxy: { ...check.proxy, implementationCode: { status: 'verified_current' } } }), null);
+    assert.equal(recognizeGetterFallback({ ...check, bytecodeHash: keccak256('0x60016000') }), null);
+  }
 });
 
 test('historical proxy getter resolves the implementation from before execution', async () => {
