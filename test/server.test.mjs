@@ -57,16 +57,6 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
       assert.equal(icon.headers.get('content-type'), 'image/png; charset=utf-8');
       assert.ok((await icon.arrayBuffer()).byteLength > 100);
     }
-    const demoResponse = await fetch(`${origin}/api/demo`);
-    assert.equal(demoResponse.status, 200);
-    const demo = await demoResponse.json();
-    assert.equal(demo.evidence.source, 'bundled_example');
-    assert.equal(demo.evidence.executionHash, '0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b');
-    assert.equal(demo.transaction.nonce, '242');
-    assert.equal(demo.transaction.safe, '0xFa7D2a996aC6350f4b56C043112Da0366a59b74c');
-    assert.equal(demo.calculatedHash, '0x48b3ddad40b2c6a2144cbeaeec3d258bc0d94f32896f46d7c90780dcefba04a4');
-    assert.equal(demo.calculatedHash, demo.transaction.safeTxHash);
-    assert.doesNotMatch(JSON.stringify(demo), /tenderly_monitor|safe_api/);
     for (const name of ['kat', 'xlayer']) {
       const logo = await fetch(`${origin}/web/assets/chains/${name}.svg`);
       assert.equal(logo.status, 200);

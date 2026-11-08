@@ -138,21 +138,18 @@ function updateWizard() {
 inputMode.addEventListener('change', updateWizard);
 updateWizard();
 document.getElementById('try-example').addEventListener('click', () => {
-  // The bundled public example uses saved transaction fields. It never spends a Safe or
-  // RPC request, and its evidence label must not imply a live verification.
+  // Run this known execution hash through the same live inspection path as
+  // user-supplied hashes. A saved report would skip the very RPC checks that
+  // the example is meant to demonstrate.
+  const executionHash = '0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b';
   importedJson = null;
   inputMode.value = 'hash';
-  input.value = '0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b';
+  input.value = executionHash;
   network.value = 'eth';
   document.getElementById('custom-chain-group').hidden = true;
   updateWizard();
-  status.textContent = 'Opening the saved example…';
-  fetch('/api/demo').then(response => response.ok ? response.json() : Promise.reject(new Error('Example unavailable'))).then(result => {
-    report.classList.remove('empty');
-    document.body.classList.add('has-report');
-    showTransactionReport(result);
-    status.textContent = 'Saved example reviewed · no live lookup';
-  }).catch(() => { status.textContent = 'Could not open the saved example'; });
+  report.innerHTML = '<div class="empty" role="status"><h2>Inspecting the example live</h2><p>Reading the Ethereum execution and checking its target contracts through RPC.</p></div>';
+  return inspect({ overrideInput: executionHash, overrideNetwork: 'eth' });
 });
 // A copied local link may include a transaction hash in its query string.
 // Prefill only a valid hash and require an explicit review click, so merely
@@ -247,7 +244,7 @@ function showCallGraph(r) {
   }
 }
 function verificationHtml(r) {
-  const sources = { safe_api: 'Safe Transaction Service', safe_api_untrusted: 'Safe Transaction Service (unsigned, untrusted record)', safe_gateway: 'Safe Client Gateway', onchain_execution: 'Onchain execution via RPC', bundled_example: 'Saved public Ethereum example bundled with this app; no live lookup', tenderly_monitor: 'Tenderly monitor snapshot', tenderly_storage: 'Imported monitor JSON' };
+  const sources = { safe_api: 'Safe Transaction Service', safe_api_untrusted: 'Safe Transaction Service (unsigned, untrusted record)', safe_gateway: 'Safe Client Gateway', onchain_execution: 'Onchain execution via RPC', tenderly_monitor: 'Tenderly monitor snapshot', tenderly_storage: 'Imported monitor JSON' };
   const source = sources[r.evidence?.source] ?? (r.transaction?.lookupSource ? 'External transaction source' : 'Supplied JSON');
   const local = r.checks.find(check => check.name === 'Local EIP-712 hash');
   const contract = r.checks.find(check => check.name.startsWith('Safe contract hash'));
@@ -358,8 +355,6 @@ function reportHtml(r, retryNote = '') {
   const safeUrl = safeUiKnown ? `https://app.safe.global/home?safe=${encodeURIComponent(`${r.network === 'xlayer' ? 'okb' : r.network}:${tx.safe}`)}` : `https://katanascan.com/address/${encodeURIComponent(tx.safe)}`;
   const evidence = r.evidence?.source === 'onchain_execution'
     ? `<div class="notice" style="margin:16px 28px 0"><strong>Verified from ${esc(r.network)} onchain execution</strong> · block ${esc(r.evidence.blockNumber)}${r.evidence.blockTime ? ` · ${esc(r.evidence.blockTime)}` : ''}<br>Execution transaction: <span class="mono">${esc(r.evidence.executionHash)}</span>. ${r.evidence.discoveredBy === 'etherscan_index' ? 'Located through an indexed Safe event. ' : ''}The call graph comes from its execTransaction calldata. State changes below require a separate trace or simulation.</div>`
-    : r.evidence?.source === 'bundled_example'
-      ? `<div class="notice demo-notice"><strong>Saved PoS Council example · no live lookup</strong><br>This is public transaction data bundled with the app, not a fresh RPC or Safe Service result. <a href="https://etherscan.io/tx/${esc(r.evidence.executionHash)}" target="_blank" rel="noopener noreferrer">View the Ethereum execution ↗</a> Use your own hash and a live lookup for an actual review.</div>`
     : ['safe_api', 'safe_api_untrusted', 'safe_gateway'].includes(r.evidence?.source)
       ? `<div class="notice" style="margin:16px 28px 0"><strong>Fetched live from ${r.evidence.source === 'safe_api_untrusted' ? 'Safe Transaction Service (unsigned record)' : r.evidence.source === 'safe_api' ? 'Safe Transaction Service' : 'Safe Client Gateway'}</strong> · ${esc(r.evidence.retrievedAt)}<br>The Safe address, nonce, target and calldata came from this source. The EIP-712 hash is recalculated locally; check the RPC result and any limitations below.</div>`
       : '';

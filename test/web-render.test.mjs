@@ -150,22 +150,26 @@ test('deep link prefills only a valid transaction hash without fetching data', (
   assert.equal(invalid.elements.get('input').value, '');
 });
 
-test('one-click saved example selects Ethereum and opens a report from saved fields', async () => {
+test('one-click example runs the live inspection path and RPC checks', async () => {
   const page = ui();
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
   const review = await analyze(tx, 'eth', { fetchState: false });
+  review.checks.push({ name: 'Safe contract hash', method: 'onchain_rpc', status: 'pass', detail: review.hash });
+  review.targetVerificationAttempted = true;
+  review.targetChecks = [{ address: tx.to, status: 'verified', reason: 'matched', blockTag: 'latest' }];
+  review.evidence = { source: 'onchain_execution', executionHash: '0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b', blockNumber: 26347372 };
   const requests = [];
-  review.evidence = { source: 'bundled_example' };
   page.context.fetch = async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => review }; };
-  page.elements.get('try-example').on_click();
-  await new Promise(done => setImmediate(done));
+  await page.elements.get('try-example').on_click();
   assert.equal(page.elements.get('input').value, '0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b');
   assert.equal(page.elements.get('network').value, 'eth');
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, '/api/demo');
-  assert.equal(requests[0].options, undefined);
-  assert.match(page.elements.get('report').innerHTML, /Saved PoS Council example/);
-  assert.equal(page.elements.get('status').textContent, 'Saved example reviewed · no live lookup');
+  assert.equal(requests[0].url, '/api/inspect');
+  assert.equal(JSON.parse(requests[0].options.body).verifyTargets, true);
+  assert.match(page.elements.get('report').innerHTML, /Verified from eth onchain execution/);
+  assert.match(page.elements.get('report').innerHTML, /Safe contract calculation by RPC/);
+  assert.match(page.elements.get('report').innerHTML, /Verified bytecode/);
+  assert.equal(page.elements.get('status').textContent, 'Inspection complete');
 });
 
 test('verification panel distinguishes supplied data, a user hash, local calculation, and RPC', async () => {
