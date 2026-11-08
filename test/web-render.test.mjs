@@ -177,7 +177,7 @@ test('call tree leads with the decoded function and arguments, not a hand-writte
   assert.match(html, /Function signature: <code>forceUnstake\(uint256\)<\/code>/);
   assert.match(html, /Likely meaning: Force unstake validator #106/);
   assert.ok(html.indexOf('flow-expression') < html.indexOf('Likely meaning:'));
-  assert.match(html, /Known signature only/);
+  assert.match(html, /Function format recognized; contract unchecked/);
   assert.match(html, /A built-in ABI decoded the calldata/);
   assert.match(html, /<span>validatorId<\/span><code>106<\/code>/);
   const generic = { ...node, method: 'setWithdrawalDelay(uint256)', args: [{ name: 'newDelay', value: '7200' }] };

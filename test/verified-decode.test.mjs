@@ -84,6 +84,22 @@ test('a built-in signature is marked verified only when the target ABI matches i
   assert.match(call.decodeSource, /verified bytecode/);
 });
 
+test('legacy proxy transfer uses the checked implementation ABI and reviewed forwarding route', () => {
+  const call = decodeCall({ to: VAULT, value: '0', operation: 0, data: transfer });
+  const fragment = new Interface(['function transfer(address,uint256)']).getFunction('transfer');
+  enrichVerifiedCalls(call, [{
+    address: VAULT, status: 'verified', verifiedFunctions: [],
+    proxy: {
+      standard: 'ZeppelinOS implementation slot', implementation: TOKEN,
+      implementationCode: { status: 'verified', source: 'https://repo.sourcify.dev/1/example', verifiedFunctions: [{ selector: call.selector, signature: fragment.format('sighash'), abi: fragment.format('json') }] },
+      forwarding: { status: 'verified_at_block', pattern: 'reviewed delegatecall fallback', blockTag: 'latest' },
+    },
+  }]);
+  assert.equal(call.method, 'transfer(address,uint256)');
+  assert.equal(call.decodeBasis, 'verified_proxy_abi');
+  assert.match(call.decodeSource, /ZeppelinOS implementation slot/);
+});
+
 test('evidence confidence fails closed on hash mismatch and flags unchecked target', () => {
   const root = decodeCall({ to: VAULT, value: '0', operation: 0, data: retrieve });
   const failed = assessConfidence({ call: root, checks: [{ method: 'local_eip712', status: 'fail' }] });

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Interface, keccak256 } from 'ethers';
-import { inspectTargetCode, recognizeGetterFallback, sourcifyLookup } from '../src/target-code.mjs';
+import { inspectTargetCode, recognizeGetterFallback, recognizeLegacyFallback, sourcifyLookup } from '../src/target-code.mjs';
 import { analyze } from '../src/analyze.mjs';
 import { assessConfidence } from '../src/confidence.mjs';
 
@@ -41,6 +41,26 @@ test('ERC-1967 implementation is inspected separately', async () => {
   const [target] = await inspectTargetCode(call, 'eth', { provider: provider({ implementation: slot }), sourceLookup });
   assert.equal(target.proxy.implementation, LOGIC);
   assert.equal(target.proxy.implementationCode.status, 'verified');
+});
+
+test('verified legacy ZeppelinOS proxy resolves its implementation without assuming its fallback route', async () => {
+  const legacySlot = '0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3';
+  const outerCode = `0x7f${legacySlot.slice(2)}6000`;
+  const implementationSlotValue = `0x${'0'.repeat(24)}${LOGIC.slice(2)}`;
+  const rpc = {
+    getNetwork: async () => ({ chainId: 1n }),
+    getCode: async address => address.toLowerCase() === TARGET.toLowerCase() ? outerCode : '0x60016000',
+    getStorage: async (_address, slot) => slot === legacySlot ? implementationSlotValue : '0x',
+  };
+  const lookup = async (_network, address) => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: address.toLowerCase() === TARGET.toLowerCase() ? outerCode : '0x60016000' }, abi: address.toLowerCase() === TARGET.toLowerCase() ? ['function implementation() view returns (address)', 'function admin() view returns (address)', { type: 'fallback', stateMutability: 'payable' }] : abi });
+  const [target] = await inspectTargetCode(call, 'eth', { provider: rpc, sourceLookup: lookup });
+  assert.equal(target.proxy.standard, 'ZeppelinOS implementation slot');
+  assert.equal(target.proxy.implementation, LOGIC);
+  assert.equal(target.proxy.implementationCode.abiSelectors[0].present, true);
+  assert.equal(target.proxy.forwarding, undefined);
+  const reviewed = recognizeLegacyFallback({ ...target, bytecodeHash: '0xd80d4b7c890cb9d6a4893e6b52bc34b56b25335cb13716e0d1d31383e6b41505' });
+  assert.equal(reviewed.status, 'verified_at_block');
+  assert.equal(recognizeLegacyFallback({ ...target, status: 'verified_current', bytecodeHash: '0xd80d4b7c890cb9d6a4893e6b52bc34b56b25335cb13716e0d1d31383e6b41505' }), null);
 });
 
 test('SafeProxy slot-0 singleton ABI is inspected instead of treating proxy ABI as target ABI', async () => {

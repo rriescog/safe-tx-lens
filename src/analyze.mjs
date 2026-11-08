@@ -309,7 +309,7 @@ export async function analyze(raw, network = 'eth', options = {}) {
     if (plannedCoversMissing) findings.push({ severity: 'info', code: 'UPGRADE_TARGET_ABI_CONDITIONAL', path: target.address, message: `The missing selector exists in the verified proposed implementation ${target.plannedImplementation}. This interpretation depends on the upgrade executing before the call.` });
     else if (missing.length) findings.push({ severity: 'warning', code: 'TARGET_ABI_MISMATCH', path: target.address, message: `The decoded selector is absent from the matching verified ${target.proxy ? 'implementation' : 'target'} ABI; the function label may be wrong.` });
   }
-  if (options.verifyTargets && targetChecks.some(target => !['verified', 'verified_current'].includes(target.status) || (target.proxy && !['verified', 'verified_current'].includes(target.proxy.implementationCode?.status)))) warnings.push('At least one called target or ERC-1967 implementation lacks matching verified runtime bytecode. A decoded selector is only a hypothesis about behavior.');
+  if (options.verifyTargets && targetChecks.some(target => !['verified', 'verified_current'].includes(target.status) || (target.proxy && !['verified', 'verified_current'].includes(target.proxy.implementationCode?.status)))) warnings.push('At least one called target or proxy implementation lacks matching verified runtime bytecode. A decoded selector is only a hypothesis about behavior.');
   if (tx.to.toLowerCase() === tx.safe.toLowerCase() && tx.data === '0x' && tx.value === '0' && tx.operation === 0) {
     findings.push({ severity: 'info', code: 'SAFE_REJECTION', path: '1', message: 'Empty self-call: this consumes the Safe nonce if executed and can cancel a competing proposal at the same nonce.' });
   }

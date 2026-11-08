@@ -5,6 +5,9 @@ import { lookupContractSource, sourcifyLookup } from './abi-sources.mjs';
 export { sourcifyLookup };
 
 const IMPLEMENTATION_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
+// Circle's FiatTokenProxy uses the older ZeppelinOS implementation slot.
+// Read it only when verified outer code and ABI identify that proxy pattern.
+const LEGACY_IMPLEMENTATION_SLOT = '0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3';
 const MAX_TARGETS = 32;
 // These exact runtime fingerprints were reviewed against the linked Sourcify
 // source. In both implementations, fallback delegatecalls the same address
@@ -13,10 +16,19 @@ const VERIFIED_GETTER_FALLBACKS = new Map([
   ['0x16a91aacbcdd1004cdf64fae29bcb2647e0b8652868adba817af4db0944a9a69', { pattern: 'GovernanceProxy delegatecall fallback', source: 'https://repo.sourcify.dev/1/0x6e7a5820baD6cebA8Ef5ea69c0C92EbbDAc9CE48' }],
   ['0x21e86e6f958f52aed4a68a4741a2ee6fce762ba95648aabb9fdb07b4647b6e9a', { pattern: 'StakeManagerProxy delegatecall fallback', source: 'https://repo.sourcify.dev/1/0x5e3Ef299fDDf15eAa0432E6e66473ace8c13D908' }],
 ]);
+const VERIFIED_LEGACY_FALLBACKS = new Map([
+  ['0xd80d4b7c890cb9d6a4893e6b52bc34b56b25335cb13716e0d1d31383e6b41505', { pattern: 'Circle FiatTokenProxy delegatecall fallback', source: 'https://repo.sourcify.dev/1/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' }],
+]);
 
 export function recognizeGetterFallback(check) {
   if (check.status !== 'verified' || check.proxy?.standard !== 'implementation() fallback' || check.proxy.implementationCode?.status !== 'verified') return null;
   const known = VERIFIED_GETTER_FALLBACKS.get(check.bytecodeHash?.toLowerCase());
+  return known ? { status: 'verified_at_block', pattern: known.pattern, source: known.source, blockTag: check.blockTag } : null;
+}
+
+export function recognizeLegacyFallback(check) {
+  if (check.status !== 'verified' || check.proxy?.standard !== 'ZeppelinOS implementation slot' || check.proxy.implementationCode?.status !== 'verified') return null;
+  const known = VERIFIED_LEGACY_FALLBACKS.get(check.bytecodeHash?.toLowerCase());
   return known ? { status: 'verified_at_block', pattern: known.pattern, source: known.source, blockTag: check.blockTag } : null;
 }
 
@@ -91,6 +103,7 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
             // Older transparent proxies expose both getters and dispatch
             // unknown selectors through fallback, without using ERC-1967.
             result.getterProxyCandidate = Boolean(iface.getFunction('implementation()') && iface.getFunction('proxyType()') && source.abi.some(item => item?.type === 'fallback'));
+            result.legacyProxyCandidate = Boolean(iface.getFunction('implementation()') && iface.getFunction('admin()') && source.abi.some(item => item?.type === 'fallback') && code.toLowerCase().includes(LEGACY_IMPLEMENTATION_SLOT.slice(2)));
             if (source.abi.length && iface.fragments.length === 0) result.abiWarning = 'Verified ABI could not be parsed';
             else {
               result.abiSelectors = [...entry.selectors].map(selector => ({ selector, present: Boolean(iface.getFunction(selector)) }));
@@ -143,7 +156,17 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
         }
       } catch (error) { result.proxyCheck = `Implementation getter unavailable: ${error.shortMessage ?? error.message}`; }
     }
-    const forwarding = recognizeGetterFallback(result);
+    if (!result.proxy && result.legacyProxyCandidate) {
+      try {
+        const slot = await provider.getStorage(entry.address, LEGACY_IMPLEMENTATION_SLOT, effectiveBlockTag);
+        const implementation = `0x${slot.slice(-40)}`;
+        if (isAddress(implementation) && implementation.toLowerCase() !== entry.address.toLowerCase() && !/^0x0{40}$/i.test(implementation)) {
+          result.proxy = { standard: 'ZeppelinOS implementation slot', implementation: getAddress(implementation) };
+          result.proxy.implementationCode = await inspectOne({ address: result.proxy.implementation, selectors: entry.selectors, operations: entry.operations }, provider, network, effectiveBlockTag, lookup, 1, Boolean(base.historicalUnavailable));
+        }
+      } catch (error) { result.proxyCheck = `Legacy implementation slot unavailable: ${error.shortMessage ?? error.message}`; }
+    }
+    const forwarding = recognizeGetterFallback(result) ?? recognizeLegacyFallback(result);
     if (forwarding) result.proxy.forwarding = forwarding;
   }
   return result;

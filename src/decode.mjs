@@ -133,10 +133,10 @@ export function enrichVerifiedCalls(root, targetChecks) {
                 // authoritative even when no name is available.
                 const known = IFACE.getFunction(node.selector);
                 node.args = parsed.fragment.inputs.map((input, index) => ({ name: input.name || (known?.format('sighash') === parsed.signature ? known.inputs[index]?.name : null) || `arg${index}`, value: clean(parsed.args[index]) }));
-                const viaGetterProxy = target.proxy?.standard === 'implementation() fallback' && source === implementation;
-                const verifiedRoute = viaGetterProxy && target.proxy.forwarding?.status === 'verified_at_block';
-                node.decodeBasis = source.status === 'explorer_abi' ? 'explorer_abi' : verifiedRoute ? 'verified_proxy_abi' : viaGetterProxy ? 'proxy_candidate_abi' : 'verified_abi';
-                node.decodeSource = source.status === 'explorer_abi' ? `${source.sourceProvider} ABI; runtime bytecode not independently matched${viaGetterProxy ? '; proxy forwarding inferred' : ''}` : verifiedRoute ? `verified ${target.proxy.forwarding.pattern}; implementation() returned the checked implementation at block ${target.proxy.forwarding.blockTag}; implementation ABI and bytecode matched` : viaGetterProxy ? 'verified implementation ABI; proxy forwarding inferred from its getters and fallback, not independently proven' : source.status === 'verified_current' ? 'verified current bytecode (historical code unavailable)' : 'verified bytecode at inspected block';
+                const viaResolvedProxy = Boolean(target.proxy && source === implementation);
+                const verifiedRoute = viaResolvedProxy && target.proxy.forwarding?.status === 'verified_at_block';
+                node.decodeBasis = source.status === 'explorer_abi' ? 'explorer_abi' : verifiedRoute ? 'verified_proxy_abi' : viaResolvedProxy ? 'proxy_candidate_abi' : 'verified_abi';
+                node.decodeSource = source.status === 'explorer_abi' ? `${source.sourceProvider} ABI; runtime bytecode not independently matched${viaResolvedProxy ? '; proxy forwarding inferred' : ''}` : verifiedRoute ? `verified ${target.proxy.forwarding.pattern}; ${target.proxy.standard} resolved the checked implementation at block ${target.proxy.forwarding.blockTag}; implementation ABI and bytecode matched` : viaResolvedProxy ? `verified implementation ABI; ${target.proxy.standard} suggests forwarding, but the exact route was not independently proven` : source.status === 'verified_current' ? 'verified current bytecode (historical code unavailable)' : 'verified bytecode at inspected block';
                 node.decodeSourceUrl = source.source;
               }
             }
