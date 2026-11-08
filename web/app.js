@@ -187,7 +187,7 @@ function callExpression(call) {
 }
 function decodeEvidence(call) {
   if (call.decodeSource) return `<div class="decode-source">${call.decodeBasis === 'proxy_candidate_abi' ? 'Possible call through a proxy: ' : 'ABI from '}${esc(call.decodeSource)}${call.decodeSourceUrl ? ` · <a href="${esc(call.decodeSourceUrl)}" target="_blank" rel="noopener noreferrer">source</a>` : ''}. Function name does not prove behavior.</div>`;
-  if (call.decodeBasis === 'selector_candidate') return '<div class="decode-source">Candidate signature from Sourcify 4byte. Arguments fit the calldata, but this is not verified against the called contract. Inspect target bytecode before relying on the name.</div>';
+  if (call.decodeBasis === 'selector_candidate') return `<div class="decode-source">Candidate signature from ${esc(call.decodeCandidateSource ?? 'a 4byte database')}. Arguments fit the calldata, but this is not verified against the called contract. Inspect target bytecode before relying on the name.</div>`;
   if (call.decodeCandidates?.length) return `<div class="decode-source">Ambiguous selector candidates: ${esc(call.decodeCandidates.join(' · '))}. No function was chosen.</div>`;
   if (call.decodeBasis === 'known_signature') return '<div class="decode-source">Known ABI signature; target behavior still requires bytecode verification.</div>';
   return '';

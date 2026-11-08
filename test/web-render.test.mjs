@@ -122,6 +122,14 @@ test('4byte candidate appears as a tentative decode in the call tree', () => {
   assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /Candidate/);
 });
 
+test('4byte fallback names its actual signature source in technical evidence', () => {
+  const page = ui();
+  page.context.sample = { to: '0x2222222222222222222222222222222222222222', value: '0', operation: 0, data: '0x12345678', selector: '0x12345678', method: 'foo(uint256)', args: [{ name: 'arg0', value: '1' }], decodeBasis: 'selector_candidate', decodeCandidateSource: '4byte.directory', children: [] };
+  const html = page.evaluate('callHtml(sample)');
+  assert.match(html, /Candidate signature from 4byte\.directory/);
+  assert.match(html, /not verified against the called contract/);
+});
+
 test('call tree leads with the decoded function and arguments, not a hand-written interpretation', () => {
   const page = ui();
   const node = { to: '0x2222222222222222222222222222222222222222', value: '0', operation: 0, data: '0x12345678', selector: '0x12345678', method: 'forceUnstake(uint256)', args: [{ name: 'validatorId', value: '106' }], decodeBasis: 'known_signature', children: [] };

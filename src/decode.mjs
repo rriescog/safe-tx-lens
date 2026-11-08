@@ -153,19 +153,36 @@ const candidateCache = new Map();
 
 // A 4byte database supplies signatures for a selector, not proof that the
 // called contract implements one of them. Never call this a verified ABI.
-export async function lookupSelectorCandidates(selector) {
+export async function lookupSelectorCandidates(selector, { request = fetch } = {}) {
   const key = selector.toLowerCase();
   const cached = candidateCache.get(key);
-  if (cached && cached.expires > Date.now()) return cached.names;
-  const response = await fetch(`https://api.4byte.sourcify.dev/signature-database/v1/lookup?function=${key}`, { signal: AbortSignal.timeout(4000) });
-  if (!response.ok) throw new Error(`Signature database ${response.status}`);
-  const raw = await response.text();
-  if (raw.length > 65536) throw new Error('Signature lookup response exceeded review limit');
-  const body = JSON.parse(raw);
-  const names = Array.isArray(body?.result?.function?.[key]) ? body.result.function[key].filter(item => !item.filtered && typeof item.name === 'string').slice(0, 12).map(item => item.name) : [];
+  if (cached && cached.expires > Date.now()) return cached.result;
+  let result = { names: [], source: null };
+  try {
+    const response = await request(`https://api.4byte.sourcify.dev/signature-database/v1/lookup?function=${key}`, { signal: AbortSignal.timeout(4000) });
+    if (!response.ok) throw new Error(`Sourcify signature database ${response.status}`);
+    const raw = await response.text();
+    if (raw.length > 65536) throw new Error('Signature lookup response exceeded review limit');
+    const body = JSON.parse(raw);
+    const names = Array.isArray(body?.result?.function?.[key]) ? body.result.function[key].filter(item => !item.filtered && typeof item.name === 'string').slice(0, 12).map(item => item.name) : [];
+    if (names.length) result = { names, source: 'Sourcify 4byte' };
+  } catch { /* An unavailable signature database must not block inspection. */ }
+  if (!result.names.length) {
+    try {
+      const response = await request(`https://www.4byte.directory/api/v1/signatures/?hex_signature=${key}&page_size=12`, { signal: AbortSignal.timeout(4000), headers: { Accept: 'application/json', 'User-Agent': 'SafeTxLens/0.2' } });
+      if (!response.ok) throw new Error(`4byte.directory ${response.status}`);
+      const raw = await response.text();
+      if (raw.length > 65536) throw new Error('Signature lookup response exceeded review limit');
+      const body = JSON.parse(raw);
+      // Never choose a single candidate from an incomplete, paginated result.
+      if (Number.isInteger(body.count) && body.count <= 12 && Array.isArray(body.results) && body.results.length === body.count) {
+        result = { names: body.results.filter(item => item.hex_signature?.toLowerCase() === key && typeof item.text_signature === 'string').map(item => item.text_signature), source: '4byte.directory' };
+      }
+    } catch { /* The primary lookup already failed or returned no candidates. */ }
+  }
   if (candidateCache.size >= 256) candidateCache.delete(candidateCache.keys().next().value);
-  candidateCache.set(key, { names, expires: Date.now() + 15 * 60_000 });
-  return names;
+  candidateCache.set(key, { result, expires: Date.now() + 15 * 60_000 });
+  return result;
 }
 
 export async function enrichCandidateCalls(root, { lookup = lookupSelectorCandidates, maxLookups = 8 } = {}) {
@@ -182,7 +199,8 @@ export async function enrichCandidateCalls(root, { lookup = lookupSelectorCandid
     catch { results.set(selector, []); }
   }
   for (const node of pending) {
-    const signatures = results.get(node.selector.toLowerCase()) ?? [];
+    const lookupResult = results.get(node.selector.toLowerCase()) ?? [];
+    const signatures = Array.isArray(lookupResult) ? lookupResult : lookupResult.names;
     const matches = new Map();
     for (const signature of signatures.slice(0, 12)) {
       if (typeof signature !== 'string' || signature.length > 256) continue;
@@ -199,6 +217,7 @@ export async function enrichCandidateCalls(root, { lookup = lookupSelectorCandid
       node.method = parsed.signature;
       node.args = parsed.fragment.inputs.map((input, index) => ({ name: input.name || `arg${index}`, value: clean(parsed.args[index]) }));
       node.decodeBasis = 'selector_candidate';
+      node.decodeCandidateSource = Array.isArray(lookupResult) ? null : lookupResult.source;
     } else if (matches.size > 1) node.decodeCandidates = [...matches.keys()].slice(0, 5);
   }
   return root;
