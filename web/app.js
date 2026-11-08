@@ -174,6 +174,17 @@ function argValue(arg, call) {
   }
   return JSON.stringify(arg.value);
 }
+function callExpression(call) {
+  if (!call.method) return call.data === '0x' ? 'Native transfer or empty call' : `Unknown selector ${call.selector ?? '0x'}`;
+  const name = call.method.split('(')[0];
+  const args = (call.args ?? []).map((arg, index) => {
+    const value = typeof arg.value === 'string' && /^(?:-?\d+|0x[0-9a-fA-F]{1,64})$/.test(arg.value)
+      ? arg.value : argValue(arg, call) ?? 'unavailable';
+    const compact = value.length > 90 ? `${value.slice(0, 87)}…` : value;
+    return `${arg.name || `arg${index}`}: ${compact}`;
+  });
+  return `${name}(${args.join(', ')})`;
+}
 function decodeEvidence(call) {
   if (call.decodeSource) return `<div class="decode-source">${call.decodeBasis === 'proxy_candidate_abi' ? 'Possible call through a proxy: ' : 'ABI from '}${esc(call.decodeSource)}${call.decodeSourceUrl ? ` · <a href="${esc(call.decodeSourceUrl)}" target="_blank" rel="noopener noreferrer">source</a>` : ''}. Function name does not prove behavior.</div>`;
   if (call.decodeBasis === 'selector_candidate') return '<div class="decode-source">Candidate signature from Sourcify 4byte. Arguments fit the calldata, but this is not verified against the called contract. Inspect target bytecode before relying on the name.</div>';
@@ -193,10 +204,11 @@ function section(title, body) {
 }
 function flowHtml(node, path, labels) {
   const method = node.method?.split('(')[0] ?? (node.data === '0x' ? 'Empty or value call' : `Unknown ${node.selector}`);
-  const title = labels.get(path) ?? method;
+  const expression = callExpression(node);
+  const interpretation = labels.get(path);
   const kind = /^schedule/.test(method) || node.stage === 'schedule' ? 'Schedule' : /^execute/.test(method) ? 'Execute' : node.operation === 1 ? 'Delegatecall' : 'Call';
   const children = node.children?.length ? `<ul class="flow-children">${node.children.map((child, i) => flowHtml(child, `${path}.${i + 1}`, labels)).join('')}</ul>` : '';
-  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong>${esc(title)}</strong><span class="flow-address mono">${esc(node.to)}</span>${node.token ? `<span class="token-identity">${esc(node.token.amount ?? 'Raw amount unavailable')} ${esc(node.token.symbol)} · ${esc(node.token.address)}<small>Symbol and decimals reported by the contract via RPC at ${esc(node.token.blockTag === 'latest' ? 'current state' : `block ${node.token.blockTag}`)}; identity unverified.</small></span>` : ''}${node.decodeSource ? `<span class="flow-evidence">${node.decodeBasis === 'proxy_candidate_abi' ? 'Proxy forwarding unconfirmed' : node.decodeBasis === 'explorer_abi' ? 'Explorer ABI only' : 'Verified ABI'} · ${esc(node.decodeSource)}</span>` : node.decodeBasis === 'selector_candidate' ? '<span class="flow-evidence">Candidate signature · target unverified</span>' : ''}</div></div>${children}</li>`;
+  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong class="flow-expression">${esc(expression)}</strong>${node.method ? `<span class="flow-signature">${node.decodeBasis === 'selector_candidate' ? 'Candidate signature' : 'Decoded signature'}: ${esc(node.method)}</span>` : ''}${interpretation && interpretation !== expression ? `<span class="flow-interpretation">Interpretation: ${esc(interpretation)}</span>` : ''}<span class="flow-address mono">${esc(node.to)}</span>${node.token ? `<span class="token-identity">${esc(node.token.amount ?? 'Raw amount unavailable')} ${esc(node.token.symbol)} · ${esc(node.token.address)}<small>Symbol and decimals reported by the contract via RPC at ${esc(node.token.blockTag === 'latest' ? 'current state' : `block ${node.token.blockTag}`)}; identity unverified.</small></span>` : ''}${node.decodeSource ? `<span class="flow-evidence">${node.decodeBasis === 'proxy_candidate_abi' ? 'Proxy forwarding unconfirmed' : node.decodeBasis === 'explorer_abi' ? 'Explorer ABI only' : 'Verified ABI'} · ${esc(node.decodeSource)}</span>` : node.decodeBasis === 'selector_candidate' ? '<span class="flow-evidence">Candidate signature · target unverified</span>' : node.decodeBasis === 'known_signature' ? '<span class="flow-evidence">Known signature · target behavior requires code verification</span>' : ''}</div></div>${children}</li>`;
 }
 function graphElements(r) {
   const elements = [{ data: { id: 'safe', label: `Safe nonce ${r.transaction.nonce}`, detail: `Safe ${r.transaction.safe}`, kind: 'safe' } }];
@@ -206,8 +218,8 @@ function graphElements(r) {
     if (elements.filter(element => !element.data.source).length >= 80) { omitted++; return; }
     const method = call.method?.split('(')[0] ?? (call.data === '0x' ? 'Value or empty call' : `Unknown ${call.selector}`);
     const kind = call.operation === 1 ? 'delegatecall' : call.stage === 'schedule' || /^schedule/.test(method) ? 'schedule' : /^execute/.test(method) ? 'execute' : 'call';
-    const title = labels.get(path) ?? method;
-    const detail = `${title}\n${kind} to ${call.to}\nValue: ${call.value} wei${call.decodeSource ? `\nABI: ${call.decodeSource}` : ''}${call.decodeError ? `\nDecode error: ${call.decodeError}` : ''}`;
+    const interpretation = labels.get(path);
+    const detail = `${callExpression(call)}${call.method ? `\n${call.decodeBasis === 'selector_candidate' ? 'Candidate signature' : 'Decoded signature'}: ${call.method}` : ''}${interpretation && interpretation !== callExpression(call) ? `\nInterpretation: ${interpretation}` : ''}\n${kind} to ${call.to}\nValue: ${call.value} wei${call.decodeSource ? `\nABI source: ${call.decodeSource}` : ''}${call.decodeError ? `\nDecode error: ${call.decodeError}` : ''}`;
     // Keep canvas labels short; the selected-node panel has the full action.
     elements.push({ data: { id: path, label: method.length > 27 ? `${method.slice(0, 24)}…` : method, detail, kind } });
     elements.push({ data: { id: `edge-${path}`, source: parent, target: path } });
@@ -360,7 +372,7 @@ function reportHtml(r, retryNote = '') {
       : '';
   const actionLabels = new Map(r.actions.map(action => [action.path, action.label]));
   const flow = `<div class="flow-map"><div class="flow-origin"><span class="flow-kind">Safe transaction</span><strong>Nonce ${esc(tx.nonce)}</strong><span class="mono">${esc(tx.safe)}</span></div><ul class="flow-root">${flowHtml(r.call, '1', actionLabels)}</ul></div><details class="graph-extra"><summary>Explore this call tree as an interactive graph</summary><div class="graph-shell"><div class="graph-top"><strong>Interactive call graph</strong><span>Drag to pan · scroll or pinch to zoom · select a node</span></div><div class="call-graph" role="img" aria-label="Interactive graph of calls encoded in this Safe transaction"></div><div class="graph-selection" aria-live="polite"></div></div></details>`;
-  const actionSummary = r.risk.actionRatings.map(action => `<div class="planned-action">${pill(action.level)}<div><span class="action-stage">${esc(action.stage === 'schedule' ? 'Encoded to schedule' : 'Encoded to call')}</span><strong>${esc(action.label)}</strong><p>${esc(action.reason)}</p></div></div>`).join('');
+  const actionSummary = r.risk.actionRatings.map(action => `<div class="planned-action">${pill(action.level)}<div><span class="action-stage">${esc(action.stage === 'schedule' ? 'Encoded to schedule' : 'Encoded to call')} · interpretation</span><strong>${esc(action.label)}</strong><p>${esc(action.reason)}</p></div></div>`).join('');
   const riskReasons = r.risk.reasons.filter(reason => !/^(Called|Scheduled):/.test(reason.message)).map(reason => `<div class="semantic-reason">${pill(reason.level)}<span>${esc(reason.message)}</span></div>`).join('');
   const confidence = confidenceHtml(r.confidence);
   const riskHtml = `${confidence}<div class="risk-summary"><div>${pill(r.risk.level)}<strong>${esc(r.risk.reviewPriority)} review priority</strong><span>${esc(r.risk.impactLevel)} potential impact</span></div>${priorityExplanation(r.risk)}<p>Priority reflects the possible impact of the decoded calls. It does not say the transaction is malicious or prove what will happen onchain.</p></div>${riskReasons}`;

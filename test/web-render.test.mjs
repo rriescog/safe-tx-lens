@@ -121,6 +121,34 @@ test('4byte candidate appears as a tentative decode in the call tree', () => {
   assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /Candidate/);
 });
 
+test('call tree leads with the decoded function and arguments, not a hand-written interpretation', () => {
+  const page = ui();
+  const node = { to: '0x2222222222222222222222222222222222222222', value: '0', operation: 0, data: '0x12345678', selector: '0x12345678', method: 'forceUnstake(uint256)', args: [{ name: 'validatorId', value: '106' }], decodeBasis: 'known_signature', children: [] };
+  page.context.sample = node;
+  const html = page.evaluate('flowHtml(sample, "1", new Map([["1", "Force unstake validator #106"]]))');
+  assert.match(html, /<strong class="flow-expression">forceUnstake\(validatorId: 106\)<\/strong>/);
+  assert.match(html, /Decoded signature: forceUnstake\(uint256\)/);
+  assert.match(html, /Interpretation: Force unstake validator #106/);
+  assert.ok(html.indexOf('flow-expression') < html.indexOf('Interpretation:'));
+  assert.match(html, /Known signature · target behavior requires code verification/);
+  const generic = { ...node, method: 'setWithdrawalDelay(uint256)', args: [{ name: 'newDelay', value: '7200' }] };
+  page.context.sample = generic;
+  assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /setWithdrawalDelay\(newDelay: 7200\)/);
+  page.context.sample = { ...node, method: null, args: null };
+  assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /Unknown selector 0x12345678/);
+});
+
+test('the real nested PoS Council example renders its ABI call separately from the human summary', async () => {
+  const page = ui();
+  const transaction = JSON.parse(await readFile(pathResolve('examples/2026-11-05-pos-council-nonce-242-executed.json'), 'utf8'));
+  page.context.sample = await analyze(transaction, 'eth', { fetchState: false });
+  const html = page.evaluate('reportHtml(sample)');
+  assert.match(html, /<strong class="flow-expression">forceUnstake\(validatorId: 106\)<\/strong>/);
+  assert.match(html, /Decoded signature: forceUnstake\(uint256\)/);
+  assert.match(html, /Interpretation: Force unstake validator #106/);
+  assert.doesNotMatch(html, /forceUnstakeValidator/);
+});
+
 test('public UI disables wallet monitoring and labels its owner-key limitations', () => {
   const page = ui({ publicMode: true });
   assert.equal(page.elements.get('network').value, 'eth');
