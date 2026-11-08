@@ -1,5 +1,8 @@
 import { Interface, JsonRpcProvider, getAddress, isAddress, keccak256 } from 'ethers';
 import { chainId } from './chains.mjs';
+import { lookupContractSource, sourcifyLookup } from './abi-sources.mjs';
+
+export { sourcifyLookup };
 
 const IMPLEMENTATION_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
 const MAX_TARGETS = 32;
@@ -22,14 +25,6 @@ function targets(root) {
   return [...found.values()];
 }
 
-export async function sourcifyLookup(network, address) {
-  const id = chainId(network);
-  const response = await fetch(`https://sourcify.dev/server/v2/contract/${id}/${address}?fields=abi,runtimeBytecode.onchainBytecode`, { signal: AbortSignal.timeout(8000) });
-  if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`Sourcify ${response.status}`);
-  return response.json();
-}
-
 async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0, historicalUnavailable = false) {
   const base = { address: entry.address, network, blockTag, selectors: [...entry.selectors], operations: [...entry.operations] };
   let code;
@@ -47,20 +42,28 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
   const bytecodeHash = keccak256(code);
   const result = { ...base, bytecodeHash, byteLength: (code.length - 2) / 2, status: 'unverified', source: null, reason: 'No matching verified source was found' };
   try {
-    const source = await lookup(network, entry.address);
+    const source = await lookup(network, entry.address, { runtimeCode: code, blockTag: effectiveBlockTag });
     if (source) {
       const matchedBytecode = source.runtimeBytecode?.onchainBytecode;
-      if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(matchedBytecode ?? '')) {
-        result.reason = 'Sourcify did not return runtime bytecode for an independent comparison';
+      if (source.explorerAbi && !matchedBytecode && Array.isArray(source.abi)) {
+        result.status = 'explorer_abi';
+        result.source = source.sourceUrl ?? null;
+        result.sourceProvider = source.sourceProvider;
+        result.reason = `ABI supplied by ${source.sourceProvider}; runtime bytecode was not independently matched to verified source${blockTag !== 'latest' ? ' at the historical block' : ''}`;
+      } else if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(matchedBytecode ?? '')) {
+        result.reason = 'Source provider did not return runtime bytecode for an independent comparison';
       } else if (keccak256(matchedBytecode) !== bytecodeHash) {
         result.status = 'mismatch';
-        result.reason = 'Sourcify verified bytecode differs from RPC bytecode at the selected block';
+        result.reason = 'Explorer verified bytecode differs from RPC bytecode at the selected block';
       } else if (!['exact_match', 'match'].includes(source.runtimeMatch ?? source.match)) {
-        result.reason = 'Sourcify returned no recognized runtime match status';
+        result.reason = 'Source provider returned no recognized runtime match status';
       } else {
         result.status = base.historicalUnavailable ? 'verified_current' : 'verified';
-        result.reason = `Sourcify ${source.runtimeMatch ?? source.match}; runtime bytecode matches ${base.historicalUnavailable ? 'current RPC only (historical state unavailable)' : 'RPC at the inspected block'}`;
-        result.source = `https://repo.sourcify.dev/${chainId(network)}/${entry.address}`;
+        result.reason = `${source.sourceProvider ?? 'Sourcify'} ${source.runtimeMatch ?? source.match}; runtime bytecode matches ${base.historicalUnavailable ? 'current RPC only (historical state unavailable)' : 'RPC at the inspected block'}`;
+        result.source = source.sourceUrl ?? `https://repo.sourcify.dev/${chainId(network)}/${entry.address}`;
+        result.sourceProvider = source.sourceProvider ?? 'sourcify';
+      }
+      if (['verified', 'verified_current', 'explorer_abi'].includes(result.status)) {
         if (Array.isArray(source.abi) && entry.selectors.size && source.abi.length > 512) {
           result.abiWarning = 'Verified ABI is too large to decode within the review limit';
         } else if (Array.isArray(source.abi) && entry.selectors.size) {
@@ -71,7 +74,7 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
             // Some verified SafeProxy builds expose only constructor+fallback
             // in their ABI, while implementing masterCopy() in assembly.
             const safeProxyFallback = source.abi.some(item => item?.type === 'constructor' && item.inputs?.some(input => input.name === '_singleton')) && source.abi.some(item => item?.type === 'fallback');
-            result.safeProxyCandidate = Boolean(iface.getFunction('masterCopy()')) || (safeProxyFallback && matchedBytecode.toLowerCase().includes('a619486e'));
+            result.safeProxyCandidate = Boolean(iface.getFunction('masterCopy()')) || (safeProxyFallback && code.toLowerCase().includes('a619486e'));
             // Older transparent proxies expose both getters and dispatch
             // unknown selectors through fallback, without using ERC-1967.
             result.getterProxyCandidate = Boolean(iface.getFunction('implementation()') && iface.getFunction('proxyType()') && source.abi.some(item => item?.type === 'fallback'));
@@ -131,7 +134,7 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
   return result;
 }
 
-export async function inspectTargetCode(call, network, { rpcUrl, provider, blockTag = 'latest', sourceLookup = sourcifyLookup, maxTargets = MAX_TARGETS } = {}) {
+export async function inspectTargetCode(call, network, { rpcUrl, provider, blockTag = 'latest', sourceLookup = lookupContractSource, maxTargets = MAX_TARGETS } = {}) {
   const entries = targets(call);
   if (!Number.isInteger(maxTargets) || maxTargets < 1 || maxTargets > MAX_TARGETS) throw new Error('Invalid target verification limit');
   if (!rpcUrl && !provider) return entries.map(entry => ({ address: entry.address, network, blockTag, selectors: [...entry.selectors], status: 'unavailable', reason: 'No RPC configured for this network' }));

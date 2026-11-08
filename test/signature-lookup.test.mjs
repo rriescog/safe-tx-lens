@@ -19,7 +19,7 @@ test('a unique 4byte candidate decodes arguments but remains explicitly unverifi
   assert.equal(call.decodeBasis, 'selector_candidate');
   assert.equal(call.decodeSource, undefined);
   const confidence = assessConfidence({ call, transaction: {}, checks: [], targetChecks: [] });
-  assert.ok(confidence.gaps.some(gap => /Decode every call selector/.test(gap.label)));
+  assert.ok(confidence.gaps.some(gap => gap.kind === 'decode' && /Match each decoded selector/.test(gap.label)));
   const risk = assessRisk({ call, actions: summarizeCalls(call), findings: [], effects: [], checks: [], transaction: { operation: 0, isExecuted: false } });
   assert.equal(risk.reviewPriority, 'high');
   assert.equal(risk.uncertain, true);

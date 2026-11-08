@@ -91,7 +91,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
     if (origin.protocol !== 'https:' || origin.origin !== publicOrigin || origin.username || origin.password) throw new Error('Public mode needs one HTTPS origin');
     if (rpcUrl) throw new Error('Public service cannot use a configured RPC URL');
     const credentials = await credentialReader();
-    if (publicMode && Object.entries(credentials).some(([name, value]) => value && (['SAFE_API_KEY', 'ETHERSCAN_API_KEY', 'TENDERLY_ACCESS_KEY', 'TENDERLY_MONITOR_ENV_FILE', 'RPC_URL'].includes(name) || name.startsWith('RPC_URL_')))) throw new Error('Public mode refuses owner API credentials');
+    if (publicMode && Object.entries(credentials).some(([name, value]) => value && (['SAFE_API_KEY', 'ETHERSCAN_API_KEY', 'OKLINK_API_KEY', 'TENDERLY_ACCESS_KEY', 'TENDERLY_MONITOR_ENV_FILE', 'RPC_URL'].includes(name) || name.startsWith('RPC_URL_')))) throw new Error('Public mode refuses owner API credentials');
     if (communityMode && !credentials.SAFE_API_KEY) throw new Error('Community mode requires a dedicated Safe API key');
     if (communityMode && (credentials.TENDERLY_MONITOR_ENV_FILE || credentials.RPC_URL || Object.entries(credentials).some(([name, value]) => name.startsWith('RPC_URL_') && value))) throw new Error('Community mode refuses monitor and private RPC configuration');
     simulationEnabled = Boolean(communityMode && credentials.TENDERLY_ACCESS_KEY && credentials.TENDERLY_ACCOUNT && credentials.TENDERLY_PROJECT);

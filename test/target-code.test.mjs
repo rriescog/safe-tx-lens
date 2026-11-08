@@ -157,7 +157,7 @@ test('Sourcify lookup distinguishes absence, outage, and a successful response',
     assert.equal(await sourcifyLookup('eth', TARGET), null);
     assert.match(urls[0], /\/1\/0x2222/);
     globalThis.fetch = async () => new Response('', { status: 503 });
-    await assert.rejects(() => sourcifyLookup('eth', TARGET), /Sourcify 503/);
+    await assert.rejects(() => sourcifyLookup('eth', TARGET), /Source API sourcify.dev 503/);
     globalThis.fetch = async () => new Response(JSON.stringify({ runtimeMatch: 'exact_match' }), { status: 200 });
     assert.equal((await sourcifyLookup('eth', TARGET)).runtimeMatch, 'exact_match');
   } finally { globalThis.fetch = original; }

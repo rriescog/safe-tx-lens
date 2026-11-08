@@ -303,7 +303,7 @@ export async function analyze(raw, network = 'eth', options = {}) {
     // Proxy ABI describes dispatch, not the functions that run through it.
     // A missing selector is meaningful only after checking the implementation.
     const effectiveTarget = target.proxy ? target.proxy.implementationCode : target;
-    const missing = effectiveTarget?.abiSelectors?.filter(selector => !selector.present && !(target.proxy && target.abiSelectors?.some(outer => outer.selector === selector.selector && outer.present))) ?? [];
+    const missing = ['verified', 'verified_current'].includes(effectiveTarget?.status) ? effectiveTarget.abiSelectors?.filter(selector => !selector.present && !(target.proxy && target.abiSelectors?.some(outer => outer.selector === selector.selector && outer.present))) ?? [] : [];
     const planned = target.plannedImplementationCode;
     const plannedCoversMissing = missing.length && ['verified', 'verified_current'].includes(planned?.status) && missing.every(selector => planned.abiSelectors?.some(item => item.selector === selector.selector && item.present));
     if (plannedCoversMissing) findings.push({ severity: 'info', code: 'UPGRADE_TARGET_ABI_CONDITIONAL', path: target.address, message: `The missing selector exists in the verified proposed implementation ${target.plannedImplementation}. This interpretation depends on the upgrade executing before the call.` });
