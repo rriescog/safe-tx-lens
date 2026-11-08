@@ -125,6 +125,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
     const appIcon = req.method === 'GET' ? /^\/web\/icons\/icon-(192|512)\.png$/.exec(req.url ?? '') : null;
     if (appIcon) return reply(res, 200, await readFile(fileURLToPath(new URL(`../web/icons/icon-${appIcon[1]}.png`, import.meta.url))), 'image/png');
     if (req.method === 'GET' && req.url === '/api/network-coverage') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/network-coverage.json', import.meta.url)), 'utf8'), 'application/json');
+    if (req.method === 'GET' && req.url === '/api/network-examples') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/network-examples.json', import.meta.url)), 'utf8'), 'application/json');
     // Query strings identify a UI deep link, not a different route. Keep the
     // root page available for /?hash=... and even an empty trailing ?.
     if (req.method === 'GET' && new URL(req.url ?? '/', 'http://localhost').pathname === '/') return reply(res, 200, html, 'text/html');

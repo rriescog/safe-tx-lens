@@ -26,7 +26,9 @@ test('recommended projects appear only in the dark footer', async () => {
   assert.match(main, /hosting, bandwidth, monitoring/);
   assert.match(main, /tier-diamond[\s\S]*tier-gold[\s\S]*tier-silver[\s\S]*tier-bronze/);
   assert.match(main, /Infrastructure support also counts/);
-  assert.doesNotMatch(main, /data-network="sep"/);
+  assert.match(main, /data-network="sep"/);
+  assert.match(main, /data-network="amoy"/);
+  assert.match(main, /data-network="imx"/);
   assert.match(main, /Polygon Amoy · onchain and JSON only/);
   assert.match(main, /Choose JSON file/);
   assert.match(main, /drag and drop one JSON file/);
@@ -35,6 +37,7 @@ test('recommended projects appear only in the dark footer', async () => {
   assert.match(main, /report it on GitHub/);
   assert.match(html, /\/web\/vendor\/cytoscape\.min\.js/);
   assert.match(footer, /Sponsor inquiries on X/);
+  assert.match(footer, /href="https:\/\/github\.com\/web3security\/safe-tx-lens\/blob\/main\/docs\/MCP\.md"[^>]*>Use the MCP server/);
   assert.doesNotMatch(main, /github\.com\/rriescog/);
 });
 

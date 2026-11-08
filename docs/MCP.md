@@ -35,12 +35,13 @@ Keep `SAFE_API_KEY`, Tenderly credentials, and any `RPC_URL_<NETWORK>` in the lo
 | `list_pending` | `safe`, optional `network`, `rpcUrl`, `simulate` | Up to 20 unexecuted records; stale nonces are identified; API confirmations are not independently verified |
 | `list_history` | `safe`, optional `network`, `rpcUrl`, `simulate` | Up to 20 executed records; a recent RPC fallback may cover only a bounded block range |
 
-Example prompts to an MCP client:
+After registering the server, restart your MCP client so it discovers the tools. Try a published, executed Polygon PoS Council transaction on Ethereum:
 
 ```text
-Use safe-tx-lens.inspect on the Safe URL https://app.safe.global/home?safe=eth:0x... and show pending nonces.
-Use safe-tx-lens.inspect_execution on 0x... on network eth; explain the decoded calls and evidence gaps.
+Use safe-tx-lens.inspect with input 0x13b5c50574eb3eed73b3538843699f3080cd5d847818ae8364e7af4dd1b4a8c3 and network eth. Show the Safe address, nonce, nested calls, source of each check, and remaining evidence gaps.
 ```
+
+For a queued proposal, call `list_pending` with its Safe address and network, then pass one returned Safe hash to `inspect`. A Safe transaction hash identifies the signed fields, but it does not contain the network or Safe address; discovery depends on a reachable proposal source. If a lookup fails, provide the Safe URL or exported transaction JSON. A local MCP client can inspect JSON without sending it to a hosted Safe Tx Lens instance.
 
 The local server can run a Tenderly simulation only when `simulate: true` and credentials are configured. A queued proposal without enough signatures may receive a clearly marked conditional preview using a temporary 1-of-N threshold override inside Tenderly, after checking current Safe storage and an owner via RPC. It cannot prove that the actual Safe execution will succeed. Never infer approval from that preview.
 

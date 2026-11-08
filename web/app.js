@@ -60,6 +60,37 @@ fetch('/api/public-config').then(response => response.ok ? response.json() : nul
     row.append(label, address, copy); host.append(row);
   }
 }).catch(() => {});
+// Every sample goes through the ordinary live inspector. Cards without a
+// published sample select the network and ask for the visitor's own input.
+fetch('/api/network-examples').then(response => response.ok ? response.json() : null).then(catalog => {
+  if (!Array.isArray(catalog?.networks)) return;
+  const byNetwork = new Map(catalog.networks.map(row => [row.network, row.examples]));
+  for (const card of document.querySelectorAll('.network-grid [data-network]')) {
+    const samples = byNetwork.get(card.dataset.network) ?? [];
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'network-try';
+    button.textContent = samples.length ? `Try ${samples[0].label}` : 'Try with your transaction';
+    button.title = samples.length ? `Review nonce ${samples[0].nonce} live; uses the shared request budget` : 'No verified public example yet; provide your own transaction';
+    button.addEventListener('click', () => {
+      const sample = samples[0];
+      if (!sample) {
+        network.value = card.dataset.network;
+        input.focus();
+        document.getElementById('inspect-form').scrollIntoView?.({ behavior: 'smooth' });
+        return;
+      }
+      importedJson = null;
+      inputMode.value = 'hash';
+      input.value = sample.hash;
+      network.value = card.dataset.network;
+      updateWizard();
+      document.getElementById('inspect-form').scrollIntoView?.({ behavior: 'smooth' });
+      inspect({ overrideInput: sample.hash, overrideNetwork: card.dataset.network });
+    });
+    card.append(button);
+  }
+}).catch(() => {});
 fetch('/api/network-coverage').then(response => response.ok ? response.json() : null).then(snapshot => {
   if (!snapshot?.networks || !Array.isArray(snapshot.networks)) return;
   const note = document.getElementById('network-coverage-note');

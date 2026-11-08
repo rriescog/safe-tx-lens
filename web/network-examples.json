@@ -1,0 +1,18 @@
+{
+  "checkedAt": "2026-11-09",
+  "networks": [
+    {"network":"eth","examples":[{"label":"Timelock batch","hash":"0x13b5c50574eb3eed73b3538843699f3080cd5d847818ae8364e7af4dd1b4a8c3","safe":"0xFa7D2a996aC6350f4b56C043112Da0366a59b74c","nonce":244},{"label":"Validator action","hash":"0x48b3ddad40b2c6a2144cbeaeec3d258bc0d94f32896f46d7c90780dcefba04a4","safe":"0xFa7D2a996aC6350f4b56C043112Da0366a59b74c","nonce":242}]},
+    {"network":"gno","examples":[{"label":"Bridge governor batch","hash":"0xdd6baaa55bb64699f2b7a70e772f320bfbff1daf22292eff7c7021fcaba1a3d0","safe":"0x7a48Dac683DA91e4faa5aB13D91AB5fd170875bd","nonce":103}]},
+    {"network":"pol","examples":[{"label":"Safe owner rotation","hash":"0x3dafb0e25d77f378cf361e6d6c823c0e56ba121e83eebe30954a997a4ed70d78","safe":"0x0c54a0bccf5079478a144dbae1afcb4fedf7b263","nonce":385}]},
+    {"network":"arb1","examples":[{"label":"Security Council module","hash":"0x7bcc49dac788990018d8715a05502991ead142de209f3c8bc0adc72e252a67bb","safe":"0x423552c0F05baCCac5Bfa91C6dCF1dc53a0A1641","nonce":0},{"label":"Security Council owners","hash":"0xc4f42d8ad1776a4cd0572d3132a31f9557a4acdb6d5b680eaf7e4c5f4157b66a","safe":"0x423552c0F05baCCac5Bfa91C6dCF1dc53a0A1641","nonce":1}]},
+    {"network":"oeth","examples":[{"label":"Admin batch","hash":"0x160528fb1e49420410350157c0dc8ea3018a3d41de82a060d282d1d511779000","safe":"0x0d30A563e38Fe2926b37783A046004A7869adE6C","nonce":65}]},
+    {"network":"base","examples":[{"label":"Admin batch","hash":"0xbccedfe5716dced33225f385d6b8d43343fa78833841a8b2ec975813e784360c","safe":"0x7Da95539762Dd11005889F6B72a6674A4888B56d","nonce":91}]},
+    {"network":"bnb","examples":[{"label":"Safe owner rotation","hash":"0x6b2b5668f54ccc47e1f16ed54a1b88ecaf869d7ec2c335579d17b2f28d722e72","safe":"0xb4222155CDB309Ecee1bA64d56c8bAb0475a95b0","nonce":32}]},
+    {"network":"avax","examples":[{"label":"Safe owner rotation","hash":"0x632316e3f4e3d96f906d3cf101443114665830efe9d0972baa883982847e32be","safe":"0xB2Bb1425514Ab5903BE6bBDb6b44958e71103561","nonce":32}]},
+    {"network":"kat","examples":[{"label":"Security multisig owners","hash":"0x4e1cf453931aeef549ce1899b505c12fc7dd3a028d2cc81b575fddc293e9a37a","safe":"0x9d851f8b8751c5fbc09b9e74e6e68e9950949052","nonce":62}]},
+    {"network":"xlayer","examples":[{"label":"Safe owner rotation","hash":"0x11dec0605d644c4b9cd4782e10a9b5eb944109f8b702a68d61bd25d40e50f30a","safe":"0x449DEFBac8dc846fE51C6f0aBD92d0F1e1b2b3E5","nonce":22}]},
+    {"network":"sep","examples":[{"label":"Safe owner rotation","hash":"0x2b4baee3bcc47636114fc3e54e686c0fc23898a39d7ea4fa72935007ad9a8024","safe":"0x1fc98b58aa44b6987b5490006afd33de3ac69674","nonce":70}]},
+    {"network":"amoy","examples":[]},
+    {"network":"imx","examples":[]}
+  ]
+}
