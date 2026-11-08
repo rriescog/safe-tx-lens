@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { resolve as pathResolve } from 'node:path';
 import vm from 'node:vm';
+import { Interface } from 'ethers';
 import { analyze } from '../src/analyze.mjs';
 import { analyzeBuilderExport } from '../src/builder.mjs';
 
@@ -147,6 +148,21 @@ test('the real nested PoS Council example renders its ABI call separately from t
   assert.match(html, /Decoded signature: forceUnstake\(uint256\)/);
   assert.match(html, /Interpretation: Force unstake validator #106/);
   assert.doesNotMatch(html, /forceUnstakeValidator/);
+});
+
+test('an arbitrary verified ABI function flows through analysis into the UI', async () => {
+  const page = ui();
+  const safe = '0x1111111111111111111111111111111111111111';
+  const target = '0x2222222222222222222222222222222222222222';
+  const abi = ['function rotateTreasury(address newTreasury,uint256 epoch,bool freeze)'];
+  const data = new Interface(abi).encodeFunctionData('rotateTreasury', [safe, 42, true]);
+  const provider = { getNetwork: async () => ({ chainId: 1n }), getCode: async () => '0x60016000', getStorage: async () => '0x' };
+  const sourceLookup = async () => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: '0x60016000' }, abi });
+  page.context.sample = await analyze({ safe, to: target, nonce: 1, value: '0', data, operation: 0 }, 'eth', { fetchState: false, verifyTargets: true, targetProvider: provider, sourceLookup });
+  const html = page.evaluate('reportHtml(sample)');
+  assert.match(html, /rotateTreasury\(newTreasury: 0x1111111111111111111111111111111111111111, epoch: 42, freeze: true\)/);
+  assert.match(html, /Decoded signature: rotateTreasury\(address,uint256,bool\)/);
+  assert.match(html, /Verified ABI · verified bytecode at inspected block/);
 });
 
 test('public UI disables wallet monitoring and labels its owner-key limitations', () => {
