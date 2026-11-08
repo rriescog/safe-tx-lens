@@ -39,6 +39,19 @@ test('recommended projects appear only in the dark footer', async () => {
   assert.match(footer, /Sponsor inquiries on X/);
   assert.match(footer, /href="https:\/\/github\.com\/web3security\/safe-tx-lens\/blob\/main\/docs\/MCP\.md"[^>]*>Use the MCP server/);
   assert.doesNotMatch(main, /github\.com\/rriescog/);
+  assert.doesNotMatch(main, /Safe queue \+ history|RPC available/);
+  assert.match(main, /Amoy and Immutable zkEVM can attempt execution-hash or supplied JSON review/);
+});
+
+test('network badges describe only the checks performed by the probe', () => {
+  const page = ui();
+  const full = page.evaluate("networkCoverageText({ pending: 'available', history: 'available', rpc: 'available', indexing: 'available' })");
+  assert.equal(full, 'Safe list APIs responded · RPC chain ID matched');
+  assert.doesNotMatch(full, /queue \+ history|RPC available/);
+  const limited = page.evaluate("networkCoverageText({ pending: 'not_available', history: 'not_available', rpc: 'available', indexing: 'not_available' })");
+  assert.equal(limited, 'Configured Safe list API returned 404 · RPC chain ID matched');
+  const lagging = page.evaluate("networkCoverageText({ pending: 'available', history: 'available', rpc: 'timeout', indexing: 'indexer_lagging' })");
+  assert.match(lagging, /RPC chain ID not confirmed · Indexer behind/);
 });
 
 test('call graph builds a Safe root and call edges while the text path stays available', async () => {

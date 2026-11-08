@@ -1,6 +1,10 @@
 # Network endpoint coverage
 
-Last live probe: **2026-11-07 18:23 UTC**. This is a dated observation, not a promise of future availability.
+Last live endpoint probe: **2026-11-08 23:49 UTC**. This is a dated observation, not a promise of future availability. The bounded probe made **39 authenticated Safe requests**, three per named network, and one `eth_chainId` request to each configured public RPC. It did not request any historical state, transaction receipt, trace, verified source, or Tenderly simulation. The `Safe list APIs responded` and `RPC chain ID matched` labels in the UI describe only those checks.
+
+Eleven networks returned a synced Safe indexer and valid pending and executed list responses for an **empty test address**; Polygon Amoy and Immutable zkEVM returned HTTP 404 for the configured Safe endpoints. All thirteen RPCs returned the expected chain ID. On 2026-11-09 local time, thirteen published example Safe hashes across the eleven networks with Safe list endpoints were also fetched individually; their Safe address, nonce, and locally calculated EIP-712 hash matched the catalog. That separate check confirms those specific examples, not general queue coverage or contract behavior. Amoy and Immutable zkEVM have no published example in the UI.
+
+Earlier probe details follow for comparison. Their results are historical and should not be read as fresh checks.
 
 The original probe made **30 authenticated Safe Transaction Service requests**, paced by 600 ms and capped at three per named network. It stopped automatically if Safe returned HTTP 429 or its remaining quota fell below 100. Nine public RPC endpoints were checked once each with `eth_chainId`. The unavailable legacy chain from that probe is excluded from the supported network list. The Safe key and quota headers are not published in the UI snapshot.
 
@@ -25,7 +29,7 @@ Two Agglayer rollups were added after that probe. At **2026-11-07 12:14 UTC**, t
 
 The pending and history calls used the zero address with `limit=1`. Their empty `results` arrays prove those endpoints answered with the expected list format; they do **not** prove that a particular Safe or transaction exists, that a pending proposal is recoverable, or that decoding and historical state verification work for every contract.
 
-One separate end-to-end sample used the public [Polygon PoS Council Safe](https://docs.polygon.technology/pos/reference/commit-chain-multisigs) on Ethereum with `limit=1` for each scope. Safe Transaction Service returned pending nonce 243 and executed nonce 244; both locally recomputed Safe hashes matched the returned hashes. This sample spent four additional Safe requests and does not validate the other eight available networks' individual transactions.
+At the time of that earlier probe, one separate sample used the public [Polygon PoS Council Safe](https://docs.polygon.technology/pos/reference/commit-chain-multisigs) on Ethereum with `limit=1` for each scope. Safe Transaction Service returned pending nonce 243 and executed nonce 244; both locally recomputed Safe hashes matched the returned hashes. This sample spent four additional Safe requests. The newer example check described above covers published transaction hashes on eleven networks, but does not establish that every Safe or queued proposal is retrievable.
 
 For another EVM chain ID, the tool can ask Safe Client Gateway for the selected chain and recompute the Safe hash if complete transaction fields are returned. Such chains are **not** part of this probe or auto-discovery and must not be shown as covered until tested.
 
@@ -37,4 +41,4 @@ npm run check:networks -- --live --snapshot web/network-coverage.json
 
 Safe counts [one API unit per HTTP request](https://docs.safe.global/core-api/api-authentication). The probe reads `X-RateLimit-Remaining`, never retries a 429, and does not write credentials to the snapshot.
 
-Immutable zkEVM (chain 13371) was added as an explicit onchain/JSON integration after an `eth_chainId` response of `0x343b` from its official public RPC on 2026-11-07. Safe proposal indexing and queue/history endpoints were not verified for this chain; do not treat it as full Safe Transaction Service coverage. Polygon Amoy and Immutable zkEVM returned HTTP 404 from the configured Safe Transaction Service endpoints in the 2026-11-07 live probe; their UI choices are limited to onchain execution hashes and supplied JSON. The old Polygon-operated Amoy RPC was retired; PublicNode returned chain ID 80002 on 2026-11-07. Neither network can currently retrieve a pending Safe hash or queue through this tool.
+Immutable zkEVM (chain 13371) was added as an onchain/JSON integration after an `eth_chainId` response of `0x343b` from its public RPC on 2026-11-07. Polygon Amoy and Immutable zkEVM returned HTTP 404 from the configured Safe Transaction Service endpoints again in the latest probe; their UI choices attempt onchain execution-hash or supplied JSON review, subject to RPC availability. The old Polygon-operated Amoy RPC was retired; PublicNode returned chain ID 80002 in both probes. Neither network currently retrieves a pending Safe hash or queue through this tool.

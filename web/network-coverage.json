@@ -1,6 +1,6 @@
 {
-  "checkedAt": "2026-11-07T18:21:36.629Z",
-  "method": "Authenticated Safe indexing, pending and history endpoint probe with an empty address; public RPC eth_chainId. Amoy RPC separately rechecked after replacing retired endpoint.",
+  "checkedAt": "2026-11-08T23:49:33.198Z",
+  "method": "Authenticated Safe Transaction Service indexing, pending and history endpoints with an empty test address; RPC eth_chainId",
   "networks": [
     {
       "network": "eth",

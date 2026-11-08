@@ -91,21 +91,30 @@ fetch('/api/network-examples').then(response => response.ok ? response.json() : 
     card.append(button);
   }
 }).catch(() => {});
+function networkCoverageText(row) {
+  const lists = row.pending === 'available' && row.history === 'available'
+    ? 'Safe list APIs responded'
+    : row.pending === 'not_tested' || row.history === 'not_tested'
+      ? 'Safe list APIs not tested'
+      : row.pending === 'not_available' && row.history === 'not_available'
+        ? 'Configured Safe list API returned 404'
+        : 'Safe list APIs inconclusive';
+  const rpc = row.rpc === 'available' ? 'RPC chain ID matched' : 'RPC chain ID not confirmed';
+  return `${lists} · ${rpc}${row.indexing === 'indexer_lagging' ? ' · Indexer behind' : ''}`;
+}
 fetch('/api/network-coverage').then(response => response.ok ? response.json() : null).then(snapshot => {
   if (!snapshot?.networks || !Array.isArray(snapshot.networks)) return;
   const note = document.getElementById('network-coverage-note');
   const checked = new Date(snapshot.checkedAt);
-  note.textContent = `Endpoint probe: ${Number.isNaN(checked.getTime()) ? 'date unknown' : checked.toLocaleDateString()} · statuses can change. An empty test address checks endpoint availability, not a real Safe.`;
+  const date = Number.isNaN(checked.getTime()) ? 'date unknown' : checked.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+  note.textContent = `Checked ${date}. Safe list APIs were queried with an empty address; RPCs were asked only for their chain ID. This does not establish that a specific Safe, past block, or simulation is available. Try a sample for a transaction-level check.`;
   const byNetwork = new Map(snapshot.networks.map(row => [row.network, row]));
   for (const card of document.querySelectorAll('.network-grid [data-network]')) {
     const row = byNetwork.get(card.dataset.network);
     if (!row) continue;
     const label = document.createElement('span'); label.className = 'network-status';
-    const queue = row.pending === 'available' && row.history === 'available';
-    const rpc = row.rpc === 'available';
-    const safeCoverage = queue ? 'Safe queue + history' : row.pending === 'not_tested' || row.history === 'not_tested' ? 'Safe queue not tested' : 'Safe source unavailable';
-    label.textContent = `${safeCoverage} · ${row.indexing === 'indexer_lagging' ? 'Indexer behind' : rpc ? 'RPC available' : 'RPC not verified'}`;
-    if (!queue || !rpc || row.indexing !== 'available') label.classList.add('limited');
+    label.textContent = networkCoverageText(row);
+    if (row.pending !== 'available' || row.history !== 'available' || row.rpc !== 'available' || row.indexing !== 'available') label.classList.add('limited');
     card.append(label);
   }
 }).catch(() => {});
