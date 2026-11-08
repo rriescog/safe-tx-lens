@@ -339,7 +339,8 @@ export async function analyze(raw, network = 'eth', options = {}) {
   const risk = assessRisk({ call, actions, findings, effects, checks, simulation, transaction: tx });
   const confidence = assessConfidence({ call, checks, targetChecks, simulation, transaction: tx });
   const status = checks.some(c => c.status === 'fail') ? 'BLOCK' : findings.some(f => f.severity === 'critical') || effects.some(e => e.severity === 'critical') ? 'REVIEW' : 'INSPECT';
-  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, risk, confidence, checks, targetChecks, targetVerificationAttempted: options.verifyTargets === true, rpc: options.rpcProvenance ? { kind: options.rpcProvenance.kind, label: options.rpcProvenance.label } : { kind: options.rpcUrl ? 'custom' : 'none', label: options.rpcUrl ? 'Custom RPC configured for this request' : 'No RPC used' }, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
+  const executionStatus = tx.isExecuted ? tx.isSuccessful === true ? 'executed_success' : tx.isSuccessful === false ? 'executed_failure' : 'executed_outcome_unknown' : 'execution_not_established';
+  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, executionStatus, risk, confidence, checks, targetChecks, targetVerificationAttempted: options.verifyTargets === true, rpc: options.rpcProvenance ? { kind: options.rpcProvenance.kind, label: options.rpcProvenance.label } : { kind: options.rpcUrl ? 'custom' : 'none', label: options.rpcUrl ? 'Custom RPC configured for this request' : 'No RPC used' }, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
 }
 
 export async function analyzeHash(hash, network, options = {}) {
@@ -347,5 +348,12 @@ export async function analyzeHash(hash, network, options = {}) {
   if (raw.safeTxHash?.toLowerCase() !== hash.toLowerCase()) throw new Error('Safe API returned a different hash');
   if (options.expectedSafe && raw.safe?.toLowerCase() !== options.expectedSafe.toLowerCase()) throw new Error('Safe URL address does not match transaction');
   const report = await analyze(raw, network, options);
-  return { ...report, evidence: { source: raw.lookupSource, retrievedAt: new Date().toISOString(), requestedHash: hash } };
+  return { ...report, executionStatus: executionStatusWithSource(report, raw.lookupSource), evidence: { source: raw.lookupSource, retrievedAt: new Date().toISOString(), requestedHash: hash } };
+}
+
+export function executionStatusWithSource(report, source) {
+  if (report.transaction.isExecuted) return report.executionStatus;
+  if (source === 'safe_api_untrusted') return 'unsigned_reported';
+  if (source === 'safe_api' || source === 'safe_gateway') return 'pending_reported';
+  return report.executionStatus;
 }

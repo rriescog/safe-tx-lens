@@ -59,6 +59,8 @@ function printReport(result, json) {
   }
   for (const report of reports) {
     console.log(`\n${report.status} ${report.hash} (${report.network})`);
+    const execution = report.executionStatus === 'executed_success' ? 'EXECUTED · SAFE SUCCESS' : report.executionStatus === 'executed_failure' ? 'EXECUTED · SAFE CALL FAILED' : report.executionStatus === 'executed_outcome_unknown' ? 'EXECUTED · OUTCOME UNKNOWN' : ['safe_api', 'safe_gateway'].includes(report.evidence?.source) ? 'PENDING · NO EXECUTION REPORTED BY SAFE SERVICE' : report.evidence?.source === 'safe_api_untrusted' ? 'UNSIGNED · NO EXECUTION REPORTED' : 'EXECUTION NOT ESTABLISHED';
+    console.log(`  EXECUTION ${execution}${report.evidence?.source === 'onchain_execution' ? ' · CONFIRMED BY ONCHAIN SAFE EVENT' : ''}`);
     if (report.evidence?.source) console.log(`  SOURCE ${report.evidence.source}${report.evidence.retrievedAt ? ` · retrieved ${report.evidence.retrievedAt}` : ''}`);
     if (report.evidence?.requestedHash) console.log(`  INPUT HASH ${report.evidence.requestedHash} · matched the returned Safe transaction identifier`);
     console.log(`  RISK ${report.risk.reviewPriority.toUpperCase()} review priority · ${report.risk.impactLevel.toUpperCase()} potential impact (${report.risk.basis})`);

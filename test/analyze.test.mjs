@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Interface } from 'ethers';
 import { readFile } from 'node:fs/promises';
-import { analyze, calculateHash, classifyEffects } from '../src/analyze.mjs';
+import { analyze, calculateHash, classifyEffects, executionStatusWithSource } from '../src/analyze.mjs';
 import { decodeCall, unpackMultiSend } from '../src/decode.mjs';
 import { parseInput } from '../src/inputs.mjs';
 import { analyzeBuilderExport, compareCalls } from '../src/builder.mjs';
@@ -19,6 +19,22 @@ test('an offline transaction reports its computed hash without claiming remote v
   assert.equal(report.checks[0].status, 'unverified');
   assert.equal(report.checks[0].method, 'local_eip712');
   assert.equal(report.simulation, null);
+  assert.equal(report.executionStatus, 'execution_not_established');
+});
+
+test('machine-readable execution state never treats an unknown outcome as failure', async () => {
+  for (const [isSuccessful, expected] of [[true, 'executed_success'], [false, 'executed_failure'], [null, 'executed_outcome_unknown']]) {
+    const report = await analyze({ ...tx, isExecuted: true, isSuccessful }, 'eth', { fetchState: false });
+    assert.equal(report.executionStatus, expected);
+  }
+});
+
+test('Safe service evidence distinguishes a reported pending or unsigned record from imported data', async () => {
+  const report = await analyze(tx, 'eth', { fetchState: false });
+  assert.equal(executionStatusWithSource(report, 'safe_api'), 'pending_reported');
+  assert.equal(executionStatusWithSource(report, 'safe_gateway'), 'pending_reported');
+  assert.equal(executionStatusWithSource(report, 'safe_api_untrusted'), 'unsigned_reported');
+  assert.equal(executionStatusWithSource(report, 'tenderly_monitor'), 'execution_not_established');
 });
 
 test('a mismatched supplied hash blocks signing', async () => {

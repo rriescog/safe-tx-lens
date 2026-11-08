@@ -1,4 +1,4 @@
-import { analyze, analyzeHash } from './analyze.mjs';
+import { analyze, analyzeHash, executionStatusWithSource } from './analyze.mjs';
 import { parseInput } from './inputs.mjs';
 import { fetchSafeTransactions, safeGet } from './safe-api.mjs';
 import { analyzeExecutionHash, contractPresence, discoverExecutionNetworks, fetchRecentExecutions, findRecentExecutionBySafeHash, rpcDetailsFor } from './onchain.mjs';
@@ -188,7 +188,7 @@ export async function resolve(input, network = 'eth', options = {}) {
       if (part === 'pending' && Number(page.safe?.threshold) === 1 && !page.transactions.length) warnings.push('No published 1/1 proposal was returned. If the first signature has not been submitted, import the complete Safe transaction JSON to review it before signing; a hash alone cannot reveal unindexed calldata.');
       for (const tx of page.transactions) {
         const report = await analyze(tx, parsed.network, { ...settings, verifyTargets: false, decodeCandidates: false, enrichTokens: false, safeInfo: page.safe });
-        reports.push({ ...report, evidence: { source: page.source, retrievedAt: new Date().toISOString() } });
+        reports.push({ ...report, executionStatus: executionStatusWithSource(report, page.source), evidence: { source: page.source, retrievedAt: new Date().toISOString() } });
       }
     } catch (error) {
       if (error.message.includes('Safe API 404') && await contractPresence(parsed.address, parsed.network, { rpcUrl: settings.rpcUrl, fetchImpl: options.fetchImpl }) === 'absent') {

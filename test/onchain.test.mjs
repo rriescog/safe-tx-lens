@@ -85,6 +85,14 @@ test('onchain execution reconstructs calldata and nonce before accepting a Safe 
   assert.equal(recent.reports[0].evidence.executionHash, EXECUTION_HASH);
 });
 
+test('Safe ExecutionFailure event is distinct from a missing or unknown outcome', async () => {
+  const failed = { ...log, topics: [id('ExecutionFailure(bytes32,uint256)'), safeHash] };
+  const report = await analyzeExecutionHash(EXECUTION_HASH, 'eth', { provider: provider({ getTransactionReceipt: async () => ({ ...receipt, logs: [failed] }) }), rpcUrl: '', fetchState: false });
+  assert.equal(report.evidence.source, 'onchain_execution');
+  assert.equal(report.transaction.isSuccessful, false);
+  assert.equal(report.executionStatus, 'executed_failure');
+});
+
 test('onchain reconstruction rejects the wrong chain, missing Safe event, and unmatchable nonce', async () => {
   const base = { rpcUrl: '', fetchState: false };
   await assert.rejects(() => analyzeExecutionHash(EXECUTION_HASH, 'eth', { ...base, provider: provider({ getNetwork: async () => ({ chainId: 100n }) }) }), /RPC chain/);

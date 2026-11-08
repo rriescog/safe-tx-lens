@@ -64,7 +64,8 @@ test('queue separates stale unexecuted records from the current nonce', async ()
   const html = page.evaluate('queueHtml(sample)');
   assert.match(html, /1 at or above reported Safe nonce 8 · 1 obsolete in this page/);
   assert.match(html, /1 obsolete proposals in this page · nonce below 8/);
-  assert.match(html, /Obsolete nonce · cannot execute now/);
+  assert.match(html, /Unexecuted · obsolete nonce/);
+  assert.match(html, /Pending · not executed/);
   assert.match(html, /data-index="0"/);
   assert.match(html, /data-index="1"/);
   assert.match(html, /potential impact if executed, not whether a proposal is malicious/);
@@ -86,12 +87,33 @@ test('unsigned 1/1 Safe records are visibly distinguished from approved proposal
   report.evidence = { source: 'safe_api_untrusted', retrievedAt: 'now' };
   const queue = { kind: 'queue', scope: 'pending', source: 'safe_api_untrusted', network: 'eth', safe: tx.safe, reports: [report], warnings: ['Unsigned 1/1 record'] };
   page.context.sample = queue;
-  assert.match(page.evaluate('queueHtml(sample)'), /Unsigned and untrusted/);
+  assert.match(page.evaluate('queueHtml(sample)'), /Unsigned record/);
   assert.match(page.evaluate('queueHtml(sample)'), /Unsigned 1\/1 record/);
   page.context.sample = report;
   assert.match(page.evaluate('verificationHtml(sample)'), /unsigned, untrusted record/);
   assert.match(page.evaluate('reportHtml(sample)'), /Fetched live from Safe Transaction Service \(unsigned record\)/);
-  assert.match(page.evaluate('reportHtml(sample)'), /Unsigned record · no approval verified/);
+  assert.match(page.evaluate('reportHtml(sample)'), /Unsigned record/);
+});
+
+test('lifecycle status separates Safe success, Safe failure, unknown outcome and unexecuted data', async () => {
+  const page = ui();
+  const base = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: 1, value: '0', data: '0x', operation: 0 };
+  const report = await analyze(base, 'eth', { fetchState: false });
+  page.context.sample = { ...report, evidence: { source: 'safe_api' } };
+  assert.equal(page.evaluate('lifecycleStatus(sample).label'), 'Pending · not executed');
+  assert.match(page.evaluate('reportHtml(sample)'), /Pending · not executed/);
+  page.context.sample = { ...report, evidence: { source: 'onchain_execution' }, transaction: { ...report.transaction, isExecuted: true, isSuccessful: true } };
+  assert.equal(page.evaluate('lifecycleStatus(sample).label'), 'Executed successfully');
+  assert.match(page.evaluate('lifecycleStatus(sample).detail'), /Safe ExecutionSuccess event/);
+  page.context.sample.transaction.isSuccessful = false;
+  assert.equal(page.evaluate('lifecycleStatus(sample).label'), 'Executed · Safe call failed');
+  assert.match(page.evaluate('reportHtml(sample)'), /Executed · Safe call failed/);
+  assert.match(page.evaluate('lifecycleStatus(sample).detail'), /outer Ethereum transaction may still have succeeded/);
+  page.context.sample.transaction.isSuccessful = null;
+  assert.equal(page.evaluate('lifecycleStatus(sample).label'), 'Executed · outcome unknown');
+  assert.doesNotMatch(page.evaluate('reportHtml(sample)'), /Executed · Safe call failed/);
+  page.context.sample = report;
+  assert.equal(page.evaluate('lifecycleStatus(sample).label'), 'Execution not established');
 });
 
 function ui({ publicMode = false, search = '', hostname = '127.0.0.1' } = {}) {

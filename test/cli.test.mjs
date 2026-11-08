@@ -40,6 +40,7 @@ test('CLI prints one transaction, a Safe queue, and one watch poll from a stubbe
   const report = cliStub('inspect', txPath, '--network', 'eth');
   assert.equal(report.status, 0, report.stderr);
   assert.match(report.stdout, /RISK/);
+  assert.match(report.stdout, /EXECUTION EXECUTION NOT ESTABLISHED/);
   assert.match(report.stdout, /SOURCE|DELEGATECALL|CALL/);
   assert.match(report.stdout, /\[local_eip712\]/);
   const safe = '0xFa7D2a996aC6350f4b56C043112Da0366a59b74c';

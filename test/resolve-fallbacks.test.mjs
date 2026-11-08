@@ -69,9 +69,11 @@ test('Safe services take priority over a configured Tenderly snapshot and defaul
     const options = { rpcUrl: '', verifyTargets: false, fetchState: false, monitorFallback: true };
     const report = await resolve(tx.safeTxHash, 'eth', options);
     assert.equal(report.evidence.source, 'safe_api');
+    assert.equal(report.executionStatus, 'pending_reported');
     assert.equal(report.checks[0].status, 'pass');
     const queue = await resolve(tx.safe, 'eth', options);
     assert.equal(queue.source, 'safe_api');
+    assert.equal(queue.reports[0].executionStatus, 'pending_reported');
     assert.equal(queue.reports[0].checks[0].status, 'pass');
     assert.equal(monitorCalls, 0);
   } finally { globalThis.fetch = original; }
