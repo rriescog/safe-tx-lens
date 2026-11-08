@@ -396,7 +396,7 @@ function queueHtml(result) {
   };
   const count = obsolete.length ? `${actionable.length} at or above reported Safe nonce ${currentNonce} · ${obsolete.length} obsolete in this page` : `${rows.length} shown`;
   const header = `<div class="queue-header"><h2>${title}</h2><div class="meta mono">${esc(result.safe)} · ${esc(result.networks?.join(', ') ?? result.network)} · ${count} · ${esc(result.source === 'safe_api_untrusted' ? 'Safe Transaction Service · unsigned record' : result.source)}${result.truncated ? ' · more may exist' : ''}</div></div>`;
-  const explanation = rows.length && result.scope !== 'history' ? `<div class="queue-explanation">“Unexecuted” means the source has no execution recorded. A nonce below the reported current Safe nonce cannot execute if that nonce is accurate; confirm it independently onchain. Priority labels describe potential impact if executed, not whether a proposal is malicious.</div>` : '';
+  const explanation = rows.length ? `<div class="queue-explanation">This list is a preview from the transaction source. Select a transaction to check its target code through RPC and review the full call path.${result.scope !== 'history' ? ' “Unexecuted” means the source has no execution recorded. A nonce below the reported current Safe nonce cannot execute if that nonce is accurate; confirm it independently onchain. Priority labels describe potential impact if executed, not whether a proposal is malicious.' : ''}</div>` : '';
   const empty = result.availability === 'absent' ? `<div class="empty"><h2>No Safe contract on ${esc(result.network)}</h2><p>The selected RPC found no bytecode at this address on this network. Check the chain prefix in your Safe URL; this tool will not silently switch chains.</p></div>` : result.availability === 'unavailable' ? `<div class="empty"><h2>Queue source unavailable</h2><p>${result.source === 'tenderly_storage' ? 'The monitor JSON did not contain complete transaction details for this filter.' : 'Neither Safe Transaction Service nor Safe Client Gateway returned the offchain proposals. The notice above shows both responses.'}</p></div>` : `<div class="empty"><h2>No ${esc(title.toLowerCase())} in the returned range</h2><p>Check the coverage notice above before interpreting an empty list.</p></div>`;
   const staleSection = obsolete.length ? `<details class="obsolete-list"><summary>${obsolete.length} obsolete proposals in this page · nonce below ${currentNonce}</summary><p>Kept for historical review. They are still marked unexecuted by the service, but their nonce is below the current nonce reported by the same source.</p>${obsolete.map(row => rowHtml(row, true)).join('')}</details>` : '';
   return `${header}${choices}${notices}${explanation}${actionable.map(row => rowHtml(row)).join('')}${!actionable.length && obsolete.length ? '<div class="queue-explanation">No proposals at or above the current Safe nonce were returned.</div>' : ''}${staleSection}${!rows.length ? empty : ''}`;
@@ -482,7 +482,12 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
         inspect({ overrideInput: result.safe });
       }));
       report.querySelectorAll('.queue-row').forEach(row => {
-        const open = () => { const selected = result.reports[Number(row.dataset.index)]; showTransactionReport(selected); status.textContent = publicMode ? 'Opening selected transaction…' : 'Verifying selected transaction targets…'; inspect({ overrideInput: selected.transaction, overrideNetwork: selected.network, verifyTargets: !publicMode }); };
+        const open = () => {
+          const selected = result.reports[Number(row.dataset.index)];
+          report.innerHTML = '<div class="empty" role="status"><h2>Checking this transaction</h2><p>Reading its target contracts through RPC and checking available source. The full report will appear when those checks finish.</p></div>';
+          status.textContent = 'Checking target contracts through RPC…';
+          inspect({ overrideInput: selected.transaction, overrideNetwork: selected.network, verifyTargets: !publicMode });
+        };
         row.addEventListener('click', open);
         row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
       });

@@ -465,6 +465,35 @@ test('queue rows and network choices open the selected Safe transaction', async 
   assert.match(reportElement.innerHTML, /Safe nonce 7/);
 });
 
+test('selecting a queue row waits for the first RPC review before showing a report', async () => {
+  const page = ui();
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const preview = await analyze(tx, 'eth', { fetchState: false, verifyTargets: false });
+  const completed = { ...preview, targetVerificationAttempted: true, targetChecks: [{ address: tx.to, status: 'verified', reason: 'matched', blockTag: 'latest' }] };
+  const queue = { kind: 'queue', scope: 'pending', safe: tx.safe, network: 'eth', source: 'safe_api', availability: 'available', truncated: false, warnings: [], reports: [preview] };
+  const row = { dataset: { index: '0' }, addEventListener(name, handler) { this[name] = handler; } };
+  const reportElement = page.elements.get('report');
+  reportElement.querySelectorAll = selector => selector === '.queue-row' ? [row] : [];
+  page.elements.get('input').value = tx.safe;
+  let finishRpc;
+  const requests = [];
+  page.context.fetch = async (_url, options) => {
+    const request = JSON.parse(options.body);
+    requests.push(request);
+    if (typeof request.input === 'object') return new Promise(resolve => { finishRpc = () => resolve({ ok: true, json: async () => completed }); });
+    return { ok: true, json: async () => queue };
+  };
+  await page.evaluate('inspect()');
+  assert.match(reportElement.innerHTML, /This list is a preview/);
+  row.click();
+  assert.match(reportElement.innerHTML, /Checking this transaction/);
+  assert.doesNotMatch(reportElement.innerHTML, /Bytecode check not run/);
+  assert.equal(requests[1].verifyTargets, true);
+  finishRpc();
+  await new Promise(done => setImmediate(done));
+  assert.match(reportElement.innerHTML, /Verified bytecode/);
+});
+
 test('Safe URL buttons preserve the chain and choose the requested scope', async () => {
   const page = ui();
   const safe = '0x1111111111111111111111111111111111111111';
