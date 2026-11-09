@@ -35,7 +35,7 @@ function args(argv) {
     if (['--network', '--rpc', '--interval', '--port', '--scope', '--safe-address', '--safe-hash', '--origin'].includes(arg)) {
       if (!argv[i + 1]) throw new Error(`Missing value for ${arg}`);
       result[arg.slice(2)] = argv[++i];
-    } else if (['--simulate', '--monitor-fallback', '--json', '--once', '--help', '--public'].includes(arg)) result[arg.slice(2)] = true;
+    } else if (['--simulate', '--monitor-fallback', '--json', '--once', '--help', '--public', '--community'].includes(arg)) result[arg.slice(2)] = true;
     else if (arg.startsWith('--')) throw new Error(`Unknown option ${arg}`);
     else result._.push(arg);
   }
