@@ -651,6 +651,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
     if (!result || !response.ok) {
       const failure = new Error(result?.error ?? 'The service returned an unexpected response. Please retry.');
       failure.code = result?.code ?? (response.status === 429 ? 'USAGE_LIMIT' : 'SERVICE_ERROR');
+      failure.simulationScope = result?.simulationScope ?? 'daily';
       failure.incidentId = result?.incidentId ?? null;
       throw failure;
     }
@@ -700,11 +701,18 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
     } else { if (priorHash?.toLowerCase() === result.hash?.toLowerCase()) { if (priorEvidence) result.evidence = priorEvidence; if (priorTargetChecks?.length) result.targetChecks = priorTargetChecks; } const retryNote = retryTargets ? JSON.stringify(previousTargetChecks) === JSON.stringify(result.targetChecks) ? 'Checked again: no new bytecode evidence. This RPC and Sourcify returned the same result. Review the reason below or use another trusted RPC locally.' : 'Checked again: bytecode evidence changed. Review the updated status and contract details below.' : ''; showTransactionReport(result, retryNote); status.textContent = retryTargets ? 'Bytecode check completed' : simulate ? 'Simulation reviewed' : 'Inspection complete'; if (watch.checked) { watch.checked = false; clearInterval(timer); timer = null; } }
   } catch (error) {
     const recorded = error.incidentId ? `<p class="meta">We recorded this issue to improve the service. Reference: <code>${esc(error.incidentId)}</code></p>` : '';
-    const limited = error.code === 'USAGE_LIMIT' || error.code === 'UPSTREAM_LIMITED';
+    const simulationLimited = error.code === 'SIMULATION_LIMIT';
+    const limited = simulationLimited || error.code === 'USAGE_LIMIT' || error.code === 'UPSTREAM_LIMITED';
+    const limitTitle = simulationLimited ? `${error.simulationScope === 'monthly' ? 'Monthly' : 'Daily'} simulation limit reached` : 'Request limit reached';
     const donationAction = donationWalletsAvailable ? '<a href="#community-support">Donate to support capacity</a>' : '<span>Donations open when a wallet is configured</span>';
     const support = limited ? `<div class="limit-support"><strong>Help us increase public capacity</strong><p>Donations and infrastructure sponsors can fund more transaction lookups, RPC access, and simulations. They do not bypass this limit or guarantee immediate availability.</p><div>${donationAction}<a href="https://x.com/rriescog" target="_blank" rel="noopener noreferrer">Sponsor the service ↗</a></div></div>` : '';
-    status.textContent = limited ? 'Request limit reached' : error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'Check the input or network' : 'Sorry, we could not complete the inspection';
-    report.innerHTML = `<div class="empty"><h2>${limited ? 'Request limit reached' : error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'We could not inspect this input' : 'Sorry, something went wrong'}</h2><p>${esc(error.message)}</p>${recorded}${support}</div>`;
+    status.textContent = limited ? limitTitle : error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'Check the input or network' : 'Sorry, we could not complete the inspection';
+    if (simulate && simulationLimited && activeReportInput) {
+      report.querySelector('.simulation-limit-notice')?.remove?.();
+      report.insertAdjacentHTML('afterbegin', `<div class="notice simulation-limit-notice" role="alert"><strong>${limitTitle}</strong><p>${esc(error.message)}</p>${support}</div>`);
+      return;
+    }
+    report.innerHTML = `<div class="empty"><h2>${limited ? limitTitle : error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'We could not inspect this input' : 'Sorry, something went wrong'}</h2><p>${esc(error.message)}</p>${recorded}${support}</div>`;
   }
   finally { submit.disabled = false; }
 }

@@ -471,6 +471,29 @@ test('request limits offer donation and sponsorship without claiming a bypass', 
   assert.doesNotMatch(page.elements.get('report').innerHTML, /Donation options/);
 });
 
+test('simulation limit explains the daily cap and leaves inspection available', async () => {
+  const page = ui();
+  page.elements.get('input').value = `0x${'a'.repeat(64)}`;
+  page.context.fetch = async () => ({ ok: false, status: 429, json: async () => ({ error: 'You have used all five simulation requests for this IP today. Inspect without simulation or retry tomorrow.', code: 'SIMULATION_LIMIT' }) });
+  await page.evaluate('inspect({ simulate: true })');
+  const html = page.elements.get('report').innerHTML;
+  assert.match(html, /Daily simulation limit reached/);
+  assert.match(html, /Inspect without simulation/);
+  assert.equal(page.elements.get('status').textContent, 'Daily simulation limit reached');
+});
+
+test('a simulation quota error keeps the transaction review on screen', async () => {
+  const page = ui();
+  page.elements.get('input').value = `0x${'a'.repeat(64)}`;
+  page.elements.get('report').innerHTML = '<section>Existing transaction review</section>';
+  page.evaluate('activeReportInput = { safeTxHash: "0x' + 'a'.repeat(64) + '" }');
+  page.context.fetch = async () => ({ ok: false, status: 429, json: async () => ({ error: 'Daily simulation limit reached. Inspect without simulation.', code: 'SIMULATION_LIMIT', simulationScope: 'daily' }) });
+  await page.evaluate('inspect({ simulate: true })');
+  const html = page.elements.get('report').innerHTML;
+  assert.match(html, /Existing transaction review/);
+  assert.match(html, /Daily simulation limit reached/);
+});
+
 test('verification panel distinguishes supplied data, a user hash, local calculation, and RPC', async () => {
   const page = ui();
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };

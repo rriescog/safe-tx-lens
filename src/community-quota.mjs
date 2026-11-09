@@ -48,7 +48,7 @@ export function communityQuota({ file, dailyUnits = 600, monthlyUnits = 10000, c
       const clientKey = createHash('sha256').update(salt).update(clientIp).digest('hex');
       const client = clients.get(clientKey);
       if (client?.day === day && client.used >= clientDailyRequests) return { allowed: false, reason: 'client_limit', retryAfterSeconds: retryAfter() };
-      if (simulation && client?.day === day && client.simulations >= simulationClientDaily) return { allowed: false, reason: 'simulation_client_limit', retryAfterSeconds: retryAfter() };
+      if (simulation && client?.day === day && client.simulations >= simulationClientDaily) return { allowed: false, reason: 'simulation_client_limit', limit: simulationClientDaily, retryAfterSeconds: retryAfter() };
       const record = read();
       if (record.dayUnits + cost > dailyUnits) return { allowed: false, reason: 'daily_limit', retryAfterSeconds: retryAfter() };
       if (record.monthUnits + cost > monthlyUnits) return { allowed: false, reason: 'monthly_limit', retryAfterSeconds: monthRetryAfter() };
