@@ -226,7 +226,7 @@ export function summarizeCalls(root) {
   const actions = [];
   const visit = (node, path) => {
     const method = node.method?.split('(')[0] ?? null;
-    const positions = { transfer: { to: 0, amount: 1 }, transferFrom: { from: 0, to: 1, amount: 2 }, approve: { spender: 0, amount: 1 } };
+    const positions = { transfer: { to: 0, amount: 1 }, transferFrom: { from: 0, to: 1, amount: 2 }, approve: { spender: 0, amount: 1 }, updateImplementation: { newImplementation: 0 } };
     const argument = name => node.args?.find(item => item.name === name)?.value ?? node.args?.[positions[method]?.[name]]?.value;
     let label;
     if (method === 'upgradeAndCall') label = `Upgrade proxy ${argument('proxy')} to implementation ${argument('implementation')}${node.children.length ? ' and call initializer' : ''}`;

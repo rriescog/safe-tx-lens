@@ -145,6 +145,43 @@ test('a proxy administration selector is valid in the outer ABI even when absent
   assert.equal(review.findings.some(item => item.code === 'TARGET_ABI_MISMATCH'), false);
 });
 
+test('verified ABI parameter aliases preserve upgrade target and check the proposed implementation', async () => {
+  const timelock = '0x4444444444444444444444444444444444444444';
+  const nextLogic = '0x5555555555555555555555555555555555555555';
+  const batch = new Interface(['function executeBatch(address[] targets,uint256[] values,bytes[] datas,bytes32 predecessor,bytes32 salt)']);
+  const upgrade = new Interface(['function updateImplementation(address newImplementation)']);
+  const validator = new Interface(['function reinitializeValidatorState(uint256 expectedIncrease)']);
+  const zero = `0x${'0'.repeat(64)}`;
+  const payload = batch.encodeFunctionData('executeBatch', [[TARGET, TARGET], [0, 0], [upgrade.encodeFunctionData('updateImplementation', [nextLogic]), validator.encodeFunctionData('reinitializeValidatorState', [123])], zero, zero]);
+  const getter = new Interface(['function implementation() view returns (address)']);
+  const rpc = {
+    getNetwork: async () => ({ chainId: 1n }),
+    getCode: async () => '0x60016000',
+    getStorage: async () => '0x',
+    call: async () => getter.encodeFunctionResult('implementation', [LOGIC]),
+  };
+  const source = async (_network, address) => ({
+    runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: '0x60016000' },
+    abi: address.toLowerCase() === timelock.toLowerCase() ? ['function executeBatch(address[] targets,uint256[] values,bytes[] datas,bytes32 predecessor,bytes32 salt)']
+      : address.toLowerCase() === TARGET.toLowerCase() ? ['function implementation() view returns (address)', 'function proxyType() view returns (uint256)', 'function updateImplementation(address _newProxyTo)', { type: 'fallback', stateMutability: 'payable' }]
+        : address.toLowerCase() === nextLogic.toLowerCase() ? ['function reinitializeValidatorState(uint256 expectedIncrease)'] : ['function oldValidatorAction(uint256)'],
+  });
+  const review = await analyze({ safe: timelock, to: timelock, value: '0', data: payload, operation: 0, nonce: 1 }, 'eth', { fetchState: false, verifyTargets: true, targetProvider: rpc, sourceLookup: source });
+  assert.equal(review.actions[0].label, `Update proxy implementation to ${nextLogic}`);
+  const checkedProxy = review.targetChecks.find(item => item.address.toLowerCase() === TARGET.toLowerCase());
+  assert.equal(checkedProxy.plannedImplementation, nextLogic);
+  assert.equal(checkedProxy.plannedImplementationCode.status, 'verified');
+  assert.ok(review.findings.some(item => item.code === 'UPGRADE_TARGET_ABI_CONDITIONAL'));
+  assert.equal(review.findings.some(item => item.code === 'TARGET_ABI_MISMATCH'), false);
+  const missingSource = async (network, address) => {
+    const entry = await source(network, address);
+    return address.toLowerCase() === nextLogic.toLowerCase() ? { ...entry, abi: ['function unrelated(uint256)'] } : entry;
+  };
+  const unresolved = await analyze({ safe: timelock, to: timelock, value: '0', data: payload, operation: 0, nonce: 1 }, 'eth', { fetchState: false, verifyTargets: true, targetProvider: rpc, sourceLookup: missingSource });
+  assert.ok(unresolved.findings.some(item => item.code === 'TARGET_ABI_MISMATCH'));
+  assert.equal(unresolved.findings.some(item => item.code === 'UPGRADE_TARGET_ABI_CONDITIONAL'), false);
+});
+
 test('assembly SafeProxy with constructor and fallback ABI resolves singleton', async () => {
   const slot = `0x${'0'.repeat(24)}${LOGIC.slice(2)}`;
   const proxyCode = '0x7fa619486e600054';

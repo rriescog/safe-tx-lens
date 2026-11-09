@@ -94,7 +94,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
   }
   const quota = publicMode ? publicQuota({ file: quotaFile, dailyLimit }) : null;
   const community = communityMode ? communityQuota({ file: communityQuotaFile, dailyUnits: communityDailyUnits, monthlyUnits: communityMonthlyUnits, clientDailyRequests: communityClientDailyRequests }) : null;
-  const mcp = communityMode ? communityMcpHandler() : null;
+  const mcp = communityMode ? communityMcpHandler({ inspectionResolver, redactResult: redactPrivateSimulationUrl }) : null;
   // The report deliberately excludes URL, IP, hash, calldata and credentials.
   // A reference ID lets the operator correlate a user's report with this log.
   const recordIncident = (category, status) => {
@@ -170,7 +170,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           const ticket = community.take(clientIp, cost, { simulation: payload.simulate === true });
           if (!ticket.allowed) return denied(res, ticket);
           try {
-            const result = await inspectionResolver(payload.input, payload.network ?? 'auto', { simulate: payload.simulate === true, fetchState: false, verifyTargets, decodeCandidates: payload.decodeCandidates === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
+            const result = await inspectionResolver(payload.input, payload.network ?? 'auto', { simulate: payload.simulate === true, fetchState: payload.simulate === true, verifyTargets, decodeCandidates: payload.decodeCandidates === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash });
             return reply(res, 200, redactPrivateSimulationUrl(result));
           } finally { community.release(); }
         }
@@ -192,6 +192,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
         const allowedMethods = ['initialize', 'notifications/initialized', 'ping', 'tools/list', 'tools/call'];
         if (!allowedMethods.includes(message.method)) return reply(res, 405, { error: 'MCP method unavailable' });
         let cost = 1;
+        let simulation = false;
         if (message.method === 'tools/call') {
           const params = message.params;
           const args = params?.arguments;
@@ -201,11 +202,16 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           if (!field) return reply(res, 400, { error: 'Unknown MCP tool' });
           const mcpInput = args[field];
           const mcpNetwork = args.network ?? 'auto';
+          if (Object.hasOwn(args, 'rpcUrl')) return reply(res, 400, { error: 'Caller-supplied RPC URLs are unavailable on the hosted MCP' });
           validateInspectionRequest({ input: mcpInput, network: mcpNetwork });
+          if (args.simulate !== undefined && typeof args.simulate !== 'boolean') return reply(res, 400, { error: 'Invalid simulate flag' });
+          simulation = args.simulate === true;
+          if (simulation && (!['inspect', 'inspect_json'].includes(params.name) || parseInput(mcpInput, mcpNetwork).kind === 'safe' || isBuilderExport(mcpInput))) return reply(res, 400, { error: 'Select one complete Safe transaction before simulating' });
+          if (simulation && !simulationEnabled) return reply(res, 503, { error: 'Tenderly simulation is not configured for this service' });
           const deepReview = params.name === 'inspect_json' || (params.name === 'inspect' && parseInput(mcpInput, mcpNetwork).kind !== 'safe');
-          cost = communityCost(mcpInput, mcpNetwork, params.name === 'list_history' ? 'history' : 'pending', { verifyTargets: deepReview });
+          cost = communityCost(mcpInput, mcpNetwork, params.name === 'list_history' ? 'history' : 'pending', { verifyTargets: deepReview, simulate: simulation });
         }
-        const ticket = community.take(clientIp, cost);
+        const ticket = community.take(clientIp, cost, { simulation });
         if (!ticket.allowed) return denied(res, ticket);
         try {
           const headers = new Headers({ 'content-type': 'application/json', accept: 'application/json, text/event-stream' });
