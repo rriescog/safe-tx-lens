@@ -98,7 +98,7 @@ test('community server needs a Safe key and keeps simulation opt-in', async () =
 test('hosted MCP simulation is explicit, metered, and hides private Tenderly links', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'safe-community-mcp-sim-'));
   const calls = [];
-  const server = await serve({ port: 0, publicOrigin: origin, communityMode: true, communityQuotaFile: join(directory, 'quota.json'), communityDailyUnits: 200, communityMonthlyUnits: 200, credentialReader: async () => ({ SAFE_API_KEY: 'test-key', TENDERLY_ACCESS_KEY: 'test-tenderly-key', TENDERLY_ACCOUNT: 'account', TENDERLY_PROJECT: 'project' }), inspectionResolver: async (_input, _network, options) => {
+  const server = await serve({ port: 0, publicOrigin: origin, communityMode: true, communityQuotaFile: join(directory, 'quota.json'), communityDailyUnits: 200, communityMonthlyUnits: 200, communitySimulationClientDaily: 1, credentialReader: async () => ({ SAFE_API_KEY: 'test-key', TENDERLY_ACCESS_KEY: 'test-tenderly-key', TENDERLY_ACCOUNT: 'account', TENDERLY_PROJECT: 'project' }), inspectionResolver: async (_input, _network, options) => {
     calls.push(options);
     return { kind: 'transaction', simulation: { success: true, stateDiffAvailable: true, url: 'https://dashboard.tenderly.co/private/project/simulator/1' }, effects: [{ kind: 'storage', before: '0', after: '1' }] };
   } });
@@ -132,6 +132,25 @@ test('hosted MCP simulation is explicit, metered, and hides private Tenderly lin
     assert.equal((await web.json()).simulation.url, undefined);
     assert.equal(calls[1].simulate, true);
     assert.equal(calls[1].fetchState, true);
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('hosted simulation allows five requests per IP each day and rejects the sixth', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'safe-community-five-sim-'));
+  const calls = [];
+  const server = await serve({ port: 0, publicOrigin: origin, communityMode: true, communityQuotaFile: join(directory, 'quota.json'), communityDailyUnits: 1000, communityMonthlyUnits: 1000, credentialReader: async () => ({ SAFE_API_KEY: 'test-key', TENDERLY_ACCESS_KEY: 'test-tenderly-key', TENDERLY_ACCOUNT: 'account', TENDERLY_PROJECT: 'project' }), inspectionResolver: async (_input, _network, options) => {
+    calls.push(options);
+    return { kind: 'transaction', simulation: { success: true, stateDiffAvailable: true }, effects: [] };
+  } });
+  try {
+    const post = () => fetch(`http://127.0.0.1:${server.address().port}/api/inspect`, { method: 'POST', headers: { 'content-type': 'application/json', origin, 'x-client-ip': '203.0.113.88' }, body: JSON.stringify({ input: `0x${'a'.repeat(64)}`, network: 'eth', simulate: true }) });
+    for (let i = 0; i < 5; i++) assert.equal((await post()).status, 200);
+    const sixth = await post();
+    assert.equal(sixth.status, 429);
+    assert.equal(calls.length, 5);
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });
