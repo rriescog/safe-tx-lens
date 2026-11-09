@@ -5,7 +5,7 @@ import { assessConfidence } from './confidence.mjs';
 import { assessRisk } from './risk.mjs';
 import { fetchTransaction, safeGet } from './safe-api.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
-import { inspectTargetCode } from './target-code.mjs';
+import { inspectTargetCode, proxyImplementationAt } from './target-code.mjs';
 import { enrichTokenCalls } from './token-metadata.mjs';
 import { readJsonResponse } from './response-boundary.mjs';
 
@@ -362,6 +362,26 @@ export async function analyze(raw, network = 'eth', options = {}) {
       target.plannedImplementation = next;
       target.plannedImplementationCode = planned;
     }
+    // For an executed Safe transaction, corroborate the reported outcome
+    // with its onchain Success event and observe the proxy at the execution
+    // block. A block-end read does not prove which intra-block call changed it.
+    if (tx.isExecuted && tx.isSuccessful === true && Number.isInteger(tx.blockNumber) && /^0x[0-9a-fA-F]{64}$/.test(tx.transactionHash ?? '') && checks[0].status !== 'fail') {
+      try {
+        const provider = options.targetProvider ?? (options.rpcUrl ? new JsonRpcProvider(options.rpcUrl) : null);
+        const receipt = await provider?.getTransactionReceipt(tx.transactionHash);
+        const success = receipt?.status === 1 && receipt.blockNumber === tx.blockNumber && receipt.logs?.some(log =>
+          log.address?.toLowerCase() === tx.safe.toLowerCase() && log.topics?.[0]?.toLowerCase() === EXEC_SUCCESS_TOPIC && log.topics?.[1]?.toLowerCase() === calculatedHash.toLowerCase());
+        if (success) for (const target of targetChecks) {
+          if (!target.plannedImplementationCode || !target.proxy?.implementation || target.proxy.implementation.toLowerCase() === target.plannedImplementation?.toLowerCase()) continue;
+          try {
+            const after = await proxyImplementationAt(target, provider, tx.blockNumber);
+            if (after?.toLowerCase() === target.plannedImplementation.toLowerCase()) {
+              target.plannedImplementationObservation = { status: 'observed_at_execution_block', before: target.proxy.implementation, after, blockNumber: tx.blockNumber, executionHash: tx.transactionHash };
+            }
+          } catch { /* Keep the ABI conclusion conditional when the post-block RPC read fails. */ }
+        }
+      } catch { /* Keep the ABI conclusion conditional when receipt evidence is unavailable. */ }
+    }
   }
   if (options.enrichTokens) await enrichTokenCalls(call, network, { rpcUrl: options.rpcUrl, provider: options.tokenProvider, blockTag: tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest' });
   const approvals = await inspectApprovedHashes(call, tx, network, options);
@@ -381,7 +401,8 @@ export async function analyze(raw, network = 'eth', options = {}) {
     const missing = ['verified', 'verified_current'].includes(effectiveTarget?.status) ? effectiveTarget.abiSelectors?.filter(selector => !selector.present && !(target.proxy && target.abiSelectors?.some(outer => outer.selector === selector.selector && outer.present))) ?? [] : [];
     const planned = target.plannedImplementationCode;
     const plannedCoversMissing = missing.length && ['verified', 'verified_current'].includes(planned?.status) && missing.every(selector => planned.abiSelectors?.some(item => item.selector === selector.selector && item.present));
-    if (plannedCoversMissing) findings.push({ severity: 'info', code: 'UPGRADE_TARGET_ABI_CONDITIONAL', path: target.address, message: `The missing selector exists in the verified proposed implementation ${target.plannedImplementation}. This interpretation depends on the upgrade executing before the call.` });
+    if (plannedCoversMissing && target.plannedImplementationObservation) findings.push({ severity: 'info', code: 'UPGRADE_TARGET_ABI_OBSERVED', path: target.address, message: `The verified new implementation ${target.plannedImplementation} contains the selector. The Safe emitted ExecutionSuccess, and this proxy changed from ${target.proxy.implementation} before execution to ${target.plannedImplementation} by the end of block ${tx.blockNumber}. An execution trace is needed to attribute the exact internal call within that block.` });
+    else if (plannedCoversMissing) findings.push({ severity: 'info', code: 'UPGRADE_TARGET_ABI_CONDITIONAL', path: target.address, message: `The missing selector exists in the verified proposed implementation ${target.plannedImplementation}. This interpretation depends on the upgrade executing before the call.` });
     else if (missing.length) findings.push({ severity: 'warning', code: 'TARGET_ABI_MISMATCH', path: target.address, message: `The decoded selector is absent from the matching verified ${target.proxy ? 'implementation' : 'target'} ABI; the function label may be wrong.` });
   }
   if (options.verifyTargets && targetChecks.some(target => !['verified', 'verified_current'].includes(target.status) || (target.proxy && !['verified', 'verified_current'].includes(target.proxy.implementationCode?.status)))) warnings.push('At least one called target or proxy implementation lacks matching verified runtime bytecode. A decoded selector is only a hypothesis about behavior.');
