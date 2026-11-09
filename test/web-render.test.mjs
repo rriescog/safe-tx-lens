@@ -44,10 +44,40 @@ test('recommended projects appear only in the dark footer', async () => {
   assert.match(main, /Amoy and Immutable zkEVM can attempt execution-hash or supplied JSON review/);
 });
 
+test('How it works distinguishes independent calculation from Safe-supplied transaction fields', async () => {
+  const html = await readFile(pathResolve('web/index.html'), 'utf8');
+  assert.match(html, /id="how-it-works"/);
+  for (const mode of ['safe-hash', 'execution-hash', 'safe-address', 'transaction-json']) {
+    assert.match(html, new RegExp(`id="how-mode-${mode}"`));
+    assert.match(html, new RegExp(`id="how-route-${mode}"`));
+  }
+  assert.match(html, /EIP-712/);
+  assert.match(html, /without calling Safe Transaction Service/);
+  assert.match(html, /matching hash proves consistency, not that Safe supplied truthful fields/i);
+  assert.match(html, /compare.*signing device/i);
+  assert.match(html, /pending.*proposal source/i);
+  assert.match(html, /RPC.*execution.*calldata/i);
+});
+
+test('How it works switches its route when the user chooses another input', () => {
+  const page = ui();
+  page.elements.get('how-mode-execution-hash').on_click();
+  assert.equal(page.elements.get('how-route-execution-hash').hidden, false);
+  assert.equal(page.elements.get('how-route-safe-hash').hidden, true);
+  assert.equal(page.elements.get('how-mode-execution-hash').attributes['aria-pressed'], 'true');
+  page.elements.get('how-mode-transaction-json').on_click();
+  assert.equal(page.elements.get('how-route-transaction-json').hidden, false);
+  assert.equal(page.elements.get('how-route-execution-hash').hidden, true);
+  page.elements.get('input-mode').value = 'url';
+  page.elements.get('input-mode').on_change();
+  assert.equal(page.elements.get('how-route-safe-address').hidden, false);
+  assert.equal(page.elements.get('how-mode-safe-address').attributes['aria-pressed'], 'true');
+});
+
 test('home and every network example remain reachable from a result', async () => {
   const html = await readFile(pathResolve('web/index.html'), 'utf8');
   assert.match(html, /<a class="brand" href="\/" aria-label="Safe Tx Lens home">/);
-  assert.match(html, /<nav class="primary-nav"[^>]*><a href="\/">Home<\/a><a href="#examples">Examples<\/a>/);
+  assert.match(html, /<nav class="primary-nav"[^>]*><a href="\/">Home<\/a><a href="#how-it-works">How it works<\/a><a href="#examples">Examples<\/a>/);
   assert.match(html, /<section id="examples" class="example-browser"/);
   const catalog = {
     networks: [
@@ -175,7 +205,7 @@ test('lifecycle status separates Safe success, Safe failure, unknown outcome and
 function ui({ publicMode = false, search = '', hostname = '127.0.0.1', installed = null, exampleCatalog = null } = {}) {
   const elements = new Map();
   const selectors = new Map();
-  const make = () => ({ value: '', textContent: '', innerHTML: '', checked: false, disabled: false, dataset: {}, children: [], classList: { add() {}, remove() {} }, addEventListener(name, handler) { this[`on_${name}`] = handler; }, append(...nodes) { this.children.push(...nodes); }, scrollIntoView() {}, querySelector() { return make(); }, querySelectorAll() { return []; }, insertAdjacentHTML(_position, value) { this.innerHTML += value; }, focus() { this.focused = true; } });
+  const make = () => ({ value: '', textContent: '', innerHTML: '', checked: false, disabled: false, dataset: {}, attributes: {}, children: [], classList: { add() {}, remove() {} }, addEventListener(name, handler) { this[`on_${name}`] = handler; }, setAttribute(name, value) { this.attributes[name] = value; }, append(...nodes) { this.children.push(...nodes); }, scrollIntoView() {}, querySelector() { return make(); }, querySelectorAll() { return []; }, insertAdjacentHTML(_position, value) { this.innerHTML += value; }, focus() { this.focused = true; } });
   const document = { body: make(), createElement(tag) { return { ...make(), tag }; }, getElementById(id) { if (!elements.has(id)) elements.set(id, make()); return elements.get(id); }, querySelector(selector) { if (!selectors.has(selector)) selectors.set(selector, make()); return selectors.get(selector); }, querySelectorAll() { return []; } };
   if (exampleCatalog) { const select = make(); select.options = exampleCatalog.networks.map(row => ({ value: row.network })); elements.set('network', select); }
   document.body.dataset.publicMode = String(publicMode);
