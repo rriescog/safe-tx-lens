@@ -44,6 +44,33 @@ test('recommended projects appear only in the dark footer', async () => {
   assert.match(main, /Amoy and Immutable zkEVM can attempt execution-hash or supplied JSON review/);
 });
 
+test('home and every network example remain reachable from a result', async () => {
+  const html = await readFile(pathResolve('web/index.html'), 'utf8');
+  assert.match(html, /<a class="brand" href="\/" aria-label="Safe Tx Lens home">/);
+  assert.match(html, /<nav class="primary-nav"[^>]*><a href="\/">Home<\/a><a href="#examples">Examples<\/a>/);
+  assert.match(html, /<section id="examples" class="example-browser"/);
+  const catalog = {
+    networks: [
+      { network: 'eth', examples: [
+        { label: 'First call', nonce: 1, hash: `0x${'1'.repeat(64)}` },
+        { label: 'Second call', nonce: 2, hash: `0x${'2'.repeat(64)}` },
+      ] },
+      { network: 'amoy', examples: [] },
+    ],
+  };
+  const page = ui({ exampleCatalog: catalog });
+  await new Promise(resolve => setImmediate(resolve));
+  const cards = page.elements.get('example-catalog').children;
+  assert.equal(cards.length, 2);
+  assert.equal(cards[0].children.filter(child => child.tag === 'button').length, 2);
+  assert.match(cards[1].children[1].textContent, /No verified public example yet/);
+  cards[0].children[2].on_click();
+  assert.equal(page.elements.get('input').value, catalog.networks[0].examples[1].hash);
+  assert.equal(page.elements.get('network').value, 'eth');
+  cards[1].children[2].on_click();
+  assert.equal(page.elements.get('network').value, 'amoy');
+});
+
 test('network badges describe only the checks performed by the probe', () => {
   const page = ui();
   const full = page.evaluate("networkCoverageText({ pending: 'available', history: 'available', rpc: 'available', indexing: 'available' })");
@@ -133,11 +160,12 @@ test('lifecycle status separates Safe success, Safe failure, unknown outcome and
   assert.equal(page.evaluate('lifecycleStatus(sample).label'), 'Execution not established');
 });
 
-function ui({ publicMode = false, search = '', hostname = '127.0.0.1', installed = null } = {}) {
+function ui({ publicMode = false, search = '', hostname = '127.0.0.1', installed = null, exampleCatalog = null } = {}) {
   const elements = new Map();
   const selectors = new Map();
-  const make = () => ({ value: '', textContent: '', innerHTML: '', checked: false, disabled: false, dataset: {}, classList: { add() {}, remove() {} }, addEventListener(name, handler) { this[`on_${name}`] = handler; }, querySelector() { return make(); }, querySelectorAll() { return []; }, insertAdjacentHTML(_position, value) { this.innerHTML += value; }, focus() { this.focused = true; } });
-  const document = { body: make(), getElementById(id) { if (!elements.has(id)) elements.set(id, make()); return elements.get(id); }, querySelector(selector) { if (!selectors.has(selector)) selectors.set(selector, make()); return selectors.get(selector); } };
+  const make = () => ({ value: '', textContent: '', innerHTML: '', checked: false, disabled: false, dataset: {}, children: [], classList: { add() {}, remove() {} }, addEventListener(name, handler) { this[`on_${name}`] = handler; }, append(...nodes) { this.children.push(...nodes); }, scrollIntoView() {}, querySelector() { return make(); }, querySelectorAll() { return []; }, insertAdjacentHTML(_position, value) { this.innerHTML += value; }, focus() { this.focused = true; } });
+  const document = { body: make(), createElement(tag) { return { ...make(), tag }; }, getElementById(id) { if (!elements.has(id)) elements.set(id, make()); return elements.get(id); }, querySelector(selector) { if (!selectors.has(selector)) selectors.set(selector, make()); return selectors.get(selector); }, querySelectorAll() { return []; } };
+  if (exampleCatalog) { const select = make(); select.options = exampleCatalog.networks.map(row => ({ value: row.network })); elements.set('network', select); }
   document.body.dataset.publicMode = String(publicMode);
   const browser = installed === null ? {} : {
     navigator: { standalone: false },
@@ -147,7 +175,7 @@ function ui({ publicMode = false, search = '', hostname = '127.0.0.1', installed
       addEventListener() {},
     },
   };
-  const context = vm.createContext({ document, URL, TextEncoder, location: { search, hostname }, setInterval: () => 1, clearInterval: () => {}, console, fetch: async () => { throw new Error('Unexpected network call'); }, ...browser });
+  const context = vm.createContext({ document, URL, TextEncoder, location: { search, hostname }, setInterval: () => 1, clearInterval: () => {}, console, fetch: async path => { if (path === '/api/network-examples' && exampleCatalog) return { ok: true, json: async () => exampleCatalog }; throw new Error('Unexpected network call'); }, ...browser });
   vm.runInContext(source, context, { filename: sourcePath });
   return { context, elements, selectors, document, evaluate: expression => vm.runInContext(expression, context) };
 }
