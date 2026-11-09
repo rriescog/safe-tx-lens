@@ -474,7 +474,7 @@ test('request limits offer donation and sponsorship without claiming a bypass', 
 test('simulation limit explains the daily cap and leaves inspection available', async () => {
   const page = ui();
   page.elements.get('input').value = `0x${'a'.repeat(64)}`;
-  page.context.fetch = async () => ({ ok: false, status: 429, json: async () => ({ error: 'You have used all five simulation requests for this IP today. Inspect without simulation or retry tomorrow.', code: 'SIMULATION_LIMIT' }) });
+  page.context.fetch = async () => ({ ok: false, status: 429, json: async () => ({ error: 'You have used all 3 simulation requests for this IP today. Inspect without simulation or retry tomorrow.', code: 'SIMULATION_LIMIT' }) });
   await page.evaluate('inspect({ simulate: true })');
   const html = page.elements.get('report').innerHTML;
   assert.match(html, /Daily simulation limit reached/);
