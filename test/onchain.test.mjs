@@ -22,6 +22,7 @@ test('RPC provenance names public defaults but never exposes a configured key', 
     assert.deepEqual(rpcDetailsFor('gno'), { url: 'https://rpc.gnosischain.com', kind: 'public', label: 'Gnosis public (rpc.gnosischain.com)' });
     assert.deepEqual(rpcDetailsFor('oeth'), { url: 'https://mainnet.optimism.io', kind: 'public', label: 'Optimism public (mainnet.optimism.io)' });
     assert.deepEqual(rpcDetailsFor('sep'), { url: 'https://public.1rpc.io/sepolia', kind: 'public', label: '1RPC public (public.1rpc.io)' });
+    assert.deepEqual(rpcDetailsFor('amoy'), { url: 'https://polygon-amoy.gateway.tenderly.co', kind: 'public', label: 'Tenderly public (polygon-amoy.gateway.tenderly.co)' });
     process.env.RPC_URL_ETH = 'https://provider.example/key/secret';
     const configured = rpcDetailsFor('eth');
     assert.equal(configured.kind, 'configured');

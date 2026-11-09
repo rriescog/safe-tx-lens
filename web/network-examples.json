@@ -12,7 +12,7 @@
     {"network":"kat","examples":[{"label":"Security multisig owners","hash":"0x4e1cf453931aeef549ce1899b505c12fc7dd3a028d2cc81b575fddc293e9a37a","safe":"0x9d851f8b8751c5fbc09b9e74e6e68e9950949052","nonce":62}]},
     {"network":"xlayer","examples":[{"label":"Safe owner rotation","hash":"0x11dec0605d644c4b9cd4782e10a9b5eb944109f8b702a68d61bd25d40e50f30a","safe":"0x449DEFBac8dc846fE51C6f0aBD92d0F1e1b2b3E5","nonce":22}]},
     {"network":"sep","examples":[{"label":"Safe owner rotation","hash":"0x2b4baee3bcc47636114fc3e54e686c0fc23898a39d7ea4fa72935007ad9a8024","safe":"0x1fc98b58aa44b6987b5490006afd33de3ac69674","nonce":70}]},
-    {"network":"amoy","examples":[]},
+    {"network":"amoy","examples":[{"label":"Safe token transfer","hash":"0x484ecb6c2ae858f0c5ad687ef7b5a7807f64e111d50f475bc67ed055305a25c1","safe":"0xF9A6Ea6af45fC580afE4B2E4943eE09CD820B07a","nonce":21,"kind":"execution"}]},
     {"network":"imx","examples":[{"label":"MultiSend transfers","hash":"0x3cda24358ae5a50a13c846336944369084f4b119137640d9a4236c694a70ee37","safe":"0x4374E2034324315684012A8E083bbe29FD32008E","nonce":74,"kind":"execution"}]}
   ]
 }
