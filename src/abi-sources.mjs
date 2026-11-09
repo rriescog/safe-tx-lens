@@ -44,7 +44,7 @@ function abiArray(value) {
 }
 
 async function jsonGet(url, { request, headers = {} } = {}) {
-  const response = await request(url, { headers: { Accept: 'application/json', 'User-Agent': 'safe-tx-lens/0.2 (+https://github.com/rriescog/safe-tx-lens)', ...headers }, signal: AbortSignal.timeout(8000) });
+  const response = await request(url, { headers: { Accept: 'application/json', 'User-Agent': 'safe-tx-lens/0.2 (+https://github.com/web3security/safe-tx-lens)', ...headers }, signal: AbortSignal.timeout(8000) });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Source API ${new URL(url).host} ${response.status}`);
   return readJsonResponse(response, 4_000_000);

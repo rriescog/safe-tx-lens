@@ -37,9 +37,9 @@ test('recommended projects appear only in the dark footer', async () => {
   assert.match(main, /report it on GitHub/);
   assert.match(html, /\/web\/vendor\/cytoscape\.min\.js/);
   assert.match(footer, /Sponsor inquiries on X/);
-  assert.match(footer, /href="https:\/\/github\.com\/rriescog\/safe-tx-lens\/blob\/main\/docs\/MCP\.md"[^>]*>Use the MCP server/);
-  assert.match(main, /github\.com\/rriescog\/safe-tx-lens/);
-  assert.doesNotMatch(html, /github\.com\/web3security\/safe-tx-lens/);
+  assert.match(footer, /href="https:\/\/github\.com\/web3security\/safe-tx-lens\/blob\/main\/docs\/MCP\.md"[^>]*>Use the MCP server/);
+  assert.match(main, /github\.com\/web3security\/safe-tx-lens/);
+  assert.doesNotMatch(html, /github\.com\/rriescog\/safe-tx-lens/);
   assert.doesNotMatch(main, /Safe queue \+ history|RPC available/);
   assert.match(main, /Amoy and Immutable zkEVM can attempt execution-hash or supplied JSON review/);
 });
