@@ -42,6 +42,16 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
     const manifest = await manifestResponse.json();
     assert.equal(manifest.display, 'standalone');
     assert.deepEqual(manifest.icons.map(icon => icon.sizes), ['192x192', '512x512']);
+    const homepage = await (await fetch(origin)).text();
+    assert.match(homepage, /<meta property="og:image" content="https:\/\/safetxlens\.org\/web\/social-card\.png">/);
+    assert.match(homepage, /<meta name="twitter:card" content="summary_large_image">/);
+    assert.match(homepage, /<link rel="canonical" href="https:\/\/safetxlens\.org\/">/);
+    const socialCard = await fetch(`${origin}/web/social-card.png`);
+    assert.equal(socialCard.status, 200);
+    assert.equal(socialCard.headers.get('content-type'), 'image/png; charset=utf-8');
+    const cardBytes = Buffer.from(await socialCard.arrayBuffer());
+    assert.equal(cardBytes.readUInt32BE(16), 1200);
+    assert.equal(cardBytes.readUInt32BE(20), 630);
     const worker = await (await fetch(`${origin}/sw.js`)).text();
     assert.match(worker, /event\.request\.mode !== 'navigate'/);
     assert.match(worker, /fetch\(event\.request\)/);

@@ -122,6 +122,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
     if (req.method === 'GET' && req.url === '/manifest.webmanifest') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/manifest.webmanifest', import.meta.url)), 'utf8'), 'application/manifest+json');
     if (req.method === 'GET' && req.url === '/sw.js') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/sw.js', import.meta.url)), 'utf8'), 'text/javascript', { 'Service-Worker-Allowed': '/' });
     if (req.method === 'GET' && req.url === '/web/offline.html') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/offline.html', import.meta.url)), 'utf8'), 'text/html');
+    if (req.method === 'GET' && req.url === '/web/social-card.png') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/social-card.png', import.meta.url))), 'image/png');
     const appIcon = req.method === 'GET' ? /^\/web\/icons\/icon-(192|512)\.png$/.exec(req.url ?? '') : null;
     if (appIcon) return reply(res, 200, await readFile(fileURLToPath(new URL(`../web/icons/icon-${appIcon[1]}.png`, import.meta.url))), 'image/png');
     if (req.method === 'GET' && req.url === '/api/network-coverage') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/network-coverage.json', import.meta.url)), 'utf8'), 'application/json');
