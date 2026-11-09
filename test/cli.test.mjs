@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const SAFE = '0x1111111111111111111111111111111111111111';
@@ -63,10 +63,24 @@ test('CLI watch reports execution and nonce supersession after a proposal leaves
   }
 });
 
-test('CLI serve starts the local UI on a random port', () => {
-  const result = spawnSync(process.execPath, ['--import', resolve('test/support/exit-after-start.mjs'), 'bin/safe-tx-lens.mjs', 'serve', '--port', '0'], {
-    encoding: 'utf8', timeout: 3000, env: { ...process.env, RPC_URL: '' },
+test('CLI serve starts the local UI on a random port', async () => {
+  const child = spawn(process.execPath, ['bin/safe-tx-lens.mjs', 'serve', '--port', '0'], {
+    env: { ...process.env, RPC_URL: '' },
   });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Safe Tx Lens: http:\/\/127\.0\.0\.1:/);
+  let out = '';
+  try {
+    await new Promise((resolveStarted, rejectStarted) => {
+      const timer = setTimeout(() => rejectStarted(new Error(`Timed out waiting for the startup banner. Output so far: ${out}`)), 10000);
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', chunk => {
+        out += chunk;
+        if (/Safe Tx Lens: http:\/\/127\.0\.0\.1:/.test(out)) { clearTimeout(timer); resolveStarted(); }
+      });
+      child.once('error', error => { clearTimeout(timer); rejectStarted(error); });
+      child.once('exit', code => { clearTimeout(timer); rejectStarted(new Error(`CLI exited before printing the banner (code ${code}). Output: ${out}`)); });
+    });
+  } finally {
+    child.kill('SIGKILL');
+  }
+  assert.match(out, /Safe Tx Lens: http:\/\/127\.0\.0\.1:/);
 });
