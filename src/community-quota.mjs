@@ -4,7 +4,7 @@ import { isIP } from 'node:net';
 
 // One process owns this durable budget. Client IPs are salted and retained
 // only in memory for the current day; the quota file contains aggregate units.
-export function communityQuota({ file, dailyUnits = 600, monthlyUnits = 10000, clientDailyRequests = 20, simulationClientDaily = 1, simulationMonthly = 100, now = () => Date.now() }) {
+export function communityQuota({ file, dailyUnits = 600, monthlyUnits = 10000, clientDailyRequests = 20, simulationClientDaily = 5, simulationMonthly = 100, now = () => Date.now() }) {
   if (!file || ![dailyUnits, monthlyUnits, clientDailyRequests, simulationClientDaily, simulationMonthly].every(value => Number.isInteger(value) && value > 0)) throw new Error('Invalid community quota configuration');
   const salt = randomBytes(16);
   const clients = new Map();
