@@ -59,6 +59,14 @@ test('How it works distinguishes independent calculation from Safe-supplied tran
   assert.match(html, /RPC.*execution.*calldata/i);
 });
 
+test('the inspection form and live example precede the detailed process map', async () => {
+  const html = await readFile(pathResolve('web/index.html'), 'utf8');
+  assert.ok(html.indexOf('id="try-example"') < html.indexOf('id="inspect-form"'));
+  assert.ok(html.indexOf('id="inspect-form"') < html.indexOf('id="how-it-works"'));
+  assert.ok(html.indexOf('id="how-it-works"') < html.indexOf('id="examples"'));
+  assert.match(html, /href="#inspect-form"[^>]*>Start a review/);
+});
+
 test('How it works switches its route when the user chooses another input', () => {
   const page = ui();
   page.elements.get('how-mode-execution-hash').on_click();

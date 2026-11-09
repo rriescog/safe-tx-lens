@@ -197,3 +197,15 @@ footer.site-footer{max-width:none;margin:0;padding:38px clamp(20px,4vw,64px) 44p
 .approved-hash code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}
 .approved-hash button{display:inline-block;margin:5px 0 8px;padding:7px 10px;font-size:11px}
 .approved-hash small{display:block;color:#4d6872;font-size:10px;line-height:1.45}
+
+/* Put the inspector within the first screen; keep the longer explanation on demand. */
+.intro-actions{display:flex;align-items:center;flex-wrap:wrap;gap:9px 12px;margin-top:19px}
+.intro-actions .start-review{display:inline-block;padding:11px 16px;border-radius:7px;background:var(--blue-dark);color:#fff;font-size:13px;font-weight:800;text-decoration:none}
+.intro-actions .start-review:hover{background:#063d58}
+.intro-actions button{padding:10px 15px;border:1px solid #a8c9d6;background:#eaf3f6;color:var(--blue-dark);font-size:13px}
+.intro-actions button:hover{background:#dcecf3}
+.intro-actions small{flex-basis:100%;color:var(--muted);font-size:11px}
+#inspect-form{scroll-margin-top:85px}
+.workspace>.how-it-works{grid-column:1/-1;width:100%;max-width:none;margin:4px 0 0}
+@media(max-width:780px){.workspace>.how-it-works{order:3}.workspace .sponsor-rail{order:4}}
+@media(max-width:540px){.intro-actions{margin-top:14px}.intro-actions .start-review,.intro-actions button{flex:1;text-align:center;white-space:nowrap;padding:9px 8px;font-size:12px}.intro-actions small{font-size:10px}}
