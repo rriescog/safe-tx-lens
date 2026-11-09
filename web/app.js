@@ -272,6 +272,7 @@ function callExpression(call) {
   return `${name}(${args.join(', ')}${allArgs.length > 3 ? `, … +${allArgs.length - 3} more` : ''})`;
 }
 function callSource(call) {
+  if (call.approval?.onchainApproval === 'observed') return { tone: 'matched', label: 'Approval event confirmed onchain', detail: 'The target contract emitted a matching ApproveHash event in this Safe execution receipt. This proves the approval happened; the linked transaction fields are checked separately below.' };
   if (!call.method) return call.data === '0x'
     ? { tone: 'matched', label: 'No function call', detail: 'No function calldata was supplied. Check the value field to see whether native currency moves.' }
     : { tone: 'unknown', label: 'Function unknown', detail: 'No reliable ABI was found for this selector. Inspect the target code and raw calldata.' };
@@ -302,6 +303,29 @@ function section(title, body) {
   const id = title.startsWith('1 ·') ? 'evidence-checks' : title.startsWith('2 ·') ? 'call-path' : title.startsWith('4 ·') ? 'target-code' : title.startsWith('5 ·') ? 'simulation-results' : '';
   return `<section class="report-section"${id ? ` id="${id}"` : ''}><h3>${esc(title)}</h3>${body}</section>`;
 }
+function approvedHashHtml(approval, network) {
+  if (!approval) return '';
+  const states = {
+    rpc_matched: ['pass', 'Hash matches recovered fields and RPC contract response'],
+    matched_fields: ['warning', 'Hash matches recovered fields; contract hash unconfirmed'],
+    mismatch: ['fail', 'Hash mismatch — do not sign'],
+    unavailable: ['unavailable', 'Approved transaction could not be recovered'],
+    not_checked: ['unverified', 'Approved transaction not checked in this preview'],
+    limit_reached: ['unavailable', 'Approval lookup limit reached'],
+  };
+  const [tone, label] = states[approval.status] ?? states.unavailable;
+  const event = approval.onchainApproval === 'observed' ? 'Matching ApproveHash event observed in the execution receipt.'
+    : approval.onchainApproval === 'not_observed' ? 'No matching ApproveHash event was found in the execution receipt.'
+      : approval.onchainApproval === 'pending' ? 'The proposal source records no execution of this nested transaction; no onchain approval is established here.'
+        : 'Onchain approval event was not verified.';
+  const linked = approval.transaction;
+  const sourceLabel = linked?.source === 'safe_api' ? 'Safe Transaction Service' : linked?.source === 'safe_gateway' ? 'Safe Client Gateway' : linked?.source ?? '';
+  const summary = linked ? `<p>Recovered from ${esc(sourceLabel)}: Safe ${esc(linked.safe)}, nonce ${esc(linked.nonce)}, target ${esc(linked.to)}. Its fields recalculate to <code>${esc(linked.calculatedHash)}</code>.</p>` : '';
+  const rpc = approval.rpc?.status === 'pass' ? `<p>The contract at the target Safe address returned the same hash through RPC at ${esc(approval.rpc.blockTag === 'latest' ? 'current state' : `block ${approval.rpc.blockTag}`)}. Check its code separately.</p>` : approval.rpc?.reason ? `<p>${esc(approval.rpc.reason)}</p>` : '';
+  const button = linked && approval.status !== 'mismatch' ? `<button type="button" class="approval-review" data-approved-hash="${esc(approval.approvedHash)}" data-approved-network="${esc(network)}">Review the approved transaction</button>` : '';
+  const fallback = !linked && approval.status === 'unavailable' ? '<p>To inspect what this hash authorizes, import the target Safe transaction JSON and compare it with this approved hash. The hash alone does not reveal its calldata.</p>' : '';
+  return `<div class="approved-hash"><div>${pill(tone)}<strong>${esc(label)}</strong></div><p>Approved hash: <code>${esc(approval.approvedHash)}</code></p>${summary}${rpc}<p>${esc(event)}</p>${approval.reason ? `<p>${esc(approval.reason)}</p>` : ''}${fallback}${button}<small>Approving a hash does not execute the linked transaction. Compare its full calldata and hash before signing.</small></div>`;
+}
 function flowHtml(node, path, labels) {
   const method = node.method?.split('(')[0] ?? (node.data === '0x' ? 'Empty or value call' : `Unknown ${node.selector}`);
   const expression = callExpression(node);
@@ -312,7 +336,7 @@ function flowHtml(node, path, labels) {
   const meaning = node.method && interpretation && interpretation !== expression ? `<span class="flow-interpretation">Likely meaning: ${esc(interpretation)}</span>` : '';
   const argumentsHtml = node.args?.length ? `<div class="flow-args"><strong>Decoded arguments</strong>${node.args.map((arg, index) => { const raw = typeof arg.value === 'string' && /^-?\d+$/.test(arg.value) ? arg.value : JSON.stringify(arg.value) ?? 'unavailable'; const display = raw.length > 512 ? `${raw.slice(0, 509)}… (full bytes in raw calldata)` : raw; return `<div><span>${esc(arg.name || `arg${index}`)}</span><code>${esc(display)}</code></div>`; }).join('')}</div>` : '';
   const proof = `<details class="flow-proof"><summary>Source and limits</summary><p>${esc(source.detail)}</p>${node.method ? `<p>Function signature: <code>${esc(node.method)}</code></p>` : ''}${node.selector && node.selector !== '0x' ? `<p>Selector: <code>${esc(node.selector)}</code></p>` : ''}${node.decodeSource ? `<p>ABI evidence: ${esc(node.decodeSource)}</p>` : ''}${safeExternalUrl(node.decodeSourceUrl) ? `<a href="${esc(safeExternalUrl(node.decodeSourceUrl))}" target="_blank" rel="noopener noreferrer">Open verified source</a>` : ''}${argumentsHtml}</details>`;
-  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong class="flow-expression">${esc(expression)}</strong>${meaning}<span class="flow-source flow-source-${source.tone}">${esc(source.label)}</span><span class="flow-address mono">${esc(node.to)}</span>${node.token ? `<span class="token-identity">${esc(node.token.amount ?? 'Raw amount unavailable')} ${esc(node.token.symbol)} · ${esc(node.token.address)}<small>Symbol and decimals reported by the contract via RPC at ${esc(node.token.blockTag === 'latest' ? 'current state' : `block ${node.token.blockTag}`)}; identity unverified.</small></span>` : ''}${proof}</div></div>${children}</li>`;
+  return `<li><div class="flow-node ${node.children?.length ? 'flow-group' : 'flow-leaf'}"><span class="flow-kind">${esc(kind)}</span><div><strong class="flow-expression">${esc(expression)}</strong>${meaning}<span class="flow-source flow-source-${source.tone}">${esc(source.label)}</span><span class="flow-address mono">${esc(node.to)}</span>${node.token ? `<span class="token-identity">${esc(node.token.amount ?? 'Raw amount unavailable')} ${esc(node.token.symbol)} · ${esc(node.token.address)}<small>Symbol and decimals reported by the contract via RPC at ${esc(node.token.blockTag === 'latest' ? 'current state' : `block ${node.token.blockTag}`)}; identity unverified.</small></span>` : ''}${node.approval ? approvedHashHtml(node.approval, node.approval.network) : ''}${proof}</div></div>${children}</li>`;
 }
 function graphElements(r) {
   const elements = [{ data: { id: 'safe', label: `Safe nonce ${r.transaction.nonce}`, detail: `Safe ${r.transaction.safe}`, kind: 'safe' } }];
@@ -585,6 +609,13 @@ function showTransactionReport(result, retryNote = '') {
   activeReportTargetChecks = result.targetChecks ?? null;
   report.innerHTML = reportHtml(result, retryNote);
   showCallGraph(result);
+  report.querySelectorAll('[data-approved-hash]').forEach(button => button.addEventListener('click', () => {
+    inputMode.value = 'hash';
+    input.value = button.dataset.approvedHash;
+    network.value = button.dataset.approvedNetwork;
+    updateWizard();
+    inspect({ overrideInput: button.dataset.approvedHash, overrideNetwork: button.dataset.approvedNetwork });
+  }));
   report.querySelector('#run-simulation')?.addEventListener('click', event => {
     event.currentTarget.disabled = true;
     inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, simulate: true });

@@ -291,6 +291,23 @@ test('a nested governance example renders its ABI call separately from the human
   assert.doesNotMatch(html, /forceUnstakeValidator/);
 });
 
+test('a nested Safe hash approval shows the linked transaction and separate execution proof', () => {
+  const page = ui();
+  page.context.approval = { network: 'eth', status: 'rpc_matched', approvedHash: `0x${'a'.repeat(64)}`, onchainApproval: 'observed', transaction: { hash: `0x${'a'.repeat(64)}`, safe: '0x1111111111111111111111111111111111111111', nonce: '244', to: '0x2222222222222222222222222222222222222222', calculatedHash: `0x${'a'.repeat(64)}`, source: 'safe_api' }, rpc: { status: 'pass', blockTag: 100 } };
+  const html = page.evaluate('approvedHashHtml(approval, "eth")');
+  assert.match(html, /Hash matches recovered fields and RPC contract response/);
+  assert.match(html, /nonce 244/);
+  assert.match(html, /Matching ApproveHash event observed/);
+  assert.match(html, /Review the approved transaction/);
+  assert.match(html, /Approving a hash does not execute/);
+  page.context.approvalCall = { approval: page.context.approval };
+  assert.equal(page.evaluate('callSource(approvalCall).label'), 'Approval event confirmed onchain');
+  page.context.approval = { ...page.context.approval, status: 'mismatch', reason: 'different Safe' };
+  const mismatch = page.evaluate('approvedHashHtml(approval, "eth")');
+  assert.match(mismatch, /Hash mismatch/);
+  assert.doesNotMatch(mismatch, /data-approved-hash=/);
+});
+
 test('an arbitrary verified ABI function flows through analysis into the UI', async () => {
   const page = ui();
   const safe = '0x1111111111111111111111111111111111111111';

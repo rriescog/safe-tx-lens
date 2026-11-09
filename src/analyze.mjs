@@ -22,6 +22,7 @@ const EXEC_IFACE = new Interface(['function execTransaction(address,uint256,byte
 const STATE_IFACE = new Interface(['function getOwners() view returns (address[])', 'function getThreshold() view returns (uint256)', 'function nonce() view returns (uint256)']);
 const EXEC_SUCCESS_TOPIC = id('ExecutionSuccess(bytes32,uint256)').toLowerCase();
 const EXEC_FAILURE_TOPIC = id('ExecutionFailure(bytes32,uint256)').toLowerCase();
+const APPROVE_HASH_TOPIC = id('ApproveHash(bytes32,address)').toLowerCase();
 
 export function normalizeTransaction(raw) {
   const tx = raw?.transaction ?? raw;
@@ -73,6 +74,7 @@ export function classifyIntent(call) {
     if (['upgradeTo', 'upgradeToAndCall', 'upgradeAndCall', 'updateImplementation', 'changeAdmin'].includes(method)) add('critical', 'UPGRADE', `Possible implementation or admin change: ${method}.`);
     if (['addOwnerWithThreshold', 'removeOwner', 'swapOwner', 'changeThreshold', 'enableModule', 'disableModule', 'setGuard', 'setFallbackHandler'].includes(method)) add('critical', 'SAFE_AUTHORITY', `Safe authority change: ${method}.`);
     if (['approve', 'increaseAllowance', 'setApprovalForAll'].includes(method)) add('warning', 'APPROVAL', `Approval or operator change: ${method}.`);
+    if (method === 'approveHash') add('warning', 'SAFE_HASH_APPROVAL', 'Approves a 32-byte hash as this Safe owner. Resolve the hash to full transaction fields before trusting what it authorizes.');
     if (['transfer', 'transferFrom'].includes(method)) add('info', 'TOKEN_TRANSFER', `Token transfer intent: ${method}.`);
     if (method === 'cleanMapToken') add('warning', 'TOKEN_MAPPING_CHANGE', 'Token mapping cleanup can affect bridge lookups; verify the target contract and resulting state.');
     if (method === 'multiSend') add('warning', 'MULTISEND_TARGET_UNVERIFIED', 'Inner calls are decoded from the bytes, but this tool has not verified that the target bytecode is the canonical Safe MultiSend contract.');
@@ -109,7 +111,72 @@ async function onchainHash(tx, rpcUrl) {
   const input = HASH_IFACE.encodeFunctionData('getTransactionHash', [tx.to, tx.value, tx.data, tx.operation, tx.safeTxGas, tx.baseGas, tx.gasPrice, tx.gasToken, tx.refundReceiver, tx.nonce]);
   const blockTag = tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest';
   const output = await provider.call({ to: tx.safe, data: input, blockTag });
-  return { hash: HASH_IFACE.decodeFunctionResult('getTransactionHash', output)[0], chainId: Number(network.chainId) };
+  return { hash: HASH_IFACE.decodeFunctionResult('getTransactionHash', output)[0], chainId: Number(network.chainId), blockTag };
+}
+
+// approveHash(bytes32) does not contain the approved transaction's fields.
+// Resolve the hash through a bounded Safe lookup, recalculate it from the
+// returned fields, then separately ask the target Safe through RPC. Never
+// render the approved transaction as a child call: approving a hash does not
+// execute that transaction.
+async function inspectApprovedHashes(call, tx, network, options) {
+  const nodes = [];
+  const walk = (node, path) => {
+    if (node.method?.split('(')[0] === 'approveHash' && node.selector === '0xd4d9bdcd') nodes.push({ node, path });
+    node.children.forEach((child, index) => walk(child, `${path}.${index + 1}`));
+  };
+  walk(call, '1');
+  if (!nodes.length) return [];
+  const enabled = options.inspectApprovedHashes ?? options.verifyTargets === true;
+  const provider = options.approvalProvider ?? (options.rpcUrl && enabled ? new JsonRpcProvider(options.rpcUrl) : null);
+  const lookup = options.approvalLookup ?? fetchTransaction;
+  const results = [];
+  let receipt;
+  if (enabled && tx.isExecuted && tx.transactionHash && provider) {
+    try {
+      if (Number((await provider.getNetwork()).chainId) === chainId(network)) receipt = await provider.getTransactionReceipt(tx.transactionHash);
+    } catch { /* A missing receipt leaves onchain approval unverified. */ }
+  }
+  for (const { node, path } of nodes) {
+    const approvedHash = node.args?.[0]?.value;
+    if (!/^0x[0-9a-fA-F]{64}$/.test(approvedHash ?? '')) continue;
+    const result = { path, network, targetSafe: node.to, approvedHash, status: enabled ? 'unavailable' : 'not_checked', onchainApproval: tx.isExecuted ? 'unavailable' : 'pending', transaction: null, rpc: null, reason: null };
+    node.approval = result;
+    results.push(result);
+    if (!enabled) continue;
+    if (results.length > 4) { result.status = 'limit_reached'; result.reason = 'Only the first four approved hashes are resolved per review.'; continue; }
+    if (receipt) {
+      const ownerTopic = `0x${tx.safe.slice(2).toLowerCase().padStart(64, '0')}`;
+      result.onchainApproval = receipt.status === 1 && (receipt.logs ?? []).some(log => log.address?.toLowerCase() === node.to.toLowerCase() && log.topics?.[0]?.toLowerCase() === APPROVE_HASH_TOPIC && log.topics?.[1]?.toLowerCase() === approvedHash.toLowerCase() && log.topics?.[2]?.toLowerCase() === ownerTopic) ? 'observed' : 'not_observed';
+    }
+    try {
+      const raw = await lookup(approvedHash, network);
+      const linked = normalizeTransaction(raw);
+      const calculated = calculateHash(linked, network);
+      result.transaction = { hash: approvedHash, safe: linked.safe, nonce: linked.nonce, to: linked.to, selector: linked.data.slice(0, 10), operation: linked.operation, isExecuted: linked.isExecuted, executionHash: linked.transactionHash, source: raw.lookupSource ?? 'safe_api', calculatedHash: calculated };
+      if (linked.safe.toLowerCase() !== node.to.toLowerCase() || calculated.toLowerCase() !== approvedHash.toLowerCase() || linked.safeTxHash && linked.safeTxHash.toLowerCase() !== approvedHash.toLowerCase()) {
+        result.status = 'mismatch';
+        result.reason = 'The returned transaction Safe, embedded hash, or locally recalculated hash differs from the hash approved by this call.';
+        continue;
+      }
+      result.status = 'matched_fields';
+      if (!provider) continue;
+      try {
+        const chain = await provider.getNetwork();
+        if (Number(chain.chainId) !== chainId(network)) { result.rpc = { status: 'unavailable', reason: 'RPC chain does not match the selected network.' }; continue; }
+        const input = HASH_IFACE.encodeFunctionData('getTransactionHash', [linked.to, linked.value, linked.data, linked.operation, linked.safeTxGas, linked.baseGas, linked.gasPrice, linked.gasToken, linked.refundReceiver, linked.nonce]);
+        const blockTag = linked.isExecuted && Number.isInteger(linked.blockNumber) && linked.blockNumber > 0 ? linked.blockNumber - 1 : 'latest';
+        const output = await provider.call({ to: linked.safe, data: input, blockTag });
+        const contractHash = HASH_IFACE.decodeFunctionResult('getTransactionHash', output)[0];
+        result.rpc = { status: contractHash.toLowerCase() === approvedHash.toLowerCase() ? 'pass' : 'mismatch', hash: contractHash, blockTag };
+        if (result.rpc.status === 'pass') result.status = 'rpc_matched';
+        else { result.status = 'mismatch'; result.reason = 'The target Safe contract returned a different transaction hash through RPC.'; }
+      } catch { result.rpc = { status: 'unavailable', reason: 'The target Safe contract hash could not be read through RPC.' }; }
+    } catch (error) {
+      result.reason = /\b429\b/.test(error.message) ? 'Safe proposal source rate limit or quota reached.' : /\b404\b/.test(error.message) ? 'No transaction was found for this hash in the configured Safe proposal source.' : 'The approved transaction fields could not be recovered from the configured Safe proposal source.';
+    }
+  }
+  return results;
 }
 
 async function safeState(tx, network) {
@@ -295,6 +362,11 @@ export async function analyze(raw, network = 'eth', options = {}) {
     }
   }
   if (options.enrichTokens) await enrichTokenCalls(call, network, { rpcUrl: options.rpcUrl, provider: options.tokenProvider, blockTag: tx.isExecuted && Number.isInteger(tx.blockNumber) && tx.blockNumber > 0 ? tx.blockNumber - 1 : 'latest' });
+  const approvals = await inspectApprovedHashes(call, tx, network, options);
+  for (const approval of approvals) {
+    checks.push({ name: `Approved Safe hash ${approval.approvedHash}`, method: 'nested_approval', status: approval.status === 'mismatch' ? 'fail' : ['rpc_matched', 'matched_fields'].includes(approval.status) ? 'pass' : 'unavailable', detail: approval.reason ?? (approval.status === 'rpc_matched' ? 'Approved hash matches recovered transaction fields and the target contract getTransactionHash response through RPC. This does not certify the target code.' : approval.status === 'matched_fields' ? 'Approved hash matches recovered transaction fields locally; target contract hash was not confirmed through RPC.' : 'The approved transaction could not be fully checked.') });
+    if (approval.status === 'mismatch') warnings.push(`Approved Safe hash ${approval.approvedHash} does not match the recovered transaction or target Safe contract. Do not sign.`);
+  }
   const actions = summarizeCalls(call);
   const findings = classifyIntent(call);
   for (const target of targetChecks) {
@@ -339,9 +411,9 @@ export async function analyze(raw, network = 'eth', options = {}) {
   const effects = classifyEffects(simulation?.unavailable ? null : simulation, tx.safe);
   const risk = assessRisk({ call, actions, findings, effects, checks, simulation, transaction: tx });
   const confidence = assessConfidence({ call, checks, targetChecks, simulation, transaction: tx });
-  const status = checks.some(c => c.status === 'fail') ? 'BLOCK' : findings.some(f => f.severity === 'critical') || effects.some(e => e.severity === 'critical') ? 'REVIEW' : 'INSPECT';
+  const status = checks.some(c => c.status === 'fail') ? 'BLOCK' : findings.some(f => f.severity === 'critical' || f.code === 'SAFE_HASH_APPROVAL') || effects.some(e => e.severity === 'critical') ? 'REVIEW' : 'INSPECT';
   const executionStatus = tx.isExecuted ? tx.isSuccessful === true ? 'executed_success' : tx.isSuccessful === false ? 'executed_failure' : 'executed_outcome_unknown' : 'execution_not_established';
-  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, executionStatus, risk, confidence, checks, targetChecks, targetVerificationAttempted: options.verifyTargets === true, rpc: options.rpcProvenance ? { kind: options.rpcProvenance.kind, label: options.rpcProvenance.label } : { kind: options.rpcUrl ? 'custom' : 'none', label: options.rpcUrl ? 'Custom RPC configured for this request' : 'No RPC used' }, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
+  return { network, chainId: chainId(network), hash: tx.safeTxHash ?? calculatedHash, calculatedHash, hashComponents, status, executionStatus, risk, confidence, checks, approvals, targetChecks, targetVerificationAttempted: options.verifyTargets === true, rpc: options.rpcProvenance ? { kind: options.rpcProvenance.kind, label: options.rpcProvenance.label } : { kind: options.rpcUrl ? 'custom' : 'none', label: options.rpcUrl ? 'Custom RPC configured for this request' : 'No RPC used' }, transaction: tx, safeState: safeInfo ? { nonce: safeInfo.nonce, threshold: safeInfo.threshold, owners: safeInfo.owners, source: safeInfo.source ?? 'safe_api', blockTag: safeInfo.blockTag ?? 'current' } : null, call, actions, findings, simulation, effects, warnings, reviewedAt: new Date().toISOString() };
 }
 
 export async function analyzeHash(hash, network, options = {}) {

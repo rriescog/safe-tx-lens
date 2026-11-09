@@ -66,6 +66,7 @@ function printReport(result, json) {
     if (report.evidence?.requestedHash) console.log(`  INPUT HASH ${report.evidence.requestedHash} · matched the returned Safe transaction identifier`);
     console.log(`  RISK ${report.risk.reviewPriority.toUpperCase()} review priority · ${report.risk.impactLevel.toUpperCase()} potential impact (${report.risk.basis})`);
     for (const action of report.risk.actionRatings) console.log(`  ${action.stage === 'schedule' ? 'SCHEDULE' : 'CALL'} [${action.level.toUpperCase()}] ${action.label} → ${action.to}`);
+    for (const approval of report.approvals ?? []) console.log(`  APPROVED HASH ${approval.approvedHash} → ${approval.targetSafe} · ${approval.status}${approval.transaction ? ` · linked nonce ${approval.transaction.nonce} ${approval.transaction.hash}` : ''} · onchain event ${approval.onchainApproval}${approval.reason ? ` · ${approval.reason}` : ''}`);
     for (const reason of report.risk.reasons.filter(item => !/^(Called|Scheduled):/.test(item.message))) console.log(`  RISK REASON ${reason.message}`);
     console.log(`  ${report.transaction.operation === 1 ? 'DELEGATECALL' : 'CALL'} ${report.transaction.to} · ${report.transaction.value} wei · nonce ${report.transaction.nonce}`);
     console.log(`  ${report.call.method ?? report.call.selector}${report.call.children.length ? ` · ${report.call.children.length} inner calls` : ''}`);
