@@ -71,6 +71,18 @@ test('home and every network example remain reachable from a result', async () =
   assert.equal(page.elements.get('network').value, 'amoy');
 });
 
+test('the published Amoy execution example opens with its network selected', async () => {
+  const catalog = JSON.parse(await readFile(pathResolve('web/network-examples.json'), 'utf8'));
+  const amoy = catalog.networks.find(row => row.network === 'amoy');
+  assert.equal(amoy.examples[0].kind, 'execution');
+  const page = ui({ exampleCatalog: catalog });
+  await new Promise(resolve => setImmediate(resolve));
+  const card = page.elements.get('example-catalog').children[catalog.networks.indexOf(amoy)];
+  card.children.find(child => child.tag === 'button').on_click();
+  assert.equal(page.elements.get('input').value, amoy.examples[0].hash);
+  assert.equal(page.elements.get('network').value, 'amoy');
+});
+
 test('network badges describe only the checks performed by the probe', () => {
   const page = ui();
   const full = page.evaluate("networkCoverageText({ pending: 'available', history: 'available', rpc: 'available', indexing: 'available' })");

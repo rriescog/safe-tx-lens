@@ -22,4 +22,5 @@ test('network carousel covers every named chain and never repeats a sample hash'
     }
   }
   assert.equal(new Set(hashes).size, hashes.length);
+  assert.ok(catalog.networks.find(row => row.network === 'amoy')?.examples.some(sample => sample.kind === 'execution'), 'Amoy should offer a real Safe execution example');
 });
