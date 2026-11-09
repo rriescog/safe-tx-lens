@@ -370,6 +370,22 @@ test('bytecode panel distinguishes checked proxy forwarding from an inferred rou
   assert.doesNotMatch(inferred, /reviewed proxy fallback/);
 });
 
+test('bytecode panel shows an observed executed upgrade without hiding the old ABI', () => {
+  const page = ui();
+  page.context.sample = { targetVerificationAttempted: true, transaction: { isExecuted: true }, targetChecks: [{
+    address: '0x2222222222222222222222222222222222222222', status: 'verified', reason: 'Runtime matched', blockTag: 99,
+    proxy: { standard: 'implementation() fallback', implementation: '0x3333333333333333333333333333333333333333', implementationCode: { status: 'verified', abiSelectors: [{ selector: '0x63c7b0f9', present: false }] } },
+    plannedImplementation: '0x5555555555555555555555555555555555555555',
+    plannedImplementationCode: { status: 'verified', abiSelectors: [{ selector: '0x63c7b0f9', present: true }] },
+    plannedImplementationObservation: { status: 'observed_at_execution_block', before: '0x3333333333333333333333333333333333333333', after: '0x5555555555555555555555555555555555555555', blockNumber: 100 },
+  }] };
+  const html = page.evaluate('targetChecksHtml(sample)');
+  assert.match(html, /Upgrade observed in block 100/);
+  assert.match(html, /old implementation ABI/);
+  assert.match(html, /new verified ABI/);
+  assert.match(html, /execution trace/);
+});
+
 test('source links reject unsafe schemes in both views', () => {
   const page = ui();
   page.context.sample = { to: '0x2222222222222222222222222222222222222222', value: '0', operation: 0, data: '0x12345678', selector: '0x12345678', method: 'foo(uint256)', args: [{ name: 'arg0', value: '1' }], decodeBasis: 'verified_abi', decodeSource: 'verified bytecode at inspected block', decodeSourceUrl: 'javascript:alert(1)', children: [] };

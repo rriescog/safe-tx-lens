@@ -32,6 +32,25 @@ export function recognizeLegacyFallback(check) {
   return known ? { status: 'verified_at_block', pattern: known.pattern, source: known.source, blockTag: check.blockTag } : null;
 }
 
+// Read the same proxy mechanism at a later block. A verified ABI tells us
+// what a selector means, while this read establishes which implementation
+// the proxy points to at that block. It cannot resolve intra-block order.
+export async function proxyImplementationAt(check, provider, blockTag) {
+  const standard = check.proxy?.standard;
+  let address;
+  if (standard === 'implementation() fallback') {
+    const iface = new Interface(['function implementation() view returns (address)']);
+    const raw = await provider.call({ to: check.address, data: iface.encodeFunctionData('implementation'), blockTag });
+    address = iface.decodeFunctionResult('implementation', raw)[0];
+  } else {
+    const slot = standard === 'ERC-1967' ? IMPLEMENTATION_SLOT : standard === 'ZeppelinOS implementation slot' ? LEGACY_IMPLEMENTATION_SLOT : standard === 'SafeProxy' ? 0 : null;
+    if (slot === null) return null;
+    const raw = await provider.getStorage(check.address, slot, blockTag);
+    address = `0x${raw.slice(-40)}`;
+  }
+  return isAddress(address) && !/^0x0{40}$/i.test(address) ? getAddress(address) : null;
+}
+
 function targets(root) {
   const found = new Map();
   const visit = node => {

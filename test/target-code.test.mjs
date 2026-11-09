@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Interface, keccak256 } from 'ethers';
+import { Interface, id, keccak256 } from 'ethers';
 import { inspectTargetCode, recognizeGetterFallback, recognizeLegacyFallback, sourcifyLookup } from '../src/target-code.mjs';
-import { analyze } from '../src/analyze.mjs';
+import { analyze, calculateHash, normalizeTransaction } from '../src/analyze.mjs';
 import { assessConfidence } from '../src/confidence.mjs';
 
 const TARGET = '0x2222222222222222222222222222222222222222';
@@ -180,6 +180,42 @@ test('verified ABI parameter aliases preserve upgrade target and check the propo
   const unresolved = await analyze({ safe: timelock, to: timelock, value: '0', data: payload, operation: 0, nonce: 1 }, 'eth', { fetchState: false, verifyTargets: true, targetProvider: rpc, sourceLookup: missingSource });
   assert.ok(unresolved.findings.some(item => item.code === 'TARGET_ABI_MISMATCH'));
   assert.equal(unresolved.findings.some(item => item.code === 'UPGRADE_TARGET_ABI_CONDITIONAL'), false);
+});
+
+test('executed upgrade automatically checks the Safe receipt and proxy implementation at the execution block', async () => {
+  const timelock = '0x4444444444444444444444444444444444444444';
+  const nextLogic = '0x5555555555555555555555555555555555555555';
+  const batch = new Interface(['function executeBatch(address[] targets,uint256[] values,bytes[] datas,bytes32 predecessor,bytes32 salt)']);
+  const upgrade = new Interface(['function updateImplementation(address newImplementation)']);
+  const validator = new Interface(['function reinitializeValidatorState(uint256 expectedIncrease)']);
+  const getter = new Interface(['function implementation() view returns (address)']);
+  const zero = `0x${'0'.repeat(64)}`;
+  const raw = {
+    safe: timelock, to: timelock, value: '0', operation: 0, nonce: 1,
+    data: batch.encodeFunctionData('executeBatch', [[TARGET, TARGET], [0, 0], [upgrade.encodeFunctionData('updateImplementation', [nextLogic]), validator.encodeFunctionData('reinitializeValidatorState', [123])], zero, zero]),
+    isExecuted: true, isSuccessful: true, blockNumber: 100, transactionHash: `0x${'a'.repeat(64)}`,
+  };
+  raw.safeTxHash = calculateHash(normalizeTransaction(raw), 'eth');
+  const source = async (_network, address) => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: '0x60016000' },
+    abi: address.toLowerCase() === timelock.toLowerCase() ? ['function executeBatch(address[] targets,uint256[] values,bytes[] datas,bytes32 predecessor,bytes32 salt)']
+      : address.toLowerCase() === TARGET.toLowerCase() ? ['function implementation() view returns (address)', 'function proxyType() view returns (uint256)', 'function updateImplementation(address _newProxyTo)', { type: 'fallback', stateMutability: 'payable' }]
+        : address.toLowerCase() === nextLogic.toLowerCase() ? ['function reinitializeValidatorState(uint256 expectedIncrease)'] : ['function oldValidatorAction(uint256)'] });
+  const rpc = {
+    getNetwork: async () => ({ chainId: 1n }), getCode: async () => '0x60016000', getStorage: async () => '0x',
+    call: async request => getter.encodeFunctionResult('implementation', [request.blockTag === 100 ? nextLogic : LOGIC]),
+    getTransactionReceipt: async () => ({ status: 1, blockNumber: 100, logs: [{ address: timelock, topics: [id('ExecutionSuccess(bytes32,uint256)'), raw.safeTxHash] }] }),
+  };
+  const review = await analyze(raw, 'eth', { fetchState: false, verifyTargets: true, targetProvider: rpc, sourceLookup: source });
+  assert.ok(review.findings.some(item => item.code === 'UPGRADE_TARGET_ABI_OBSERVED'));
+  assert.equal(review.findings.some(item => item.code === 'UPGRADE_TARGET_ABI_CONDITIONAL'), false);
+  const failedReceipt = { ...rpc, getTransactionReceipt: async () => ({ status: 1, blockNumber: 100, logs: [] }) };
+  const unproven = await analyze(raw, 'eth', { fetchState: false, verifyTargets: true, targetProvider: failedReceipt, sourceLookup: source });
+  assert.equal(unproven.findings.some(item => item.code === 'UPGRADE_TARGET_ABI_OBSERVED'), false);
+  assert.ok(unproven.findings.some(item => item.code === 'UPGRADE_TARGET_ABI_CONDITIONAL'));
+  const unchangedProxy = { ...rpc, call: async () => getter.encodeFunctionResult('implementation', [LOGIC]) };
+  const unchanged = await analyze(raw, 'eth', { fetchState: false, verifyTargets: true, targetProvider: unchangedProxy, sourceLookup: source });
+  assert.equal(unchanged.findings.some(item => item.code === 'UPGRADE_TARGET_ABI_OBSERVED'), false);
+  assert.ok(unchanged.findings.some(item => item.code === 'UPGRADE_TARGET_ABI_CONDITIONAL'));
 });
 
 test('assembly SafeProxy with constructor and fallback ABI resolves singleton', async () => {
