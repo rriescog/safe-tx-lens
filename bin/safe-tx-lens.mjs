@@ -10,7 +10,7 @@ function help() {
 
 Inputs: Safe tx hash, onchain execution tx hash, Safe address, app.safe.global URL, or JSON file (@path)
 Options:
-  --network <auto|eth|gno|pol|arb1|oeth|base|sep|kat|xlayer|bnb|avax|CHAIN_ID>
+  --network <auto|eth|gno|pol|arb1|oeth|base|sep|amoy|kat|xlayer|imx|bnb|avax|CHAIN_ID>
   --rpc <url>          Verify against the Safe contract; historical simulation
   --simulate           Simulate an inspected transaction with Tenderly
   --monitor-fallback    Explicitly allow a local Tenderly monitor snapshot if Safe services fail
@@ -19,6 +19,7 @@ Options:
   --once               Watch one poll and exit
   --port <number>      Local UI port (default 4173)
   --public             VPS mode: no owner keys, no simulation, shared daily budget
+  --community          Community mode: dedicated server key, shared web/MCP quota
   --origin <https://domain>  Required public UI origin
   --scope <pending|history|both>  Safe address listing (default pending)
   --safe-address <address>  Safe address to use when checking Builder JSON

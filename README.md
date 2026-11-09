@@ -1,192 +1,82 @@
 # Safe Tx Lens
 
-Read-only inspection for Safe multisig proposals. Give it a Safe transaction hash, an onchain execution hash, a Safe URL, a Safe address, or transaction JSON. It recalculates the EIP-712 hash, recursively opens supported nested calls, rates review priority from the decoded action and observed effects, and optionally simulates the actual `execTransaction` through Tenderly. The CLI can poll a Safe's offchain queue; the local UI and MCP server expose the same analysis.
+[![Tests and audit](https://github.com/rriescog/safe-tx-lens/actions/workflows/quality.yml/badge.svg?branch=main)](https://github.com/rriescog/safe-tx-lens/actions/workflows/quality.yml) [![Build and deploy](https://github.com/rriescog/safe-tx-lens/actions/workflows/ci-cd.yml/badge.svg?branch=main)](https://github.com/rriescog/safe-tx-lens/actions/workflows/ci-cd.yml) [![MIT License](https://img.shields.io/github/license/rriescog/safe-tx-lens)](LICENSE) [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-43853d)](package.json)
 
-The decoder processes each submitted transaction, regardless of whether its fields came from Safe Transaction Service, onchain execution, a URL, or imported JSON. Common signatures are recognized immediately; target-specific functions are decoded from Sourcify or a chain explorer ABI when available. The report distinguishes an ABI whose runtime bytecode matches the inspected RPC block from an explorer ABI that only describes a possible function signature. A signature database can suggest a name when neither source has an ABI, but that suggestion is labeled as unverified.
+**Independent, read-only review of Safe transactions before signing, while queued, and after execution.**
 
-## Why
+Safe Tx Lens reconstructs a transaction's fields, checks its Safe hash, decodes nested calls, and shows which contract-code and simulation checks actually ran. Use the [community interface](https://safetxlens.org/) or run the open-source UI, CLI, and MCP server on infrastructure you control. It never asks for a wallet connection, private key, or signature.
 
-A compromised multisig interface can show a benign description while presenting different calldata for approval. Safe Tx Lens helps a team compare the Safe hash, complete transaction fields, nested calls, target bytecode, and optional simulation before signing. The signing device's displayed hash and an independently obtained reference are critical parts of that review.
+## Why this exists
 
-## How to use the review
+A signing interface can display a benign description while presenting different transaction fields for approval. A reliable review starts with the exact hash shown on the signing device, then examines the fields, nested calls, target code, and any measured effects. Safe Tx Lens makes that work easier and exposes missing evidence. **It cannot certify that a transaction is safe.**
 
-1. Paste a Safe transaction hash, onchain execution hash, Safe address, Safe URL, or JSON export. For a Safe address, choose queued proposals or executed history and then select a transaction.
-2. Check the source and time of the transaction fields. Compare the recalculated hash with the exact hash shown on your signing device.
-3. Read the decoded call tree; the interactive graph is an optional additional view. Check the proposed changes and whether target bytecode verification actually ran and matched source at the relevant block.
-4. If configured, run one simulation and read only the state changes the provider returned. Use a separate implementation and a separately trusted source for the final review.
+## Start a review
 
-The UI has a one-click example based on [a published Safenet Beta rewards distribution](https://forum.safefoundation.org/t/sep-55-phase-2-fund-safenet-beta-for-safe-token-utility/6967/16) on Ethereum. The button sends its Safe hash through the same live inspection path as a user-supplied hash: the transaction source supplies the fields, the tool recalculates the Safe hash, and RPC checks the Safe contract hash and target bytecode when its provider responds. This consumes a service request and may report unavailable evidence when an upstream provider fails.
-
-On Chrome, the UI can be installed as an app when served on localhost or HTTPS. The service worker caches only an offline explanation page; transaction inputs, API responses and reports are never cached for offline viewing. The moving network strip includes Katana and X Layer icons from their respective [Katana brand kit](https://docs.katana.network/katana/additional-resources/brand-kit/) and [X Layer media kit](https://github.com/okx/xlayer-docs/tree/main/media-kit). Chain marks remain the property of their owners; their display does not imply endorsement or grant trademark rights under this project's MIT license.
-
-The optional interactive graph uses [Cytoscape.js](https://js.cytoscape.org/) under the MIT license, served from this installation rather than a third-party CDN. It is a view of the same decoded call tree shown first as accessible text. A long tree is capped at 79 calls in the graph; the text path retains all calls.
-
-The hosted interface and its Safe, RPC, Sourcify, and Tenderly providers are additional trust boundaries. For a stronger independent check, install the source on infrastructure you control, select an RPC you trust separately, and compare results with another implementation. This repository is currently private while the service is being prepared for a public MIT-licensed release; a hosted report is not a safety guarantee.
-
-Safe Transaction Service can retain unexecuted records whose nonce is already below the Safe's current nonce. The UI separates these obsolete records from proposals at or above the current nonce; an impact label is not a judgment that a proposal is malicious. Current signer confirmations still need independent checking.
-
-The review labels execution separately from risk: pending as reported by Safe, unsigned, obsolete nonce, executed with Safe success, executed with Safe failure, or executed with an unknown outcome. A Safe `ExecutionFailure` event means the inner Safe call failed; the outer EVM transaction may still have succeeded. Imported JSON without a live source is labeled “execution not established.” CLI and MCP JSON expose the machine-readable `executionStatus` field, while the UI states whether the result came from an onchain Safe event or an offchain transaction source.
-
-**This is an aid for human review, not a proof of safety.** A matching hash proves the supplied fields hash to the expected value. It does not prove target bytecode is benign. A successful simulation covers one chain state and one execution path. Verify the hash on a hardware wallet and inspect every critical call independently.
-
-**Decoding is not proof of behavior.** For a selected transaction, the tool reads runtime bytecode from that chain's RPC and compares its hash with Sourcify's verified runtime bytecode or Blockscout's verified deployed bytecode. Etherscan V2 and OKLink supply an ABI but not the bytecode comparison in this path; their labels stay **explorer ABI only**. It checks selectors against the matched ABI and follows ERC-1967 implementations and recognized SafeProxy slot-0 singletons. A bounded fallback queries [Sourcify's 4byte signature database](https://docs.sourcify.dev/docs/api/) and, if that returns no signatures, [4byte.directory](https://www.4byte.directory/docs/) for unknown selectors. A unique signature whose ABI exactly reproduces the calldata is shown as a **candidate**, never as verified target behavior. Missing source, a bytecode mismatch, and unavailable historical RPC state stay visible. Other proxy patterns, dynamically selected modules, delegatecall semantics, and code changes within a transaction need independent review. It does not decompile arbitrary EVM bytecode. The [per-network source matrix](docs/ABI-SOURCES.md) lists the providers and evidence limits.
-
-## Quick start
-
-Node.js 20 or newer:
-
-```sh
-npm install
-node bin/safe-tx-lens.mjs serve
-```
-
-Open <http://127.0.0.1:4173>. Choose hash, Safe address, Safe URL, or JSON in the guided form; it also recognizes pasted inputs automatically. The report distinguishes transaction fields fetched from Safe services from its local hash calculation and contract hash check via RPC. The UI binds only to localhost and never requests a wallet connection or signature.
-
-```sh
-# The Safe transaction hash is enough when the Safe API is available.
-node bin/safe-tx-lens.mjs inspect 0xYOUR_SAFE_TX_HASH --network eth
-
-# An executed Ethereum transaction can be reconstructed from public RPC without any API key.
-node bin/safe-tx-lens.mjs inspect 0xYOUR_ONCHAIN_EXECUTION_HASH --network eth
-
-# A Safe address discovers supported networks and inspects their pending proposals.
-node bin/safe-tx-lens.mjs inspect 0xYOUR_SAFE_ADDRESS --network auto
-
-# List recent executed history, or pending plus executed, for a Safe address.
-node bin/safe-tx-lens.mjs inspect 0xYOUR_SAFE_ADDRESS --network eth --scope history
-node bin/safe-tx-lens.mjs inspect 0xYOUR_SAFE_ADDRESS --network eth --scope both
-
-# A Safe URL carries the network and, when present, the transaction hash.
-node bin/safe-tx-lens.mjs inspect 'https://app.safe.global/transactions/tx?safe=eth:0xYOUR_SAFE_ADDRESS&id=multisig_...'
-
-# Local JSON works even when the Safe API is rate limited.
-node bin/safe-tx-lens.mjs inspect @transaction.json --network eth --rpc https://YOUR_RPC --json
-
-# Safe Transaction Builder exports are accepted as plans, even without nonce or Safe hash.
-node bin/safe-tx-lens.mjs inspect @builder-export.json --network eth
-node bin/safe-tx-lens.mjs inspect @builder-export.json --network eth --safe-hash 0xYOUR_SAFE_TX_HASH
-
-# Monitor new proposals and confirmations. Emits JSON for piping to your own alerting system.
-node bin/safe-tx-lens.mjs watch 0xYOUR_SAFE_ADDRESS --network eth --interval 30
-```
-
-Thirteen named networks are configured, but Amoy and Immutable zkEVM currently support only onchain execution hashes and supplied JSON because their Safe queue/history endpoints returned 404. Public RPC defaults may be unavailable, including [Katana](https://docs.katana.network/katana/technical-reference/network-information/) and [X Layer](https://web3.okx.com/it/onchainos/dev-docs/xlayer/developer/rpc-endpoints/rpc-endpoints). These endpoints need no user key but have no service guarantee. Katana and X Layer RPC chain IDs and Safe indexing, queued and history endpoints responded in the [bounded endpoint probe](docs/NETWORK-COVERAGE.md); that empty-address check does not establish that a particular transaction is indexed. No key is needed for local JSON analysis or reconstruction from an onchain execution transaction hash when a public RPC responds. Pending proposals are offchain, so an EVM RPC cannot recover their calldata from a Safe transaction hash. Safe Transaction Service access is needed for reliable hash-only lookup of pending proposals. [Anonymous access](https://docs.safe.global/core-api/how-to-use-api-keys) has a monthly quota; `SAFE_API_KEY` enables authenticated access.
-
-The site lists networks with current named integrations. Agglayer support is broader than the two queue-capable integrations shown in the moving strip: Immutable zkEVM is available for onchain execution hashes and supplied JSON, with queue/history still unverified. More Agglayer rollups require chain-specific RPC, Safe indexing, and source lookup checks before we advertise hash-only or Safe-address lookup. An explicit EVM chain ID allows manual inspection without implying those upstream services exist.
-
-For a Safe hash, the UI, CLI, and MCP look up offchain proposals through Safe services and can use an optional Etherscan event index to locate executed transactions. An indexed execution is reconstructed and checked against the EVM RPC; an index hit by itself is not treated as proof. For a Safe address, Safe services supply the pending queue and executed history; Ethereum history can fall back to a recent RPC scan. The RPC scan covers roughly the latest 8,000 blocks and reports its range. If every pending source fails, the queue is marked **unavailable**, never empty. Listings show at most 20 per category in the UI and MCP.
-
-A bare Safe hash does not encode a readable network or Safe address. The UI defaults to **Auto-detect**, which first checks public RPC receipts for a Safe execution event, then searches supported chain indexes and Safe Transaction Services for a proposal hash. A Safe URL supplies its own network. A bare Safe address is probed on supported chains; when found on several, the UI lets the reviewer choose a network. Network discovery depends on reachable services and may miss unsupported or unavailable chains. For an executed transaction, the report labels the onchain execution hash, block, and time separately from decoded intent. An empty measured state-diff section means no trace or simulation supplied those effects.
-
-### Credentials and RPC setup
-
-Copy `.env.example` to `.env`, fill only the services you use, then start with `node --env-file=.env bin/safe-tx-lens.mjs serve`. `.env` is gitignored; never paste a key into the web UI. Keys embedded in an RPC URL are secrets too.
-
-| Setting | Needed for | Local CLI/UI/MCP | Hosted community service today |
-| --- | --- | --- | --- |
-| `SAFE_API_KEY` | Reliable queued hash lookup and Safe pending/history listings | Recommended; anonymous quota is limited | Required; provision a dedicated service key as a server secret |
-| `RPC_URL_ETH`, `RPC_URL_POL` | Independent Ethereum/Polygon chain reads: Safe contract hash, execution receipt/logs, target bytecode, ERC-1967 slot, historical state when available | Recommended for dependable reviews; public RPC defaults exist | Dedicated RPC URLs are **not yet wired** into hosted mode; it uses public defaults |
-| Other `RPC_URL_<NETWORK>` | The same onchain checks on another selected network | Optional per selected chain | Dedicated URLs are **not yet wired** into hosted mode |
-| `ETHERSCAN_API_KEY` | Optional index for older executed Safe hashes and ABI/source fallback on eleven named networks | Optional; required for Etherscan ABI fallback | Configure a dedicated service key for this fallback |
-| `OKLINK_API_KEY` | X Layer verified contract ABI fallback through OKLink | Optional; public access may be limited | Configure a dedicated service key for this fallback |
-| `TENDERLY_ACCESS_KEY`, `TENDERLY_ACCOUNT`, `TENDERLY_PROJECT` | Optional simulation and measured state changes | Optional | Optional dedicated community project; disabled by default |
-| Sourcify | Verified runtime bytecode and ABI lookup | No key | No key; public API fair use applies |
-
-The keyless Ethereum default is [Alchemy's public endpoint](https://www.alchemy.com/rpc/ethereum). A bounded live probe returned historical `eth_getCode` at block 18,000,000; the previous PublicNode default rejected that request without a personal token. This one successful read does not establish availability or rate limits for a public service. Polygon still uses a shared PublicNode endpoint. Before a public deployment, configure dedicated Ethereum and Polygon RPCs with historical state and keep their provider credentials server-side; hosted deployment currently has no path to use dedicated RPCs.
-
-The network suffixes are `ETH` (Ethereum, chain 1), `POL` (Polygon PoS, 137), `GNO` (Gnosis, 100), `ARB1` (Arbitrum One, 42161), `OETH` (Optimism, 10), `BASE` (8453), `SEP` (Sepolia, 11155111), `AMOY` (Polygon Amoy, 80002), `KAT` (Katana, 747474), `XLAYER` (X Layer, 196), `IMX` (Immutable zkEVM, 13371), `BNB` (56), and `AVAX` (43114). A numeric chain ID uses `RPC_URL_<CHAIN_ID>` for explicit local inspection. Configure one endpoint **per network** for multi-chain use: the single `RPC_URL` or `--rpc` overrides every network in that process/request, so it is suitable only when inspecting one selected chain. The tool checks the RPC's `eth_chainId` against the selected network and reports a mismatch rather than trusting the wrong chain. For historical bytecode/storage checks, choose a provider that serves the required past block; if it cannot, the report labels current-only or unavailable evidence.
-
-Safe Transaction Service calls use its `katana` and `okb` aliases for the user-facing `kat` and `xlayer` network names. The UI accepts Safe URLs with those aliases and keeps chain IDs 747474 and 196 for hashing and RPC checks.
-
-Ethereum and Polygon PoS had working Safe indexing, pending and history endpoints, and matching public RPC chain IDs in the [dated network probe](docs/NETWORK-COVERAGE.md). That probe did **not** establish that every transaction, contract, or historical block can be verified. For a dependable public service, dedicated Ethereum and Polygon RPC endpoints, caching, provider failure handling, and end-to-end tests must be added to hosted mode before claiming that standard. A paid RPC plan alone does not change the present hosted configuration.
-
-[Safe Builder](https://safe.global/plans) provides a free authenticated plan with a monthly quota; Safe lists it for prototyping and its Growth plan for production. For simulation, set the Tenderly variables above, then use `--simulate` with CLI `inspect` or select the simulation button for one report in the UI. A simulation is saved in the configured Tenderly project. The local UI links to its trace for project members; the public UI shows returned effects but does not publish a private project URL. Tenderly simulations require an explicit sharing action before anyone can open them publicly.
-
-In the UI, open one transaction and select **Run simulation and inspect state changes**. This sends that transaction's calldata and signatures to the configured Tenderly project. The report separates decoded intent from storage, balance, and asset changes returned by the simulation. If signatures are insufficient, hash verification fails, or the provider omits the state diff, it reports that limit rather than claiming no changes. Simulation is opt-in per transaction so browsing a Safe queue does not submit dozens of simulations.
-
-```sh
-export SAFE_API_KEY='...'
-export ETHERSCAN_API_KEY='...'
-export RPC_URL_ETH='https://YOUR_ETHEREUM_RPC'
-export RPC_URL_POL='https://YOUR_POLYGON_RPC'
-export TENDERLY_ACCESS_KEY='...'
-export TENDERLY_ACCOUNT='your-account'
-export TENDERLY_PROJECT='your-project'
-node bin/safe-tx-lens.mjs serve
-```
-
-The JSON input should contain `safe`, `to`, `value`, `data`, `operation`, `nonce`, `safeTxGas`, `baseGas`, `gasPrice`, `gasToken`, and `refundReceiver`; absent numeric/gas fields default to zero. Include `safeTxHash` to check it against the calculated hash. For historical simulation include `transactionHash`, `blockNumber`, and either the exact `signatures` bytes from an onchain `execTransaction` or `confirmationsRequired` and `confirmations` from the Safe Transaction Service.
-
-Safe Transaction Builder exports have a different shape: `version`, `chainId`, `meta`, and `transactions`. The tool decodes each top-level transaction and nested timelock/governance call. The export's `meta.checksum` is **not** a Safe transaction hash. A Builder export omits the Safe nonce and gas fields, so it cannot prove a Safe hash on its own. In the UI, enter a Safe transaction hash in the comparison field to fetch the actual Safe transaction and check the target, value, operation, and calldata of every call in order. Executed Ethereum Safe hashes can also be found in recent onchain logs when Safe API access is exhausted; queued hashes still require the Safe Transaction Service.
-
-## MCP server
-
-See the [MCP setup and tool reference](docs/MCP.md) for local and hosted transports, examples, quotas, and evidence limits.
-
-`node bin/safe-tx-lens-mcp.mjs` starts a local stdio MCP server using the [official TypeScript SDK](https://ts.sdk.modelcontextprotocol.io/v2/). It exposes five read-only tools: `inspect`, `inspect_json`, `inspect_execution`, `list_pending`, and `list_history`. `inspect_json` can review offchain proposals without any API key; `inspect_execution` uses public Ethereum RPC. `list_pending` needs a reachable Safe Transaction Service. `list_history` can fall back to recent Ethereum RPC logs.
-
-For the public service, once DNS and the VPS are live, register its Streamable HTTP endpoint in Codex CLI/Desktop:
-
-```sh
-codex mcp add safe-tx-lens --url https://safetxlens.org/mcp
-```
-
-The endpoint is not live until deployment. To run the MCP entirely on your own machine, clone this repository, run `npm ci`, then from its root register the local process without manually writing a path:
-
-```sh
-codex mcp add safe-tx-lens-local -- node "$PWD/bin/safe-tx-lens-mcp.mjs"
-```
-
-The [VPS deployment guide](deploy/README.md) prepares `safetxlens.org` with a dedicated Safe API key, shared web/MCP quota, and CI/CD. Tenderly simulation is optional and requires a separate community project. DNS and a VPS have not yet been configured, so this repository is not a live public SaaS.
-
-## What the report distinguishes
-
-| Layer | Evidence | Limit |
+| Input | What the tool can do | What it still needs |
 | --- | --- | --- |
-| Hash | The user's supplied hash when available; local EIP-712 recomputation; onchain Safe `getTransactionHash` through an RPC when available | A pass confirms agreement about the supplied fields, not malicious target code or valid signer approvals |
-| Decoded action and risk | Built-in ABI for common transfers, approvals, Safe authority changes, upgrades, timelock calls, governance forwarding, validator calls, and recursive MultiSend; action-based impact and review priority | A matching selector does not verify the target bytecode or prove the action will execute; unknown selectors stay unknown |
-| Target code | Chain-checked RPC bytecode hash compared with Sourcify or verified Blockscout runtime when available; explorer ABI fallback for other contracts; ERC-1967 and recognized SafeProxy singleton inspection | Explorer ABI alone does not prove code identity; matching source does not prove safe behavior; archive state and other proxy patterns need manual review |
-| Observed effect | Storage, native balance, and asset changes reported by a simulation, with Safe singleton slot 0 highlighted | Only available when simulation succeeds and the provider returns changes |
-| Execution | Safe Transaction Service status and optional historical simulation at the previous block | A simulated success never guarantees future execution |
+| Safe transaction hash | Search available sources, reconstruct fields, and recalculate the hash | A reachable proposal or execution source; the hash contains neither chain ID nor Safe address |
+| Onchain execution hash | Reconstruct an executed Safe transaction | An RPC serving that transaction and relevant historical state |
+| Safe address or Safe URL | List queued proposals or executed history, then inspect a selection | Safe list endpoints for that network |
+| Transaction JSON or Builder export | Decode supplied fields and compare hashes when complete | Independent provenance; a Builder plan alone has no Safe nonce or transaction hash |
 
-Simulation uses the transaction's actual fields and either exact onchain signature bytes or standard 65-byte confirmation signatures. For a queued transaction without enough signatures, it can make a **conditional preview** after checking the current Safe threshold and owner onchain: Tenderly temporarily overrides the threshold to one and uses an approved-hash signature from a verified owner. This does not reproduce real approval or guarantee actual execution; the report labels it separately and does not credit it as a faithful simulation. Historical simulations require the real execution sender and an RPC receipt or block number; the tool will not guess a sender because it can change Safe signature checks. Building complex offchain contract signature layouts from confirmations needs further support.
+Network discovery and provider access are best-effort. An unavailable queue is marked **unavailable**, never empty. Supplied JSON can still be inspected when offchain lookup fails. The [dated network coverage](docs/NETWORK-COVERAGE.md) reports actual endpoint checks, and the [ABI source matrix](docs/ABI-SOURCES.md) describes contract lookup routes.
 
-The report names the origin of the transaction fields. For a queued Safe hash, Safe Transaction Service or Client Gateway supplies the fields; local EIP-712 calculation checks that they produce the requested hash. The Safe contract hash check asks the contract through an RPC, independently of the Safe service if that RPC is separately trusted. If the input is only a Safe address, there is no independently supplied reference hash until the reviewer compares the result with the signing device. Imported JSON is not a second source if it was downloaded from the same Safe service. API confirmation labels and signatures are not independently validated by the hash checks.
+### Read the result
 
-For a 1/1 Safe with an empty normal queue, an authenticated inspection makes one bounded query for Safe Transaction Service records with `trusted=false`. Any returned item is labeled unsigned and untrusted; its fields are still checked against its Safe hash locally. If the transaction has not been indexed at all, a hash alone cannot reveal it. Import its complete transaction JSON to inspect the proposed call before signing.
+1. Check the source of the transaction fields. Compare the calculated Safe hash with your signing device.
+2. Read the decoded call tree, including nested calls. The interactive graph is an additional view of the same tree.
+3. Check whether target code was verified at the inspected block, verified only against current state, decoded from an unmatched ABI, or left unknown.
+4. If simulation is configured, request it for the selected transaction and inspect only the effects returned. Cross-check critical conclusions with a separately trusted source.
 
-Normal hash and Safe address lookups never read monitor snapshots. A local CLI can explicitly opt into a snapshot fallback with `--monitor-fallback`; incomplete records are marked unverified. The hosted service never enables this fallback. A Tenderly simulation is a separate, explicit action.
+The 0–10 **evidence confidence** number measures how much of the report could be checked; it is not a safety score. Review priority describes possible impact, not malicious intent. A decoded selector or ABI describes calldata format, not contract behavior. See the [review model](docs/REVIEW-MODEL.md).
 
-`watch` polls the first 100 pending proposals, reports new proposals and confirmation-count changes, and fetches the final status when a tracked proposal leaves the queue. It is a local process, not a hosted 24/7 monitor. The UI displays up to 20 pending proposals per refresh and marks when a tracked proposal leaves the queue. The interface never submits a transaction or a signature.
+## Run it yourself
 
-The browser's 30-second watch control is available only on a loopback hostname in local mode. Public and community modes remove it; hosted web and MCP requests share a quota. JSON files can be selected or dropped into the browser. They are parsed as data, never executed, and bounded to 5 MB locally or 256 KB publicly; an export can still be false or incomplete, so check its provenance. The MIT license retains the author's copyright while granting its stated permissions.
+Requires Node.js 20 or newer:
 
-## External services
+```sh
+git clone https://github.com/rriescog/safe-tx-lens.git
+cd safe-tx-lens
+npm ci
+npm start
+```
 
-[Safe Transaction Service](https://docs.safe.global/core-api/api-safe-transaction-service) supplies indexed offchain proposals. [Sourcify](https://docs.sourcify.dev/), [Etherscan V2](https://docs.etherscan.io/supported-chains), [Blockscout](https://docs.blockscout.com/api-reference/get-smart-contract), and [OKLink](https://www.oklink.com/docs/en/) supply contract metadata according to the [source matrix](docs/ABI-SOURCES.md). Optional simulations use Tenderly when configured. The application labels which evidence came from each service and which checks were performed locally.
+Open [http://127.0.0.1:4173](http://127.0.0.1:4173). The local UI binds to loopback. Chrome can install it as an app on localhost or HTTPS; the service worker does not cache transaction inputs or reports.
 
-## Security and limitations
+The CLI uses the same analysis:
 
-- Supported Safe Transaction Service network prefixes are listed in `src/chains.mjs`. A supplied Safe URL must be on `https://app.safe.global` without credentials. The URL is parsed, never fetched. Hashes, addresses, and JSON are accepted as data; hosted callers cannot supply an RPC URL or another outbound endpoint.
-- Other EVM chain IDs can be entered explicitly in the UI, CLI (`--network 130`), or MCP. JSON with a valid chain ID can select that chain automatically for offline decoding and EIP-712 hashing. Safe Client Gateway must serve that chain for pending proposals; set `RPC_URL_<CHAIN_ID>` or `--rpc` to check contract bytecode. Hash-only or address-only automatic chain discovery remains limited to the ten mainnet integrations: a 32-byte hash has no chain ID, and probing every Safe-supported chain on each public request would exhaust provider quotas. For another chain, supply its chain ID or a Safe URL that contains it. An unavailable Safe service is reported rather than guessed.
-- [Dated network coverage](docs/NETWORK-COVERAGE.md) records actual Safe indexing, pending and history endpoint responses alongside RPC chain-ID checks. The UI displays the same dated snapshot; a live request may differ. Recheck with `npm run check:networks -- --live --snapshot web/network-coverage.json`. The script caps and paces Safe requests, stops on HTTP 429 or low remaining quota, and never publishes the key or quota headers in the UI snapshot.
-- The tool fetches from fixed Safe, Tenderly, Sourcify, Etherscan V2, Blockscout, and OKLink endpoints plus network-specific public RPCs. `--rpc` or `RPC_URL_<NETWORK>` selects another RPC. The local UI listens on `127.0.0.1` and does not expose API keys to the browser.
-- The built-in ABI list covers common calls. Unknown selectors are decoded from a matching verified runtime ABI when one is available; otherwise an explorer ABI may decode arguments with an explicit **unmatched bytecode** label. The verifier follows ERC-1967 and recognized SafeProxy singleton storage. For verified fallback contracts exposing `implementation()` and `proxyType()`, it also inspects the reported implementation. Forwarding is marked checked at the inspected block only for reviewed proxy runtime fingerprints whose verified source proves the getter and delegatecall fallback use the same implementation; other routes remain inferred. A function name describes the call format, not what the contract will actually do. Historical code may be unavailable; the report labels current-only matches.
-- The colored 0–10 figure measures evidence coverage, not safety or the probability of an exploit. A failed Safe hash check forces it to zero. Unavailable historical code caps the score.
-- Browser and API inputs, uploaded JSON, ABI labels, and MCP arguments are treated as untrusted data. The service validates structure and size, and the UI escapes or constructs text nodes for external values. There is no LLM in the inspection path, so transaction content is never promoted into prompt instructions.
-- Unavailable routes and unexpected inspection failures return a readable apology and incident reference. The server logs only that reference, time, category, and HTTP status; it does not put the URL, IP, hash, calldata, or credentials in the incident record. Expected bad input is explained without creating an incident. The reference is for operator follow-up; no external alerting service is configured yet.
-- The public service verifies code for a selected transaction, with the request charged to the same per-client quota as other web and MCP requests. Queue listings remain lightweight. The separate keyless public demo also attempts live ABI and bytecode verification for a single selected transaction, capped at four target contracts; skipped targets remain visibly unchecked.
-- Donation addresses are not shown until the maintainer configures `PUBLIC_DONATION_WALLETS` as a JSON array of `{ "network": "eth", "address": "0x..." }` entries. Check the network and address before sending funds. No Bitcoin address is configured. Network logo files come from [Trust Wallet Assets](https://github.com/trustwallet/assets) under its MIT license, reproduced in `web/assets/chains/LICENSE`.
-- State diffs can omit internal semantics and token transfers depending on Tenderly's response. The UI separates simulated asset movements from storage changes, formats `balanceOf` mappings when their keys and values are valid, and keeps the raw values available. Tenderly `balance_changes` summaries without before/after values are informational, not native balance diffs or warnings about the transaction. A true `balance_diff` record missing those values is reported as incomplete evidence.
-- A compromised RPC, Safe API, Tenderly service, computer, browser, or signing device can still mislead the reviewer. Cross-check against another provider and the hardware wallet display.
-- There is no claim that this tool alone would have prevented Bybit or any other incident. Operators need independent verification, signer process controls, and incident response procedures.
+```sh
+node bin/safe-tx-lens.mjs inspect 0xSAFE_TRANSACTION_HASH --network auto
+node bin/safe-tx-lens.mjs inspect 0xEXECUTION_HASH --network eth --json
+node bin/safe-tx-lens.mjs inspect 0xSAFE_ADDRESS --network eth --scope both
+node bin/safe-tx-lens.mjs inspect @transaction.json --network eth
+node bin/safe-tx-lens.mjs help
+```
 
-Report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
+The local `watch` command polls one Safe and emits JSON events; it is not a hosted monitoring control. See [MCP usage](docs/MCP.md) for local and hosted clients and the [deployment guide](deploy/README.md) for a community service.
 
-## Development
+### Credentials
+
+**No key is required** to decode supplied JSON or try an executed transaction through a working public RPC. Pending offchain proposals need a proposal source; an EVM RPC alone cannot recover their calldata from a Safe hash. Authenticated Safe access improves lookup reliability, and dedicated RPCs improve onchain and historical checks.
+
+Copy [`.env.example`](.env.example) to `.env` and set only the providers you use. Keep keys and keyed RPC URLs out of Git, browser inputs, and MCP arguments. Tenderly simulation is optional and disabled when its credentials and project are absent. The hosted service uses its own server-side credentials and quotas, never a visitor's local environment. See [configuration](docs/CONFIGURATION.md) for the settings and hosted-mode limits.
+
+## Evidence and limits
+
+The tool hashes transaction fields locally with EIP-712 and, when possible, asks the Safe contract for its hash through an RPC. Nested calldata is decoded with built-in ABIs, verified contract metadata, explorer ABIs, or clearly labeled candidate signatures. Runtime bytecode is compared with verified source when both the source and an appropriate RPC block are available. Recognized proxy implementation paths are inspected separately.
+
+Simulation is an **explicit** Tenderly request. It can show storage and asset changes for one chain state and execution path; missing values stay missing. A conditional preview that changes Safe state inside the simulation is labeled and does not establish approval or faithful execution. For an executed transaction, the report distinguishes Safe success, Safe failure, and an unknown outcome.
+
+Each report states which checks passed, were unavailable, or remain inferred. Safe services, RPCs, source registries, browsers, and signing devices are separate trust boundaries. Self-hosting gives you control over code, keys, RPCs, and logs; it does not eliminate external dependencies. See the [review model](docs/REVIEW-MODEL.md) for the exact boundaries.
+
+## Tests and project policy
 
 ```sh
 npm test
+npm run test:fuzz
+npm run test:coverage
 ```
 
-MIT licensed. Contributions for verified ABI sources, proxy detection, richer state effects, and safe historical replay are welcome.
+The **Tests and audit** badge reports the pull request and `main` verification workflow. The **Build and deploy** badge reports the separate production workflow; it can fail even when tests pass. Neither badge claims 100% coverage or universal provider availability. Automated tests use controlled providers; live endpoint observations are documented separately.
+
+All changes to `main` go through a pull request and CI. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the process and [SECURITY.md](SECURITY.md) to report a vulnerability privately. The project is [MIT licensed](LICENSE). Third-party chain logos remain the property of their owners; see [asset licenses](web/assets/chains/LICENSE).

@@ -1,10 +1,10 @@
 # MCP usage
 
-Safe Tx Lens exposes read-only MCP tools. The planned community endpoint is `https://safetxlens.org/mcp` over Streamable HTTP and shares the web UI's quota. It is **not live yet**: the domain, DNS and VPS must be ready first. A local stdio server is available when you run your own copy.
+Safe Tx Lens exposes read-only MCP tools. The community endpoint is `https://safetxlens.org/mcp` over Streamable HTTP and shares the web UI's quota. Its MCP initialization response was checked on 2026-11-09; individual upstream lookups may still be unavailable or rate limited. A local stdio server is available when you run your own copy.
 
 Each MCP call requests only the analysis or Safe transaction list named by its tool. `list_history` means executed transactions belonging to the supplied Safe; it never reads previous users' requests. The application does not save a per-user request history, hashes, calldata, or IP addresses in its quota file. It saves aggregate daily/monthly usage counts; per-IP counters remain in process memory for the current day. Error logs contain a generated incident ID, category, time, and status without the input. An operator's reverse proxy or infrastructure may have separate access logs, so a self-hosted instance should configure those explicitly.
 
-## Connect to the community service after launch
+## Connect to the community service
 
 Codex CLI/Desktop:
 
@@ -46,7 +46,7 @@ The local server can run a Tenderly simulation only when `simulate: true` and cr
 
 ## Hosted `/mcp`
 
-When `serve --community` is deployed behind HTTPS, use `https://safetxlens.org/mcp` with an MCP client that supports Streamable HTTP. This endpoint exposes `inspect`, `inspect_json`, `list_pending`, and `list_history`. It caps queue/history results at five, input bodies at 256 KB, and rejects caller-supplied RPC URLs, credentials, polling and simulation parameters. Supplied URLs must be HTTPS links to `app.safe.global`; the service parses them for Safe fields and never fetches them as URLs. Bare hashes, Safe addresses, and transaction JSON remain valid data inputs. It does not expose `inspect_execution` as a separate tool; `inspect` accepts an execution hash. The web UI and MCP share an operator-wide daily/monthly budget and a per-IP request allowance. On exhaustion the HTTP response is 429 with `Retry-After`.
+The hosted `https://safetxlens.org/mcp` endpoint exposes `inspect`, `inspect_json`, `list_pending`, and `list_history`. It caps queue/history results at five, input bodies at 256 KB, and rejects caller-supplied RPC URLs, credentials, polling and simulation parameters. Supplied URLs must be HTTPS links to `app.safe.global`; the service parses them for Safe fields and never fetches them as URLs. Bare hashes, Safe addresses, and transaction JSON remain valid data inputs. It does not expose `inspect_execution` as a separate tool; `inspect` accepts an execution hash. The web UI and MCP share an operator-wide daily/monthly budget and a per-IP request allowance. On exhaustion the HTTP response is 429 with `Retry-After`.
 
 MCP tool descriptions are instructions to the client about input format, not a security guarantee. Treat transaction metadata, ABI text, JSON files, and contract source as untrusted data. Verify every important hash on a signing device and compare critical results with a separate implementation.
 
