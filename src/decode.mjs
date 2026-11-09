@@ -16,6 +16,7 @@ const IFACE = new Interface([
   'function disableModule(address prevModule,address module)',
   'function setGuard(address guard)',
   'function setFallbackHandler(address handler)',
+  'function approveHash(bytes32 hashToApprove)',
   'function upgradeTo(address implementation)',
   'function upgradeToAndCall(address implementation,bytes data)',
   'function upgradeAndCall(address proxy,address implementation,bytes data)',
@@ -235,6 +236,7 @@ export function summarizeCalls(root) {
     else if (method === 'forceUnstakePOL') label = `Force unstake POL validator #${argument('validatorId')}`;
     else if (method === 'reinitializeValidatorState') label = `Reinitialize validator state; expected increase ${argument('expectedIncrease')}`;
     else if (method === 'cleanMapToken') label = `Clean token mapping: root ${argument('rootToken')}, child ${argument('childToken')}`;
+    else if (method === 'approveHash') label = `Approve Safe hash ${argument('hashToApprove')}`;
     else if (node.token && method === 'transfer') label = `Transfer ${node.token.amount ?? argument('amount')} ${node.token.symbol} to ${argument('to')}`;
     else if (node.token && method === 'transferFrom') label = `Transfer ${node.token.amount ?? argument('amount')} ${node.token.symbol} from ${argument('from')} to ${argument('to')}`;
     else if (node.token && method === 'approve') label = `Approve ${node.token.amount ?? argument('amount')} ${node.token.symbol} for ${argument('spender')}`;

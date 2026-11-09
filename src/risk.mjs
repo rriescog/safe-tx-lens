@@ -17,6 +17,7 @@ function actionImpact(action) {
   if (method === 'reinitializeValidatorState') return { score: 90, reason: 'Reinitializes validator accounting state.' };
   if (['forceUnstake', 'forceUnstakePOL'].includes(method)) return { score: 80, reason: 'Forces a validator to unstake; impacts validator operations and funds flow.' };
   if (['approve', 'increaseAllowance', 'setApprovalForAll'].includes(method)) return { score: 80, reason: 'Grants or increases spending or operator authority.' };
+  if (method === 'approveHash') return { score: 85, reason: 'Approves a Safe transaction hash as this contract owner; inspect the linked transaction before signing.' };
   if (['transfer', 'transferFrom'].includes(method)) return { score: 75, reason: 'Moves tokens; value and recipient need independent review.' };
   if (/^(retrieveRemaining|withdrawAll|emergencyWithdraw|sweep|sweepToken|rescueTokens|recoverERC20)$/i.test(method ?? '')) return { score: 80, reason: 'Function name suggests a balance recovery or sweep; inspect verified source and token flows before signing.' };
   if (method === 'cleanMapToken') return { score: 80, reason: 'Changes token mapping; verify bridge effects against events and storage.' };
