@@ -42,7 +42,7 @@ function communityCost(input, network, scope, { simulate = false, verifyTargets 
 function denied(res, ticket) {
   const seconds = ticket.retryAfterSeconds ?? 2;
   const error = ticket.reason === 'busy' ? 'The service is busy. Please retry shortly.' : `Usage limit reached. Please try again in ${seconds} seconds.`;
-  return reply(res, 429, { error, retryAfterSeconds: seconds }, 'application/json', { 'Retry-After': String(seconds) });
+  return reply(res, 429, { error, code: ticket.reason === 'busy' ? 'SERVICE_BUSY' : 'USAGE_LIMIT', retryAfterSeconds: seconds }, 'application/json', { 'Retry-After': String(seconds) });
 }
 
 export function redactPrivateSimulationUrl(result) {
@@ -153,7 +153,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           if (payload.scope === 'both') return reply(res, 400, { error: 'Select pending or history on the public demo' });
           if (payload.verifyTargets === true) return reply(res, 403, { error: 'Bulk target verification is available in the local tool' });
           const ticket = quota.take();
-          if (!ticket.allowed) return reply(res, 429, { error: ticket.reason === 'busy' ? 'Public demo is busy; retry shortly' : 'Public demo daily request budget reached; use the CLI locally' });
+          if (!ticket.allowed) return reply(res, 429, { error: ticket.reason === 'busy' ? 'Public demo is busy; retry shortly' : 'Public demo daily request budget reached; use the CLI locally', code: ticket.reason === 'busy' ? 'SERVICE_BUSY' : 'USAGE_LIMIT' });
           try {
             return reply(res, 200, await inspectionResolver(payload.input, payload.network ?? 'eth', { simulate: false, fetchState: false, verifyTargets: singleTransaction, targetLimit: 4, decodeCandidates: payload.decodeCandidates === true, limit: 5, scope: payload.scope ?? 'pending', safeAddress: payload.safeAddress, safeHash: payload.safeHash }));
           } finally { quota.release(); }

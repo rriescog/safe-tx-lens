@@ -188,18 +188,17 @@ function updateWizard() {
 inputMode.addEventListener('change', updateWizard);
 updateWizard();
 document.getElementById('try-example').addEventListener('click', () => {
-  // Run this known execution hash through the same live inspection path as
-  // user-supplied hashes. A saved report would skip the very RPC checks that
-  // the example is meant to demonstrate.
-  const executionHash = '0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b';
+  // Use a published Safe hash and the ordinary live inspection path. A saved
+  // report would conceal whether the transaction source and RPC work today.
+  const exampleHash = '0x7bcc49dac788990018d8715a05502991ead142de209f3c8bc0adc72e252a67bb';
   importedJson = null;
   inputMode.value = 'hash';
-  input.value = executionHash;
-  network.value = 'eth';
+  input.value = exampleHash;
+  network.value = 'arb1';
   document.getElementById('custom-chain-group').hidden = true;
   updateWizard();
-  report.innerHTML = '<div class="empty" role="status"><h2>Inspecting the example live</h2><p>Reading the Ethereum execution and checking its target contracts through RPC.</p></div>';
-  return inspect({ overrideInput: executionHash, overrideNetwork: 'eth' });
+  report.innerHTML = '<div class="empty" role="status"><h2>Inspecting the example live</h2><p>Reading the published Arbitrum transaction and checking its target contracts through RPC.</p></div>';
+  return inspect({ overrideInput: exampleHash, overrideNetwork: 'arb1' });
 });
 // A copied local link may include a transaction hash in its query string.
 // Prefill only a valid hash and require an explicit review click, so merely
@@ -579,7 +578,7 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
     const result = await response.json().catch(() => null);
     if (!result || !response.ok) {
       const failure = new Error(result?.error ?? 'The service returned an unexpected response. Please retry.');
-      failure.code = result?.code ?? 'SERVICE_ERROR';
+      failure.code = result?.code ?? (response.status === 429 ? 'USAGE_LIMIT' : 'SERVICE_ERROR');
       failure.incidentId = result?.incidentId ?? null;
       throw failure;
     }
@@ -629,8 +628,10 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
     } else { if (priorHash?.toLowerCase() === result.hash?.toLowerCase()) { if (priorEvidence) result.evidence = priorEvidence; if (priorTargetChecks?.length) result.targetChecks = priorTargetChecks; } const retryNote = retryTargets ? JSON.stringify(previousTargetChecks) === JSON.stringify(result.targetChecks) ? 'Checked again: no new bytecode evidence. This RPC and Sourcify returned the same result. Review the reason below or use another trusted RPC locally.' : 'Checked again: bytecode evidence changed. Review the updated status and contract details below.' : ''; showTransactionReport(result, retryNote); status.textContent = retryTargets ? 'Bytecode check completed' : simulate ? 'Simulation reviewed' : 'Inspection complete'; if (watch.checked) { watch.checked = false; clearInterval(timer); timer = null; } }
   } catch (error) {
     const recorded = error.incidentId ? `<p class="meta">We recorded this issue to improve the service. Reference: <code>${esc(error.incidentId)}</code></p>` : '';
-    status.textContent = error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'Check the input or network' : 'Sorry, we could not complete the inspection';
-    report.innerHTML = `<div class="empty"><h2>${error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'We could not inspect this input' : 'Sorry, something went wrong'}</h2><p>${esc(error.message)}</p>${recorded}</div>`;
+    const limited = error.code === 'USAGE_LIMIT' || error.code === 'UPSTREAM_LIMITED';
+    const support = limited ? '<div class="limit-support"><strong>Help us increase public capacity</strong><p>Donations and infrastructure sponsors can fund more transaction lookups, RPC access, and simulations. They do not bypass this limit or guarantee immediate availability.</p><div><a href="#community-support">Donation options</a><a href="https://x.com/rriescog" target="_blank" rel="noopener noreferrer">Sponsor the service ↗</a></div></div>' : '';
+    status.textContent = limited ? 'Request limit reached' : error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'Check the input or network' : 'Sorry, we could not complete the inspection';
+    report.innerHTML = `<div class="empty"><h2>${limited ? 'Request limit reached' : error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'We could not inspect this input' : 'Sorry, something went wrong'}</h2><p>${esc(error.message)}</p>${recorded}${support}</div>`;
   }
   finally { submit.disabled = false; }
 }

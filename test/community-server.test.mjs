@@ -35,7 +35,9 @@ test('community web and hosted MCP share the same IP quota while deep review has
     const limited = await post('/api/inspect', { input: plan, network: 'eth' });
     assert.equal(limited.status, 429);
     assert.ok(Number(limited.headers.get('retry-after')) > 0);
-    assert.match((await limited.json()).error, /try again in/i);
+    const limitedBody = await limited.json();
+    assert.match(limitedBody.error, /try again in/i);
+    assert.equal(limitedBody.code, 'USAGE_LIMIT');
     const noIdentity = await post('/api/inspect', { input: plan }, { 'x-client-ip': 'spoof' });
     assert.equal(noIdentity.status, 403);
     const otherClient = await post('/api/inspect', { input: plan, network: 'eth' }, { 'x-client-ip': '203.0.113.2' });

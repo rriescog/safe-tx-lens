@@ -307,26 +307,44 @@ test('deep link prefills only a valid transaction hash without fetching data', (
   assert.equal(invalid.elements.get('input').value, '');
 });
 
-test('one-click example runs the live inspection path and RPC checks', async () => {
+test('one-click Arbitrum example runs the live inspection path and RPC checks', async () => {
   const page = ui();
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
   const review = await analyze(tx, 'eth', { fetchState: false });
   review.checks.push({ name: 'Safe contract hash', method: 'onchain_rpc', status: 'pass', detail: review.hash });
   review.targetVerificationAttempted = true;
   review.targetChecks = [{ address: tx.to, status: 'verified', reason: 'matched', blockTag: 'latest' }];
-  review.evidence = { source: 'onchain_execution', executionHash: '0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b', blockNumber: 26347372 };
+  review.evidence = { source: 'safe_api', requestedHash: '0x7bcc49dac788990018d8715a05502991ead142de209f3c8bc0adc72e252a67bb', retrievedAt: 'now' };
   const requests = [];
   page.context.fetch = async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => review }; };
   await page.elements.get('try-example').on_click();
-  assert.equal(page.elements.get('input').value, '0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b');
-  assert.equal(page.elements.get('network').value, 'eth');
+  assert.equal(page.elements.get('input').value, '0x7bcc49dac788990018d8715a05502991ead142de209f3c8bc0adc72e252a67bb');
+  assert.equal(page.elements.get('network').value, 'arb1');
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, '/api/inspect');
+  assert.equal(JSON.parse(requests[0].options.body).network, 'arb1');
   assert.equal(JSON.parse(requests[0].options.body).verifyTargets, true);
-  assert.match(page.elements.get('report').innerHTML, /Verified from eth onchain execution/);
+  assert.match(page.elements.get('report').innerHTML, /Safe Transaction Service/);
   assert.match(page.elements.get('report').innerHTML, /Safe contract calculation by RPC/);
   assert.match(page.elements.get('report').innerHTML, /Verified bytecode/);
   assert.equal(page.elements.get('status').textContent, 'Inspection complete');
+});
+
+test('request limits offer donation and sponsorship without claiming a bypass', async () => {
+  const page = ui();
+  page.elements.get('input').value = `0x${'a'.repeat(64)}`;
+  page.context.fetch = async () => ({ ok: false, status: 429, json: async () => ({ error: 'Usage limit reached. Please try again in 60 seconds.', code: 'USAGE_LIMIT' }) });
+  await page.evaluate('inspect()');
+  const html = page.elements.get('report').innerHTML;
+  assert.match(html, /Request limit reached/);
+  assert.match(html, /href="#community-support">Donation options/);
+  assert.match(html, /Sponsor the service/);
+  assert.match(html, /do not bypass this limit/);
+  assert.match(html, /60 seconds/);
+
+  page.context.fetch = async () => ({ ok: false, status: 429, json: async () => ({ error: 'Service is busy', code: 'SERVICE_BUSY' }) });
+  await page.evaluate('inspect()');
+  assert.doesNotMatch(page.elements.get('report').innerHTML, /Donation options/);
 });
 
 test('verification panel distinguishes supplied data, a user hash, local calculation, and RPC', async () => {
