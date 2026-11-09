@@ -1,5 +1,5 @@
 {
-  "checkedAt": "2026-11-08T23:49:33.198Z",
+  "checkedAt": "2026-11-09T20:36:53.914Z",
   "method": "Authenticated Safe Transaction Service indexing, pending and history endpoints with an empty test address; RPC eth_chainId",
   "networks": [
     {

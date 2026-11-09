@@ -3,9 +3,49 @@ import assert from 'node:assert/strict';
 import { probeNetworks, publicSnapshot } from '../scripts/check-networks.mjs';
 import { CHAINS } from '../src/chains.mjs';
 import { analyze } from '../src/analyze.mjs';
+import { PUBLIC_RPC } from '../src/onchain.mjs';
+import { readFile } from 'node:fs/promises';
 
 const credentials = async () => ({ SAFE_API_KEY: 'fixture-only' });
 const pause = async () => {};
+
+test('every advertised named network has a configured RPC, coverage row, example row, and local override name', async () => {
+  const [coverage, examples, html, env] = await Promise.all([
+    readFile(new URL('../web/network-coverage.json', import.meta.url), 'utf8').then(JSON.parse),
+    readFile(new URL('../web/network-examples.json', import.meta.url), 'utf8').then(JSON.parse),
+    readFile(new URL('../web/index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../.env.example', import.meta.url), 'utf8'),
+  ]);
+  const networks = Object.keys(CHAINS).sort();
+  assert.deepEqual(Object.keys(PUBLIC_RPC).sort(), networks);
+  assert.deepEqual(coverage.networks.map(row => row.network).sort(), networks);
+  assert.deepEqual(examples.networks.map(row => row.network).sort(), networks);
+  for (const network of networks) {
+    assert.match(html, new RegExp(`<option value="${network}"`));
+    assert.match(env, new RegExp(`^RPC_URL_${network.toUpperCase()}=`, 'm'));
+    assert.equal(coverage.networks.find(row => row.network === network).chainId, CHAINS[network]);
+  }
+  assert.equal(new Set(coverage.networks.map(row => row.network)).size, networks.length);
+  assert.equal(new Set(examples.networks.map(row => row.network)).size, networks.length);
+});
+
+test('production configuration inventory names every Compose and deployment setting', async () => {
+  const [env, ...configs] = await Promise.all([
+    readFile(new URL('../.env.example', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/compose.yaml', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/compose.tenderly.yaml', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/compose.etherscan.yaml', import.meta.url), 'utf8'),
+    readFile(new URL('../deploy/compose.oklink.yaml', import.meta.url), 'utf8'),
+    readFile(new URL('../.github/workflows/ci-cd.yml', import.meta.url), 'utf8'),
+  ]);
+  const workflow = configs.pop();
+  const compose = configs.join('\n');
+  const variableNames = [...compose.matchAll(/\$\{([A-Z][A-Z0-9_]*)(?::[^}]*)?\}/g)].map(match => match[1]);
+  for (const name of variableNames) assert.match(env, new RegExp(`^${name}=`, 'm'));
+  const repoSettings = [...workflow.matchAll(/\$\{\{\s*(?:vars|secrets)\.([A-Z][A-Z0-9_]*)\s*\}\}/g)].map(match => match[1]);
+  for (const name of repoSettings) assert.match(env, new RegExp(`\\b${name}\\b`));
+  for (const name of ['SAFE_API_KEY_FILE', 'TENDERLY_ACCESS_KEY_FILE', 'ETHERSCAN_API_KEY_FILE', 'OKLINK_API_KEY_FILE']) assert.match(env, new RegExp(`\\b${name}\\b`));
+});
 
 test('offline Safe hashes and call decoding work on every named chain without spending API quota', async () => {
   const safe = '0x1111111111111111111111111111111111111111';

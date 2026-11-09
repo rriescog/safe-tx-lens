@@ -41,7 +41,7 @@ test('recommended projects appear only in the dark footer', async () => {
   assert.match(main, /github\.com\/rriescog\/safe-tx-lens/);
   assert.doesNotMatch(html, /github\.com\/web3security\/safe-tx-lens/);
   assert.doesNotMatch(main, /Safe queue \+ history|RPC available/);
-  assert.match(main, /Amoy and Immutable zkEVM can attempt execution-hash or supplied JSON review/);
+  assert.match(main, /Amoy and Immutable zkEVM currently need an execution hash or supplied JSON/);
 });
 
 test('How it works distinguishes independent calculation from Safe-supplied transaction fields', async () => {
