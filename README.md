@@ -61,6 +61,12 @@ The local `watch` command polls one Safe and emits JSON events; it is not a host
 
 Copy [`.env.example`](.env.example) to `.env` and set only the providers you use. Keep keys and keyed RPC URLs out of Git, browser inputs, and MCP arguments. Tenderly simulation is optional and disabled when its credentials and project are absent. The hosted service uses its own server-side credentials and quotas, never a visitor's local environment. See [configuration](docs/CONFIGURATION.md) for the settings and hosted-mode limits.
 
+### Community capacity and fair use
+
+The free community service currently relies on free-tier provider API keys and shared public RPC endpoints. Those upstream services have limited capacity, so a lookup, historical check, or simulation may be unavailable even when the tool itself is working. The web UI and hosted MCP share request budgets; per-IP and service-wide limits protect that capacity and help keep access available to more people. The [deployment guide](deploy/README.md) describes the configured limits and how they are enforced.
+
+Please use the shared service responsibly: select a network when you know it, avoid repeated automatic searches or unnecessary simulation retries, and run your own copy for bulk or continuous analysis. [Donations and sponsorship](https://safetxlens.org/#community-support), including RPC or simulation capacity contributed in kind, can help pay for stronger infrastructure and higher provider allowances so more people can use the service. Support does not change a transaction's findings or buy a favorable review.
+
 ## Evidence and limits
 
 The tool hashes transaction fields locally with EIP-712 and, when possible, asks the Safe contract for its hash through an RPC. Nested calldata is decoded with built-in ABIs, verified contract metadata, explorer ABIs, or clearly labeled candidate signatures. Runtime bytecode is compared with verified source when both the source and an appropriate RPC block are available. Recognized proxy implementation paths are inspected separately.
