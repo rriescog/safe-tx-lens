@@ -132,16 +132,36 @@ test('lifecycle status separates Safe success, Safe failure, unknown outcome and
   assert.equal(page.evaluate('lifecycleStatus(sample).label'), 'Execution not established');
 });
 
-function ui({ publicMode = false, search = '', hostname = '127.0.0.1' } = {}) {
+function ui({ publicMode = false, search = '', hostname = '127.0.0.1', installed = null } = {}) {
   const elements = new Map();
   const selectors = new Map();
   const make = () => ({ value: '', textContent: '', innerHTML: '', checked: false, disabled: false, dataset: {}, classList: { add() {}, remove() {} }, addEventListener(name, handler) { this[`on_${name}`] = handler; }, querySelector() { return make(); }, querySelectorAll() { return []; }, insertAdjacentHTML(_position, value) { this.innerHTML += value; }, focus() { this.focused = true; } });
   const document = { body: make(), getElementById(id) { if (!elements.has(id)) elements.set(id, make()); return elements.get(id); }, querySelector(selector) { if (!selectors.has(selector)) selectors.set(selector, make()); return selectors.get(selector); } };
   document.body.dataset.publicMode = String(publicMode);
-  const context = vm.createContext({ document, URL, TextEncoder, location: { search, hostname }, setInterval: () => 1, clearInterval: () => {}, console, fetch: async () => { throw new Error('Unexpected network call'); } });
+  const browser = installed === null ? {} : {
+    navigator: { standalone: false },
+    window: {
+      location: { reload() { this.reloaded = true; } },
+      matchMedia: () => ({ matches: installed, addEventListener() {} }),
+      addEventListener() {},
+    },
+  };
+  const context = vm.createContext({ document, URL, TextEncoder, location: { search, hostname }, setInterval: () => 1, clearInterval: () => {}, console, fetch: async () => { throw new Error('Unexpected network call'); }, ...browser });
   vm.runInContext(source, context, { filename: sourcePath });
   return { context, elements, selectors, document, evaluate: expression => vm.runInContext(expression, context) };
 }
+
+test('installed app shows a refresh button that reloads the page', async () => {
+  const html = await readFile(pathResolve('web/index.html'), 'utf8');
+  assert.match(html, /id="refresh-app"[^>]*hidden[^>]*>↻ Refresh<\/button>/);
+  const installed = ui({ installed: true });
+  assert.equal(installed.elements.get('refresh-app').hidden, false);
+  assert.equal(installed.elements.get('install-app').hidden, true);
+  installed.elements.get('refresh-app').on_click();
+  assert.equal(installed.context.window.location.reloaded, true);
+  const browserTab = ui({ installed: false });
+  assert.equal(browserTab.elements.get('refresh-app').hidden, true);
+});
 
 test('web renderer escapes untrusted calldata and addresses', () => {
   const page = ui();

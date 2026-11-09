@@ -34,7 +34,17 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) navigator.
 if (typeof window !== 'undefined') {
   let installPrompt = null;
   const installButton = document.getElementById('install-app');
-  window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; installButton.hidden = false; });
+  const refreshButton = document.getElementById('refresh-app');
+  const standaloneDisplay = window.matchMedia?.('(display-mode: standalone)');
+  const isInstalled = () => Boolean(standaloneDisplay?.matches || navigator.standalone === true);
+  const updateAppControls = () => {
+    refreshButton.hidden = !isInstalled();
+    installButton.hidden = isInstalled() || !installPrompt;
+  };
+  updateAppControls();
+  standaloneDisplay?.addEventListener?.('change', updateAppControls);
+  refreshButton.addEventListener('click', () => window.location.reload());
+  window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; updateAppControls(); });
   installButton.addEventListener('click', async () => {
     if (!installPrompt) return;
     const prompt = installPrompt;
@@ -42,7 +52,7 @@ if (typeof window !== 'undefined') {
     installButton.hidden = true;
     await prompt.prompt();
   });
-  window.addEventListener('appinstalled', () => { installPrompt = null; installButton.hidden = true; });
+  window.addEventListener('appinstalled', () => { installPrompt = null; updateAppControls(); });
 }
 // Wallet addresses come only from validated server configuration. Build the
 // DOM with text nodes so addresses and labels cannot become HTML instructions.
