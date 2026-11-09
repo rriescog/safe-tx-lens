@@ -32,6 +32,8 @@ test('community web and hosted MCP share the same IP quota while deep review has
     assert.equal(second.status, 200);
     const data = await second.text();
     assert.match(data, /"name":"inspect"/);
+    const secondInspection = await post('/api/inspect', { input: plan, network: 'eth' });
+    assert.equal(secondInspection.status, 200);
     const limited = await post('/api/inspect', { input: plan, network: 'eth' });
     assert.equal(limited.status, 429);
     assert.ok(Number(limited.headers.get('retry-after')) > 0);
@@ -47,6 +49,26 @@ test('community web and hosted MCP share the same IP quota while deep review has
     assert.match(await mcpCall.text(), /"kind".*"builder"|\\"kind\\":\\"builder\\"/);
     const exhausted = await post('/mcp', { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'inspect_json', arguments: { transaction: plan, network: 'eth' } } }, { 'x-client-ip': '203.0.113.4' });
     assert.equal(exhausted.status, 429);
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('MCP discovery still works after the client exhausts its inspection quota', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'safe-community-mcp-discovery-'));
+  const server = await serve({ port: 0, publicOrigin: origin, communityMode: true, communityQuotaFile: join(directory, 'quota.json'), communityDailyUnits: 100, communityMonthlyUnits: 100, communityClientDailyRequests: 1, credentialReader: async () => ({ SAFE_API_KEY: 'test-key' }) });
+  const base = `http://127.0.0.1:${server.address().port}/mcp`;
+  const post = message => fetch(base, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-client-ip': '203.0.113.44' }, body: JSON.stringify(message) });
+  try {
+    const call = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'inspect_json', arguments: { transaction: plan, network: 'eth' } } };
+    assert.equal((await post(call)).status, 200);
+    assert.equal((await post(call)).status, 429);
+    const initialized = await post({ jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'quota-test', version: '1.0' } } });
+    assert.equal(initialized.status, 200);
+    const list = await post({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} });
+    assert.equal(list.status, 200);
+    assert.match(await list.text(), /"name":"inspect"/);
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });

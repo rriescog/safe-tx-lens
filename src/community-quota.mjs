@@ -8,6 +8,7 @@ export function communityQuota({ file, dailyUnits = 600, monthlyUnits = 10000, c
   if (!file || ![dailyUnits, monthlyUnits, clientDailyRequests, simulationClientDaily, simulationMonthly].every(value => Number.isInteger(value) && value > 0)) throw new Error('Invalid community quota configuration');
   const salt = randomBytes(16);
   const clients = new Map();
+  const controlClients = new Map();
   let active = false;
   const date = () => new Date(now()).toISOString().slice(0, 10);
   const retryAfter = () => Math.max(1, Math.ceil((Date.parse(`${date()}T00:00:00Z`) + 86400000 - now()) / 1000));
@@ -23,6 +24,23 @@ export function communityQuota({ file, dailyUnits = 600, monthlyUnits = 10000, c
     return { day: date(), month: date().slice(0, 7), dayUnits: record.day === date() ? record.dayUnits : 0, monthUnits: record.month === date().slice(0, 7) ? record.monthUnits : 0, monthSimulations: record.month === date().slice(0, 7) ? record.monthSimulations ?? 0 : 0 };
   }
   return {
+    // MCP initialize, ping, and tool discovery never contact upstream APIs.
+    // Give them a separate short window so clients can reconnect after their
+    // inspection allowance is exhausted, while bounding reconnect floods.
+    takeControl(clientIp) {
+      if (!isIP(clientIp)) return { allowed: false, reason: 'invalid_request' };
+      const minute = Math.floor(now() / 60_000);
+      const key = createHash('sha256').update(salt).update(clientIp).digest('hex');
+      const previous = controlClients.get(key);
+      const used = previous?.minute === minute ? previous.used : 0;
+      if (used >= 60) return { allowed: false, reason: 'control_limit', retryAfterSeconds: Math.max(1, Math.ceil(((minute + 1) * 60_000 - now()) / 1000)) };
+      if (controlClients.size >= 10_000) {
+        for (const [identity, record] of controlClients) if (record.minute !== minute) controlClients.delete(identity);
+        if (controlClients.size >= 10_000 && !controlClients.has(key)) return { allowed: false, reason: 'busy', retryAfterSeconds: 2 };
+      }
+      controlClients.set(key, { minute, used: used + 1 });
+      return { allowed: true };
+    },
     take(clientIp, cost, { simulation = false } = {}) {
       if (!isIP(clientIp) || !Number.isInteger(cost) || cost < 1 || cost > dailyUnits) return { allowed: false, reason: 'invalid_request' };
       if (active) return { allowed: false, reason: 'busy', retryAfterSeconds: 2 };

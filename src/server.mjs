@@ -211,7 +211,8 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           const deepReview = params.name === 'inspect_json' || (params.name === 'inspect' && parseInput(mcpInput, mcpNetwork).kind !== 'safe');
           cost = communityCost(mcpInput, mcpNetwork, params.name === 'list_history' ? 'history' : 'pending', { verifyTargets: deepReview, simulate: simulation });
         }
-        const ticket = community.take(clientIp, cost, { simulation });
+        const toolCall = message.method === 'tools/call';
+        const ticket = toolCall ? community.take(clientIp, cost, { simulation }) : community.takeControl(clientIp);
         if (!ticket.allowed) return denied(res, ticket);
         try {
           const headers = new Headers({ 'content-type': 'application/json', accept: 'application/json, text/event-stream' });
@@ -219,7 +220,7 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
           const result = await mcp.fetch(new Request(`${publicOrigin}/mcp`, { method: 'POST', headers, body }));
           const responseBody = await result.text();
           return reply(res, result.status, responseBody, result.headers.get('content-type')?.split(';')[0] ?? 'application/json');
-        } finally { community.release(); }
+        } finally { if (toolCall) community.release(); }
       } catch (error) { return inspectionFailure(res, error, recordIncident); }
     }
     const incidentId = recordIncident('unknown_route', 404);

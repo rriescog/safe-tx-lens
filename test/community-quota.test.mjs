@@ -5,6 +5,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { communityQuota } from '../src/community-quota.mjs';
 
+test('MCP control messages have a separate bounded allowance without consuming inspection units', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'safe-community-control-'));
+  const file = join(directory, 'quota.json');
+  let time = Date.parse('2026-11-09T12:00:00Z');
+  try {
+    const gate = communityQuota({ file, dailyUnits: 1, monthlyUnits: 1, clientDailyRequests: 1, now: () => time });
+    for (let i = 0; i < 60; i++) assert.equal(gate.takeControl('203.0.113.1').allowed, true);
+    assert.equal(gate.takeControl('203.0.113.1').reason, 'control_limit');
+    assert.equal(gate.take('203.0.113.1', 1).allowed, true);
+    gate.release();
+    time += 60_000;
+    assert.equal(gate.takeControl('203.0.113.1').allowed, true);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test('community budget limits each IP, survives restarts globally, and resets on UTC boundaries', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'safe-community-quota-'));
   const file = join(directory, 'quota.json');
