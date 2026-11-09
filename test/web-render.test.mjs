@@ -65,6 +65,9 @@ test('the inspection form and live example precede the detailed process map', as
   assert.ok(html.indexOf('id="inspect-form"') < html.indexOf('id="how-it-works"'));
   assert.ok(html.indexOf('id="how-it-works"') < html.indexOf('id="examples"'));
   assert.match(html, /href="#inspect-form"[^>]*>Start a review/);
+  assert.match(html, /Independent project; not affiliated with Safe or the Safe Ecosystem Foundation/);
+  assert.match(html, /not affiliated with or endorsed by Safe or the Safe Ecosystem Foundation/);
+  assert.doesNotMatch(html.match(/<div class="intro-actions">[\s\S]*?<\/div>/)?.[0] ?? '', /Safe Ecosystem Foundation|nonce 60|Example source/);
 });
 
 test('How it works switches its route when the user chooses another input', () => {
@@ -407,6 +410,7 @@ test('one-click community rewards example runs the live Ethereum inspection path
   const page = ui();
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
   const review = await analyze(tx, 'eth', { fetchState: false });
+  review.hash = '0x53de3b97560824bbe774b2290e70bfdc37c5b9c502ac5e62d652e5f24190dc2a';
   review.checks.push({ name: 'Safe contract hash', method: 'onchain_rpc', status: 'pass', detail: review.hash });
   review.targetVerificationAttempted = true;
   review.targetChecks = [{ address: tx.to, status: 'verified', reason: 'matched', blockTag: 'latest' }];
@@ -421,6 +425,9 @@ test('one-click community rewards example runs the live Ethereum inspection path
   assert.equal(JSON.parse(requests[0].options.body).network, 'eth');
   assert.equal(JSON.parse(requests[0].options.body).verifyTargets, true);
   assert.match(page.elements.get('report').innerHTML, /Safe Transaction Service/);
+  assert.match(page.elements.get('report').innerHTML, /About this example/);
+  assert.match(page.elements.get('report').innerHTML, /not a partnership or endorsement/);
+  assert.match(page.elements.get('report').innerHTML, /forum\.safefoundation\.org/);
   assert.match(page.elements.get('report').innerHTML, /Safe contract calculation by RPC/);
   assert.match(page.elements.get('report').innerHTML, /Verified bytecode/);
   assert.equal(page.elements.get('status').textContent, 'Inspection complete');
