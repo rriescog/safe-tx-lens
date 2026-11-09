@@ -27,4 +27,6 @@ jobs:
       - name: Validate deployment configuration
         run: |
           touch deploy/safe-api-key
+          touch deploy/etherscan-api-key deploy/oklink-api-key
           DOMAIN=safetxlens.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml config --quiet
+          DOMAIN=safetxlens.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml -f deploy/compose.etherscan.yaml -f deploy/compose.oklink.yaml config --quiet

@@ -2,6 +2,8 @@
 .github
 .env
 .env.*
+deploy/*-key
+deploy/.env
 node_modules
 test
 examples

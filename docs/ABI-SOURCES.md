@@ -20,6 +20,8 @@ This matrix describes lookup routes, not a guarantee that an individual contract
 
 All thirteen also have a Sourcify lookup. Etherscan V2's live chain list was checked on 2026-11-08; X Layer and Immutable zkEVM were absent, so they have separate routes. Configure keys only on the server. There is no per-user explorer key field in the web UI.
 
+PolygonScan is part of the Etherscan V2 lookup path: the tool sends the same `ETHERSCAN_API_KEY` to `api.etherscan.io/v2/api` with `chainid=137`, `module=contract`, and `action=getsourcecode`. PolygonScan is the source link shown to the reviewer, not a second API endpoint or key. The hosted service uses this route only when its optional Etherscan secret is enabled; otherwise it tries Sourcify and any available keyless routes. An explorer ABI alone is not a bytecode match at a historical block.
+
 ## Evidence levels
 
 1. **Verified at inspected block:** the chain RPC returned bytecode for that block, Sourcify or a verified Blockscout record returned runtime bytecode, and their hashes matched. This still does not prove that the function is safe.
