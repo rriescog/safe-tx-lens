@@ -21,6 +21,17 @@ const communityMode = document.body.dataset.communityMode === 'true';
 const publicFacing = publicMode || communityMode;
 const loopbackHost = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(globalThis.location?.hostname);
 const simulationEnabled = document.body.dataset.simulationEnabled === 'true';
+const howModes = ['safe-hash', 'execution-hash', 'safe-address', 'transaction-json'];
+let selectedHowMode = 'safe-hash';
+function showHowMode(mode) {
+  selectedHowMode = mode;
+  for (const option of howModes) {
+    document.getElementById(`how-mode-${option}`).setAttribute('aria-pressed', String(option === mode));
+    document.getElementById(`how-route-${option}`).hidden = option !== mode;
+  }
+}
+for (const mode of howModes) document.getElementById(`how-mode-${mode}`).addEventListener('click', () => showHowMode(mode));
+showHowMode(selectedHowMode);
 // Duplicate the visual strips for a seamless loop. Accessibility sees one set.
 for (const id of ['network-track', 'tier-diamond', 'tier-gold', 'tier-silver', 'tier-bronze']) {
   const track = document.getElementById(id);
@@ -95,7 +106,7 @@ fetch('/api/network-examples').then(response => response.ok ? response.json() : 
       const button = document.createElement('button'); button.type = 'button'; button.className = 'network-try';
       button.textContent = `${sample.label} · nonce ${sample.nonce}${sample.kind === 'execution' ? ' · execution hash' : ''}`;
       button.title = `Review ${sample.hash} live; uses the shared request budget`;
-      button.addEventListener('click', () => launchExample(sample.hash, row.network));
+      button.addEventListener('click', () => launchExample(sample.hash, row.network, sample.kind));
       card.append(button);
     }
     if (!samples.length) {
@@ -184,6 +195,9 @@ function selectedInputMode() {
 }
 function updateWizard() {
   const mode = selectedInputMode();
+  if (mode === 'json') showHowMode('transaction-json');
+  else if (mode === 'safe' || mode === 'url') showHowMode('safe-address');
+  else if (mode === 'hash' && selectedHowMode !== 'execution-hash') showHowMode('safe-hash');
   const isSafe = mode === 'safe' || mode === 'url';
   document.getElementById('json-import').hidden = mode !== 'json';
   document.getElementById('json-options').hidden = mode !== 'json';
@@ -203,11 +217,12 @@ function updateWizard() {
 }
 inputMode.addEventListener('change', updateWizard);
 updateWizard();
-function launchExample(hash, selectedNetwork) {
+function launchExample(hash, selectedNetwork, kind) {
   importedJson = null;
   inputMode.value = 'hash';
   input.value = hash;
   network.value = selectedNetwork;
+  showHowMode(kind === 'execution' ? 'execution-hash' : 'safe-hash');
   document.getElementById('custom-chain-group').hidden = true;
   updateWizard();
   document.getElementById('inspect-form').scrollIntoView?.({ behavior: 'smooth' });
