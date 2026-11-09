@@ -13,10 +13,10 @@ const FAILURE_TOPIC = id('ExecutionFailure(bytes32,uint256)').toLowerCase();
 // infrastructure: verify the returned chain ID on every request and surface
 // outages rather than silently treating missing code as an EOA.
 export const PUBLIC_RPC = Object.freeze({
-  eth: 'https://eth-mainnet.g.alchemy.com/public', gno: 'https://gnosis.publicnode.com',
-  pol: 'https://polygon-bor-rpc.publicnode.com', arb1: 'https://arbitrum-one-rpc.publicnode.com',
-  oeth: 'https://optimism-rpc.publicnode.com', base: 'https://base-rpc.publicnode.com',
-  sep: 'https://ethereum-sepolia-rpc.publicnode.com', amoy: 'https://polygon-amoy-bor-rpc.publicnode.com', bnb: 'https://bsc-rpc.publicnode.com',
+  eth: 'https://eth-mainnet.g.alchemy.com/public', gno: 'https://rpc.gnosischain.com',
+  pol: 'https://rpc-mainnet.matic.quiknode.pro', arb1: 'https://arbitrum-one-rpc.publicnode.com',
+  oeth: 'https://mainnet.optimism.io', base: 'https://base-rpc.publicnode.com',
+  sep: 'https://public.1rpc.io/sepolia', amoy: 'https://polygon-amoy-bor-rpc.publicnode.com', bnb: 'https://bsc-rpc.publicnode.com',
   avax: 'https://avalanche-c-chain-rpc.publicnode.com',
   kat: 'https://rpc.katana.network', xlayer: 'https://rpc.xlayer.tech', imx: 'https://rpc.immutable.com',
 });
@@ -47,7 +47,8 @@ export function rpcDetailsFor(network, override) {
   const configured = process.env[`RPC_URL_${network.toUpperCase()}`];
   if (configured) return { url: configured, kind: 'configured', label: `RPC configured for ${network}` };
   const publicUrl = PUBLIC_RPC[network];
-  return publicUrl ? { url: publicUrl, kind: 'public', label: `${network === 'eth' ? 'Alchemy public' : ['kat', 'xlayer'].includes(network) ? 'Network public' : 'PublicNode'} (${new URL(publicUrl).host})` } : { url: null, kind: 'none', label: 'No RPC configured for this network' };
+  const provider = network === 'eth' ? 'Alchemy public' : network === 'gno' ? 'Gnosis public' : network === 'oeth' ? 'Optimism public' : network === 'pol' ? 'QuickNode public' : network === 'sep' ? '1RPC public' : ['kat', 'xlayer'].includes(network) ? 'Network public' : 'PublicNode';
+  return publicUrl ? { url: publicUrl, kind: 'public', label: `${provider} (${new URL(publicUrl).host})` } : { url: null, kind: 'none', label: 'No RPC configured for this network' };
 }
 
 export function rpcFor(network, override) {

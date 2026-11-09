@@ -18,7 +18,10 @@ test('RPC provenance names public defaults but never exposes a configured key', 
   delete process.env.RPC_URL_ETH;
   try {
     assert.deepEqual(rpcDetailsFor('eth'), { url: 'https://eth-mainnet.g.alchemy.com/public', kind: 'public', label: 'Alchemy public (eth-mainnet.g.alchemy.com)' });
-    assert.deepEqual(rpcDetailsFor('pol'), { url: 'https://polygon-bor-rpc.publicnode.com', kind: 'public', label: 'PublicNode (polygon-bor-rpc.publicnode.com)' });
+    assert.deepEqual(rpcDetailsFor('pol'), { url: 'https://rpc-mainnet.matic.quiknode.pro', kind: 'public', label: 'QuickNode public (rpc-mainnet.matic.quiknode.pro)' });
+    assert.deepEqual(rpcDetailsFor('gno'), { url: 'https://rpc.gnosischain.com', kind: 'public', label: 'Gnosis public (rpc.gnosischain.com)' });
+    assert.deepEqual(rpcDetailsFor('oeth'), { url: 'https://mainnet.optimism.io', kind: 'public', label: 'Optimism public (mainnet.optimism.io)' });
+    assert.deepEqual(rpcDetailsFor('sep'), { url: 'https://public.1rpc.io/sepolia', kind: 'public', label: '1RPC public (public.1rpc.io)' });
     process.env.RPC_URL_ETH = 'https://provider.example/key/secret';
     const configured = rpcDetailsFor('eth');
     assert.equal(configured.kind, 'configured');

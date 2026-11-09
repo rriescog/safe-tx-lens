@@ -196,7 +196,7 @@ test('auto-discovered execution follows a non-Ethereum network', async () => wit
   const executionHash = `0x${'cd'.repeat(32)}`;
   const fetchImpl = async (url, options) => {
     const method = JSON.parse(options.body).method;
-    const polygon = String(url).includes('polygon-bor-rpc.publicnode.com');
+    const polygon = String(url).includes('rpc-mainnet.matic.quiknode.pro');
     return new Response(JSON.stringify({ result: method === 'eth_chainId' ? '0x89' : polygon ? { logs: [{ topics: [id('ExecutionSuccess(bytes32,uint256)')] }] } : null }), { status: 200 });
   };
   const report = await resolve(executionHash, 'auto', {

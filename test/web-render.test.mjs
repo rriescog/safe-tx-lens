@@ -63,7 +63,7 @@ test('home and every network example remain reachable from a result', async () =
   const cards = page.elements.get('example-catalog').children;
   assert.equal(cards.length, 2);
   assert.equal(cards[0].children.filter(child => child.tag === 'button').length, 2);
-  assert.match(cards[1].children[1].textContent, /No verified public example yet/);
+  assert.match(cards[1].children[1].textContent, /No public transaction example yet/);
   cards[0].children[2].on_click();
   assert.equal(page.elements.get('input').value, catalog.networks[0].examples[1].hash);
   assert.equal(page.elements.get('network').value, 'eth');

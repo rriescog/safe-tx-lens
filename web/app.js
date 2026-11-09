@@ -73,7 +73,7 @@ fetch('/api/public-config').then(response => response.ok ? response.json() : nul
   }
 }).catch(() => {});
 // The moving network strip is an overview. The stationary catalog below it
-// exposes every verified sample as a separate choice, including keyboard use.
+// exposes every real sample as a separate choice, including keyboard use.
 fetch('/api/network-examples').then(response => response.ok ? response.json() : null).then(catalog => {
   if (!Array.isArray(catalog?.networks)) throw new Error('Example catalog unavailable');
   const host = document.getElementById('example-catalog');
@@ -88,7 +88,7 @@ fetch('/api/network-examples').then(response => response.ok ? response.json() : 
     if (samples.length) covered++;
     else {
       const note = document.createElement('p');
-      note.textContent = 'No verified public example yet. An execution hash or transaction JSON can still be reviewed on this network.';
+      note.textContent = 'No public transaction example yet. An execution hash or transaction JSON can still be reviewed on this network.';
       card.append(note);
     }
     for (const sample of samples) {
@@ -112,7 +112,7 @@ fetch('/api/network-examples').then(response => response.ok ? response.json() : 
     }
     host.append(card);
   }
-  document.getElementById('example-coverage').textContent = `${covered} networks have a verified sample. The other network choices accept your own execution hash or JSON; no sample is invented.`;
+  document.getElementById('example-coverage').textContent = `${covered} networks have a real transaction example. Each example runs live checks; the evidence available depends on that network’s RPC and source providers. Other networks accept your own execution hash or JSON.`;
 }).catch(() => { document.getElementById('example-coverage').textContent = 'Examples are temporarily unavailable. You can still inspect your own transaction above.'; });
 function networkCoverageText(row) {
   const lists = row.pending === 'available' && row.history === 'available'
