@@ -17,6 +17,7 @@ test('network carousel covers every named chain and never repeats a sample hash'
       assert.match(sample.safe, /^0x[0-9a-fA-F]{40}$/);
       assert.ok(Number.isSafeInteger(sample.nonce) && sample.nonce >= 0);
       assert.ok(sample.label.length > 0);
+      assert.ok(sample.kind === undefined || sample.kind === 'execution');
       hashes.push(sample.hash.toLowerCase());
     }
   }

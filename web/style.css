@@ -138,3 +138,26 @@ footer.site-footer{max-width:none;margin:0;padding:38px clamp(20px,4vw,64px) 44p
 .priority-explanation{margin-top:13px;padding:12px 14px;border:1px solid #ead4c2;border-radius:7px;background:#fff}.risk-summary .priority-explanation>strong{font-size:13px}.priority-explanation ul{margin:7px 0 5px;padding-left:18px}.priority-explanation li{font-size:13px;line-height:1.45;margin:4px 0;overflow-wrap:anywhere}.priority-explanation small{display:block;color:var(--muted);font-size:11px;line-height:1.4}
 .effect-intro{font-size:12px;color:var(--muted);max-width:68ch;margin:18px 0 8px}.effect-group{margin-top:20px}.effect-group h4{margin:0 0 5px;font-size:15px;letter-spacing:-.02em}.effect-group h4 span{font-size:11px;color:var(--muted);font-weight:650;margin-left:5px}.effect-group .item{padding:13px 0}.effect-amount{font-size:20px;font-weight:800;line-height:1.2;margin:5px 0 9px}.effect-amount span{font-size:15px;color:var(--green)}.effect-parties{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.effect-parties small{display:block;color:var(--muted);font-size:11px;font-weight:700}.effect-parties code,.storage-map code{display:block;overflow-wrap:anywhere;font-size:11px;color:var(--ink)}.effect-source{font-size:11px!important;color:var(--muted);margin-top:8px!important;overflow-wrap:anywhere}.storage-map{display:grid;gap:0;margin-top:8px;border-top:1px solid #e3ecef}.storage-map>div{display:grid;grid-template-columns:minmax(190px,1fr) minmax(140px,1fr);gap:12px;align-items:center;padding:7px 0;border-bottom:1px solid #e3ecef}.storage-map span{font-size:12px;font-weight:700;overflow-wrap:anywhere}.effect-coverage{margin:17px 0;padding:10px 12px;background:#f1f6f8;border-left:3px solid #8caebd;font-size:12px;color:var(--muted)}.effect-coverage summary{cursor:pointer;color:var(--blue-dark);font-weight:700}.effect-coverage p{margin:7px 0 0;max-width:68ch}
 @media(max-width:650px){.effect-parties,.storage-map>div{grid-template-columns:1fr;gap:2px}.effect-amount{font-size:18px}}
+
+/* Navigation stays available while a long report is open. */
+.masthead{position:sticky;top:0;z-index:20}
+.masthead .brand{margin-left:0;color:var(--ink);text-decoration:none;font-size:18px}
+.masthead .brand:hover{color:var(--blue-dark)}
+.primary-nav{display:flex;align-items:center;gap:4px;margin-left:auto}
+.masthead .primary-nav a{margin-left:0;padding:8px 11px;border-radius:6px;text-decoration:none;color:var(--blue-dark);white-space:nowrap}
+.masthead .primary-nav a:hover{background:#eaf3f6}
+.masthead .refresh-app{margin-left:0}
+.example-all-link{font-size:12px;font-weight:750;white-space:nowrap}
+#examples{scroll-margin-top:84px}
+.example-browser{margin:18px 0 34px;padding:22px 24px;border-top:4px solid var(--blue-dark);background:var(--white);border-radius:8px}
+.example-browser-heading{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:14px}
+.example-browser h3{margin:0;font-size:19px;letter-spacing:-.03em}
+.example-browser-heading p{margin:0;color:var(--muted);font-size:12px;max-width:60ch}
+.example-catalog{display:grid;grid-template-columns:repeat(auto-fit,minmax(218px,1fr));gap:0 18px}
+.example-card{padding:13px 0 15px;border-top:1px solid var(--line);min-width:0}
+.example-card h4{margin:0 0 8px;font-size:14px}
+.example-card p{margin:0 0 9px;color:var(--muted);font-size:12px}
+.example-card .network-try{display:block;width:100%;margin-top:6px;text-align:left;font-size:12px;padding:8px 10px}
+@media(max-width:750px){.example-browser-heading{display:block}.example-browser-heading p{margin-top:5px}.example-try{flex-wrap:wrap}.example-all-link{margin-left:auto}}
+@media(max-width:540px){.masthead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px;padding:8px 14px;height:auto;min-height:60px}.masthead .brand{font-size:15px}.masthead .edition{display:none}.primary-nav{grid-column:2;margin-left:0}.masthead .primary-nav a{font-size:11px;padding:7px 5px}.masthead .refresh-app,.masthead .install-app{grid-column:1/-1;justify-self:end}.example-browser{padding:17px 16px}.example-catalog{grid-template-columns:1fr}.example-all-link{display:inline-block;margin-top:12px}}
+.network-status.partial{color:var(--muted)}

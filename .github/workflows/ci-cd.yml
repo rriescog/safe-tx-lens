@@ -1,7 +1,6 @@
-name: Test, build and deploy
+name: Build and deploy
 
 on:
-  pull_request:
   push:
     branches: [main]
   workflow_dispatch:

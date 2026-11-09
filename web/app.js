@@ -72,45 +72,56 @@ fetch('/api/public-config').then(response => response.ok ? response.json() : nul
     row.append(label, address, copy); host.append(row);
   }
 }).catch(() => {});
-// Every sample goes through the ordinary live inspector. Cards without a
-// published sample select the network and ask for the visitor's own input.
+// The moving network strip is an overview. The stationary catalog below it
+// exposes every verified sample as a separate choice, including keyboard use.
 fetch('/api/network-examples').then(response => response.ok ? response.json() : null).then(catalog => {
-  if (!Array.isArray(catalog?.networks)) return;
-  const byNetwork = new Map(catalog.networks.map(row => [row.network, row.examples]));
-  for (const card of document.querySelectorAll('.network-grid [data-network]')) {
-    const samples = byNetwork.get(card.dataset.network) ?? [];
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'network-try';
-    button.textContent = samples.length ? `Try ${samples[0].label}` : 'Try with your transaction';
-    button.title = samples.length ? `Review nonce ${samples[0].nonce} live; uses the shared request budget` : 'No verified public example yet; provide your own transaction';
-    button.addEventListener('click', () => {
-      const sample = samples[0];
-      if (!sample) {
-        network.value = card.dataset.network;
-        input.focus();
+  if (!Array.isArray(catalog?.networks)) throw new Error('Example catalog unavailable');
+  const host = document.getElementById('example-catalog');
+  const names = new Map([...document.querySelectorAll('.network-grid [data-network]')].map(card => [card.dataset.network, card.querySelector('strong')?.textContent]));
+  let covered = 0;
+  for (const row of catalog.networks) {
+    if (![...network.options].some(option => option.value === row.network)) continue;
+    const card = document.createElement('article'); card.className = 'example-card';
+    const heading = document.createElement('h4'); heading.textContent = names.get(row.network) ?? row.network;
+    card.append(heading);
+    const samples = Array.isArray(row.examples) ? row.examples.filter(sample => /^0x[0-9a-fA-F]{64}$/.test(sample.hash)) : [];
+    if (samples.length) covered++;
+    else {
+      const note = document.createElement('p');
+      note.textContent = 'No verified public example yet. An execution hash or transaction JSON can still be reviewed on this network.';
+      card.append(note);
+    }
+    for (const sample of samples) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'network-try';
+      button.textContent = `${sample.label} · nonce ${sample.nonce}${sample.kind === 'execution' ? ' · execution hash' : ''}`;
+      button.title = `Review ${sample.hash} live; uses the shared request budget`;
+      button.addEventListener('click', () => launchExample(sample.hash, row.network));
+      card.append(button);
+    }
+    if (!samples.length) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'network-try';
+      button.textContent = 'Use my transaction';
+      button.addEventListener('click', () => {
+        network.value = row.network;
+        inputMode.value = 'auto';
+        updateWizard();
         document.getElementById('inspect-form').scrollIntoView?.({ behavior: 'smooth' });
-        return;
-      }
-      importedJson = null;
-      inputMode.value = 'hash';
-      input.value = sample.hash;
-      network.value = card.dataset.network;
-      updateWizard();
-      document.getElementById('inspect-form').scrollIntoView?.({ behavior: 'smooth' });
-      inspect({ overrideInput: sample.hash, overrideNetwork: card.dataset.network });
-    });
-    card.append(button);
+        input.focus();
+      });
+      card.append(button);
+    }
+    host.append(card);
   }
-}).catch(() => {});
+  document.getElementById('example-coverage').textContent = `${covered} networks have a verified sample. The other network choices accept your own execution hash or JSON; no sample is invented.`;
+}).catch(() => { document.getElementById('example-coverage').textContent = 'Examples are temporarily unavailable. You can still inspect your own transaction above.'; });
 function networkCoverageText(row) {
   const lists = row.pending === 'available' && row.history === 'available'
-    ? 'Safe list APIs responded'
+    ? 'Safe list endpoints responded'
     : row.pending === 'not_tested' || row.history === 'not_tested'
-      ? 'Safe list APIs not tested'
+      ? 'Safe list endpoints not tested'
       : row.pending === 'not_available' && row.history === 'not_available'
-        ? 'Configured Safe list API returned 404'
-        : 'Safe list APIs inconclusive';
+        ? 'Safe queue/history unavailable via configured API'
+        : 'Safe list endpoints inconclusive';
   const rpc = row.rpc === 'available' ? 'RPC chain ID matched' : 'RPC chain ID not confirmed';
   return `${lists} · ${rpc}${row.indexing === 'indexer_lagging' ? ' · Indexer behind' : ''}`;
 }
@@ -126,7 +137,10 @@ fetch('/api/network-coverage').then(response => response.ok ? response.json() : 
     if (!row) continue;
     const label = document.createElement('span'); label.className = 'network-status';
     label.textContent = networkCoverageText(row);
-    if (row.pending !== 'available' || row.history !== 'available' || row.rpc !== 'available' || row.indexing !== 'available') label.classList.add('limited');
+    // Missing Safe list endpoints limit offchain discovery. They do not
+    // establish that the network or its RPC is down.
+    if (row.pending === 'not_available' && row.history === 'not_available' && row.rpc === 'available') label.classList.add('partial');
+    else if (row.pending !== 'available' || row.history !== 'available' || row.rpc !== 'available' || row.indexing !== 'available') label.classList.add('limited');
     card.append(label);
   }
 }).catch(() => {});
@@ -189,18 +203,22 @@ function updateWizard() {
 }
 inputMode.addEventListener('change', updateWizard);
 updateWizard();
+function launchExample(hash, selectedNetwork) {
+  importedJson = null;
+  inputMode.value = 'hash';
+  input.value = hash;
+  network.value = selectedNetwork;
+  document.getElementById('custom-chain-group').hidden = true;
+  updateWizard();
+  document.getElementById('inspect-form').scrollIntoView?.({ behavior: 'smooth' });
+  report.innerHTML = '<div class="empty" role="status"><h2>Inspecting the example live</h2><p>Reading the published transaction and checking its target contracts through RPC.</p></div>';
+  return inspect({ overrideInput: hash, overrideNetwork: selectedNetwork });
+}
 document.getElementById('try-example').addEventListener('click', () => {
   // Use a published Safe hash and the ordinary live inspection path. A saved
   // report would conceal whether the transaction source and RPC work today.
   const exampleHash = '0x53de3b97560824bbe774b2290e70bfdc37c5b9c502ac5e62d652e5f24190dc2a';
-  importedJson = null;
-  inputMode.value = 'hash';
-  input.value = exampleHash;
-  network.value = 'eth';
-  document.getElementById('custom-chain-group').hidden = true;
-  updateWizard();
-  report.innerHTML = '<div class="empty" role="status"><h2>Inspecting the example live</h2><p>Reading the published Ethereum transaction and checking its target contracts through RPC.</p></div>';
-  return inspect({ overrideInput: exampleHash, overrideNetwork: 'eth' });
+  return launchExample(exampleHash, 'eth');
 });
 // A copied local link may include a transaction hash in its query string.
 // Prefill only a valid hash and require an explicit review click, so merely

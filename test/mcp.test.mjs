@@ -12,7 +12,7 @@ test('MCP exposes read-only tools and inspects an offchain rejection without key
     assert.deepEqual(list.tools.map(tool => tool.name), ['inspect', 'inspect_json', 'inspect_execution', 'list_pending', 'list_history']);
     assert.ok(list.tools.every(tool => tool.annotations?.readOnlyHint === true));
     assert.match(JSON.stringify(list.tools.find(tool => tool.name === 'inspect_execution')?.inputSchema?.properties?.network), /kat|xlayer/);
-    const transaction = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
+    const transaction = JSON.parse(await readFile('examples/safe-pending.json', 'utf8'));
     const result = await client.callTool({ name: 'inspect_json', arguments: { transaction } });
     assert.equal(result.isError, undefined);
     const report = result.structuredContent ?? JSON.parse(result.content[0].text);

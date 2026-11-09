@@ -17,12 +17,10 @@ if (!inventoryPath || !/^\d+$/.test(requestedCount) || Number(requestedCount) < 
   const document = JSON.parse(await readFile(inventoryPath, 'utf8'));
   const items = Array.isArray(document) ? document : document.safes;
   if (!Array.isArray(items)) throw new Error('Inventory must be an array or an object with a safes array');
-  // Spectre inventories can include legacy multisigs without Safe's nonce,
-  // threshold, or Transaction Service support. Test only records explicitly
-  // typed as Safe, while allowing older generic fixtures without a type key.
+  // Check only records explicitly typed as Safe. A missing type is accepted
+  // for backward compatibility with simple address inventories.
   const supported = items.filter(item => (item.type === undefined || item.type === 'safe') && chain.has(Number(item.chain_id)) && (!networks || networks.has(chain.get(Number(item.chain_id)))));
-  const priority = item => /Protocol Council|AggLayer Rollup Multisig|Polygon_Security_Multisig|Polygon_Engineering_Multisig/i.test(item.name ?? '');
-  const selected = [...supported.filter(priority), ...supported.filter(item => !priority(item))].slice(0, Number(requestedCount));
+  const selected = supported.slice(0, Number(requestedCount));
   if (selected.length !== Number(requestedCount)) throw new Error(`Inventory has only ${selected.length} supported multisigs`);
   let passed = 0;
   let failed = 0;

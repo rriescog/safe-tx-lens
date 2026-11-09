@@ -5,7 +5,7 @@ import { resolve } from '../src/resolve.mjs';
 import { calculateHash, normalizeTransaction } from '../src/analyze.mjs';
 import { Interface, id } from 'ethers';
 
-const tx = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
+const tx = JSON.parse(await readFile('examples/safe-pending.json', 'utf8'));
 const monitorRecord = (prefix = 'eth') => ({
   prefix, safeAddress: tx.safe, txStatus: 'AWAITING_CONFIRMATIONS',
   txData: { to: { value: tx.to }, value: tx.value, hexData: tx.data, operation: tx.operation },

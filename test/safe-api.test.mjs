@@ -80,7 +80,7 @@ test('an empty 1/1 queue checks unsigned records without presenting them as trus
 });
 
 test('hash-only inspection records the exact user reference separately from the Safe API payload', async () => {
-  const tx = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
+  const tx = JSON.parse(await readFile('examples/safe-pending.json', 'utf8'));
   await withFetch(async url => {
     assert.match(String(url), new RegExp(`/multisig-transactions/${tx.safeTxHash}/`));
     return new Response(JSON.stringify(tx), { status: 200 });
@@ -118,7 +118,7 @@ test('lowercase inventory addresses are checksummed before Safe API lookup', asy
 }));
 
 test('Safe Gateway can recover a hash and queue when the Transaction Service is unavailable', async () => {
-  const tx = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
+  const tx = JSON.parse(await readFile('examples/safe-pending.json', 'utf8'));
   const gatewayTx = {
     safeAddress: tx.safe, txStatus: 'AWAITING_CONFIRMATIONS',
     txData: { to: { value: tx.to }, value: tx.value, hexData: tx.data, operation: tx.operation },

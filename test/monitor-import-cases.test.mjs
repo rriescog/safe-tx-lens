@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { analyzeMonitorStorage, isMonitorStorage } from '../src/monitor-import.mjs';
 
-const tx = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
+const tx = JSON.parse(await readFile('examples/safe-pending.json', 'utf8'));
 const record = {
   prefix: 'eth', safeAddress: tx.safe, txStatus: 'AWAITING_CONFIRMATIONS',
   txData: { to: { value: tx.to }, value: tx.value, hexData: tx.data, operation: tx.operation },

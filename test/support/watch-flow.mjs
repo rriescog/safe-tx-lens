@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-const tx = JSON.parse(readFileSync(new URL('../../examples/2026-11-05-pos-council-nonce-243-rejection.json', import.meta.url), 'utf8'));
+const tx = JSON.parse(readFileSync(new URL('../../examples/safe-pending.json', import.meta.url), 'utf8'));
 const originalSetTimeout = globalThis.setTimeout;
 globalThis.setTimeout = (callback, delay, ...args) => originalSetTimeout(callback, delay >= 15000 ? 1 : delay, ...args);
 let queueCalls = 0;
