@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fetchMonitorStorage, localCredentials, monitorConfig } from '../src/tenderly-storage.mjs';
 
 async function withConfig(values, fetcher, run) {
-  const keys = ['TENDERLY_ACCESS_KEY', 'TENDERLY_ACCOUNT', 'TENDERLY_PROJECT', 'TENDERLY_MONITOR_ENV_FILE'];
+  const keys = ['TENDERLY_ACCESS_KEY', 'TENDERLY_ACCOUNT', 'TENDERLY_PROJECT', 'TENDERLY_MONITOR_ENV_FILE', 'ETHERSCAN_API_KEY', 'OKLINK_API_KEY', 'ETHERSCAN_API_KEY_FILE', 'OKLINK_API_KEY_FILE'];
   const old = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   const oldFetch = globalThis.fetch;
   for (const key of keys) process.env[key] = values[key] ?? '';
@@ -37,6 +37,21 @@ test('monitor can read an external local env file without echoing credentials', 
       const config = await localCredentials();
       assert.equal(config.TENDERLY_ACCOUNT, 'file-account');
       assert.equal((await monitorConfig()).project, 'file-project');
+    });
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('explorer keys are read from mounted files instead of inline environment values', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'safe-explorer-keys-'));
+  const etherscan = join(dir, 'etherscan-api-key');
+  const oklink = join(dir, 'oklink-api-key');
+  try {
+    await writeFile(etherscan, 'etherscan-file-key\n', { mode: 0o600 });
+    await writeFile(oklink, 'oklink-file-key\n', { mode: 0o600 });
+    await withConfig({ ETHERSCAN_API_KEY: 'ignored-inline-key', OKLINK_API_KEY: 'ignored-inline-key', ETHERSCAN_API_KEY_FILE: etherscan, OKLINK_API_KEY_FILE: oklink }, null, async () => {
+      const config = await localCredentials();
+      assert.equal(config.ETHERSCAN_API_KEY, 'etherscan-file-key');
+      assert.equal(config.OKLINK_API_KEY, 'oklink-file-key');
     });
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

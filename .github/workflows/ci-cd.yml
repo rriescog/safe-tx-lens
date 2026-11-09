@@ -26,7 +26,9 @@ jobs:
       - name: Check deploy configuration
         run: |
           touch deploy/safe-api-key
+          touch deploy/etherscan-api-key deploy/oklink-api-key
           DOMAIN=safetxlens.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml config --quiet
+          DOMAIN=safetxlens.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml -f deploy/compose.etherscan.yaml -f deploy/compose.oklink.yaml config --quiet
 
   publish:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -74,6 +76,8 @@ jobs:
           DEPLOY_TENDERLY_ENABLED: ${{ vars.DEPLOY_TENDERLY_ENABLED }}
           DEPLOY_TENDERLY_ACCOUNT: ${{ vars.DEPLOY_TENDERLY_ACCOUNT }}
           DEPLOY_TENDERLY_PROJECT: ${{ vars.DEPLOY_TENDERLY_PROJECT }}
+          DEPLOY_ETHERSCAN_ENABLED: ${{ vars.DEPLOY_ETHERSCAN_ENABLED }}
+          DEPLOY_OKLINK_ENABLED: ${{ vars.DEPLOY_OKLINK_ENABLED }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
@@ -82,6 +86,8 @@ jobs:
           [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.:-]+$ ]]
           [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
           [[ "$DEPLOY_TENDERLY_ENABLED" == true || "$DEPLOY_TENDERLY_ENABLED" == false || -z "$DEPLOY_TENDERLY_ENABLED" ]]
+          [[ "$DEPLOY_ETHERSCAN_ENABLED" == true || "$DEPLOY_ETHERSCAN_ENABLED" == false || -z "$DEPLOY_ETHERSCAN_ENABLED" ]]
+          [[ "$DEPLOY_OKLINK_ENABLED" == true || "$DEPLOY_OKLINK_ENABLED" == false || -z "$DEPLOY_OKLINK_ENABLED" ]]
           if [[ "$DEPLOY_TENDERLY_ENABLED" == true ]]; then
             [[ "$DEPLOY_TENDERLY_ACCOUNT" =~ ^[a-zA-Z0-9_-]+$ ]]
             [[ "$DEPLOY_TENDERLY_PROJECT" =~ ^[a-zA-Z0-9_-]+$ ]]
@@ -107,20 +113,24 @@ jobs:
           DEPLOY_TENDERLY_ENABLED: ${{ vars.DEPLOY_TENDERLY_ENABLED }}
           DEPLOY_TENDERLY_ACCOUNT: ${{ vars.DEPLOY_TENDERLY_ACCOUNT }}
           DEPLOY_TENDERLY_PROJECT: ${{ vars.DEPLOY_TENDERLY_PROJECT }}
+          DEPLOY_ETHERSCAN_ENABLED: ${{ vars.DEPLOY_ETHERSCAN_ENABLED }}
+          DEPLOY_OKLINK_ENABLED: ${{ vars.DEPLOY_OKLINK_ENABLED }}
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
           GHCR_READ_USER: ${{ github.repository_owner }}
           IMAGE: ${{ needs.publish.outputs.image }}
         run: |
           ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p "$HOME/safe-tx-lens"'
-          scp -o StrictHostKeyChecking=yes deploy/compose.yaml deploy/compose.tenderly.yaml deploy/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:safe-tx-lens/"
+          scp -o StrictHostKeyChecking=yes deploy/compose.yaml deploy/compose.tenderly.yaml deploy/compose.etherscan.yaml deploy/compose.oklink.yaml deploy/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:safe-tx-lens/"
           printf '%s' "$GHCR_READ_TOKEN" | ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_READ_USER' --password-stdin >/dev/null"
-          ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- '$DEPLOY_DOMAIN' '$IMAGE' '$DEPLOY_TENDERLY_ENABLED' '$DEPLOY_TENDERLY_ACCOUNT' '$DEPLOY_TENDERLY_PROJECT'" <<'REMOTE'
+          ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- '$DEPLOY_DOMAIN' '$IMAGE' '$DEPLOY_TENDERLY_ENABLED' '$DEPLOY_TENDERLY_ACCOUNT' '$DEPLOY_TENDERLY_PROJECT' '$DEPLOY_ETHERSCAN_ENABLED' '$DEPLOY_OKLINK_ENABLED'" <<'REMOTE'
           set -euo pipefail
           domain="$1"
           image="$2"
           tenderly_enabled="$3"
           tenderly_account="$4"
           tenderly_project="$5"
+          etherscan_enabled="$6"
+          oklink_enabled="$7"
           cd "$HOME/safe-tx-lens"
           test -s safe-api-key || { echo 'Dedicated Safe API key file is missing on the VPS' >&2; exit 1; }
           umask 077
@@ -131,6 +141,14 @@ jobs:
             test -s tenderly-access-key || { echo 'Dedicated Tenderly key file is missing on the VPS' >&2; exit 1; }
             printf 'TENDERLY_ACCOUNT=%s\nTENDERLY_PROJECT=%s\n' "$tenderly_account" "$tenderly_project" >> .env
             compose_files+=(-f compose.tenderly.yaml)
+          fi
+          if [[ "$etherscan_enabled" == true ]]; then
+            test -s etherscan-api-key || { echo 'Dedicated Etherscan key file is missing on the VPS' >&2; exit 1; }
+            compose_files+=(-f compose.etherscan.yaml)
+          fi
+          if [[ "$oklink_enabled" == true ]]; then
+            test -s oklink-api-key || { echo 'Dedicated OKLink key file is missing on the VPS' >&2; exit 1; }
+            compose_files+=(-f compose.oklink.yaml)
           fi
           docker compose --env-file .env "${compose_files[@]}" pull
           docker compose --env-file .env "${compose_files[@]}" up -d --remove-orphans

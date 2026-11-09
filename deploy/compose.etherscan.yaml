@@ -1,0 +1,9 @@
+services:
+  app:
+    environment:
+      ETHERSCAN_API_KEY_FILE: /run/secrets/etherscan_api_key
+    secrets:
+      - etherscan_api_key
+secrets:
+  etherscan_api_key:
+    file: ./etherscan-api-key

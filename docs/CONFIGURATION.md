@@ -35,6 +35,8 @@ The hosted UI and `/mcp` endpoint share a server-side quota. They do not use vis
 
 The community mode rejects `RPC_URL` and `RPC_URL_<NETWORK>` in its environment. It uses the public RPC defaults in [`src/onchain.mjs`](../src/onchain.mjs); putting a private RPC URL on the VPS will not enable it. Do not place provider tokens in a public browser or MCP configuration.
 
+The production Compose file mounts the Safe key by default. Optional overlays mount Etherscan and OKLink keys separately when `DEPLOY_ETHERSCAN_ENABLED` or `DEPLOY_OKLINK_ENABLED` is set to `true` and the matching key file exists on the VPS. `ETHERSCAN_API_KEY` uses Etherscan V2 with a chain ID, so a PolygonScan ABI lookup needs the Etherscan key and `chainid=137`, not a separate PolygonScan key. See the [deployment steps](../deploy/README.md) and [ABI source matrix](ABI-SOURCES.md).
+
 The community service fetches a requested Safe transaction from available sources or analyzes caller-supplied JSON. A provider outage, missing Safe index, or exhausted quota is reported as unavailable rather than converted into a negative finding about the transaction.
 
 ## Data handling

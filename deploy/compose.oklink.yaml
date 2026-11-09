@@ -1,0 +1,9 @@
+services:
+  app:
+    environment:
+      OKLINK_API_KEY_FILE: /run/secrets/oklink_api_key
+    secrets:
+      - oklink_api_key
+secrets:
+  oklink_api_key:
+    file: ./oklink-api-key
