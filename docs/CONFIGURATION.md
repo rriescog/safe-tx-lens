@@ -33,9 +33,9 @@ Simulation is opt-in per transaction. It sends calldata and available signatures
 
 The hosted UI and `/mcp` endpoint share a server-side quota. They do not use visitor credentials. The deployment requires a **dedicated** Safe API key stored as a file-mounted secret. Tenderly is disabled unless a separate community project, access key, and deployment variables are configured. Follow [deployment](../deploy/README.md) for exact files, repository variables, and rollback.
 
-The current community mode rejects `RPC_URL` and `RPC_URL_<NETWORK>` in its environment. It uses the public RPC defaults in [`src/onchain.mjs`](../src/onchain.mjs); putting a private RPC URL on the VPS will not enable it. Adding quota-controlled, server-only dedicated RPCs requires an implementation change. Do not place a personal provider token in a public browser or MCP configuration.
+The community mode rejects `RPC_URL` and `RPC_URL_<NETWORK>` in its environment. It uses the public RPC defaults in [`src/onchain.mjs`](../src/onchain.mjs); putting a private RPC URL on the VPS will not enable it. Do not place provider tokens in a public browser or MCP configuration.
 
-The community service never reads a local Tenderly monitor snapshot. It fetches a requested Safe transaction from available sources or analyzes caller-supplied JSON. A provider outage, missing Safe index, or exhausted quota is reported as unavailable rather than converted into a negative finding about the transaction.
+The community service fetches a requested Safe transaction from available sources or analyzes caller-supplied JSON. A provider outage, missing Safe index, or exhausted quota is reported as unavailable rather than converted into a negative finding about the transaction.
 
 ## Data handling
 

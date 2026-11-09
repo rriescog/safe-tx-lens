@@ -237,9 +237,9 @@ test('call tree leads with the decoded function and arguments, not a hand-writte
   assert.match(page.evaluate('flowHtml(sample, "1", new Map())'), /Function unknown/);
 });
 
-test('the real nested PoS Council example renders its ABI call separately from the human summary', async () => {
+test('a nested governance example renders its ABI call separately from the human summary', async () => {
   const page = ui();
-  const transaction = JSON.parse(await readFile(pathResolve('examples/2026-11-05-pos-council-nonce-242-executed.json'), 'utf8'));
+  const transaction = JSON.parse(await readFile(pathResolve('examples/safe-executed.json'), 'utf8'));
   page.context.sample = await analyze(transaction, 'eth', { fetchState: false });
   const html = page.evaluate('reportHtml(sample)');
   assert.match(html, /<strong class="flow-expression">forceUnstake\(validatorId: 106\)<\/strong>/);

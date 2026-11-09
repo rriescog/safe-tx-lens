@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-const tx = JSON.parse(readFileSync(new URL('../../examples/2026-11-05-pos-council-nonce-243-rejection.json', import.meta.url), 'utf8'));
+const tx = JSON.parse(readFileSync(new URL('../../examples/safe-pending.json', import.meta.url), 'utf8'));
 globalThis.fetch = async url => {
   const path = String(url);
   if (path.endsWith(`/safes/${tx.safe}/`)) return new Response(JSON.stringify({ address: tx.safe, nonce: 244, threshold: 1, owners: [tx.safe] }), { status: 200 });

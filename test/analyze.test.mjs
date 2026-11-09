@@ -103,15 +103,15 @@ test('Safe URL parser uses the embedded network and hash', () => {
   assert.throws(() => parseInput(`https://evil.example/?safe=eth:${SAFE}`), /Only https:\/\/app.safe.global/);
 });
 
-test('public PoS Council examples reproduce their Safe transaction hashes', async () => {
-  for (const path of ['examples/2026-11-05-pos-council-nonce-242-executed.json', 'examples/2026-11-05-pos-council-nonce-243-rejection.json']) {
+test('public transaction examples reproduce their Safe transaction hashes', async () => {
+  for (const path of ['examples/safe-executed.json', 'examples/safe-pending.json']) {
     const transaction = JSON.parse(await readFile(path, 'utf8'));
     assert.equal(calculateHash(transaction, 'eth').toLowerCase(), transaction.safeTxHash.toLowerCase());
   }
 });
 
-test('PoS Council nested governance calls expose the actual action and its risk', async () => {
-  const transaction = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-242-executed.json', 'utf8'));
+test('nested governance calls expose the actual action and its risk', async () => {
+  const transaction = JSON.parse(await readFile('examples/safe-executed.json', 'utf8'));
   const report = await analyze(transaction, 'eth', { fetchState: false });
   assert.deepEqual(report.actions.map(action => action.stage), ['schedule', 'call']);
   assert.deepEqual(report.actions.map(action => action.method), ['forceUnstake(uint256)', 'forceUnstake(uint256)']);
@@ -124,14 +124,14 @@ test('PoS Council nested governance calls expose the actual action and its risk'
 });
 
 test('a nonce-only Safe rejection has medium review priority', async () => {
-  const transaction = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
+  const transaction = JSON.parse(await readFile('examples/safe-pending.json', 'utf8'));
   const report = await analyze(transaction, 'eth', { fetchState: false });
   assert.equal(report.actions[0].label, 'Empty call / Safe nonce consumption');
   assert.equal(report.risk.reviewPriority, 'medium');
 });
 
 test('Builder exports decode without a Safe nonce and compare exact calls when a Safe transaction is available', async () => {
-  const transaction = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-242-executed.json', 'utf8'));
+  const transaction = JSON.parse(await readFile('examples/safe-executed.json', 'utf8'));
   const actual = await analyze(transaction, 'eth', { fetchState: false });
   const transactions = actual.call.children.map(({ to, value, data, operation }) => ({ to, value, data, operation }));
   const builder = { version: '1.0', chainId: '1', meta: { createdFromSafeAddress: transaction.safe }, transactions };
@@ -158,7 +158,7 @@ test('Builder timelock batches reveal proxy upgrades and validator reinitializat
 });
 
 test('Gateway transaction mapping preserves every field used by the Safe hash', async () => {
-  const original = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-242-executed.json', 'utf8'));
+  const original = JSON.parse(await readFile('examples/safe-executed.json', 'utf8'));
   const gateway = { safeAddress: original.safe, txHash: original.transactionHash, txStatus: 'SUCCESS', executedAt: 1,
     txData: { to: { value: original.to }, value: original.value, hexData: original.data, operation: original.operation },
     detailedExecutionInfo: { safeTxHash: original.safeTxHash, nonce: original.nonce, safeTxGas: original.safeTxGas, baseGas: original.baseGas, gasPrice: original.gasPrice, gasToken: original.gasToken, refundReceiver: { value: original.refundReceiver }, confirmations: [] } };
@@ -169,7 +169,7 @@ test('Gateway transaction mapping preserves every field used by the Safe hash', 
 });
 
 test('Tenderly monitor storage decodes offchain payloads without claiming an unverified Safe hash', async () => {
-  const original = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-242-executed.json', 'utf8'));
+  const original = JSON.parse(await readFile('examples/safe-executed.json', 'utf8'));
   const id = `multisig_${original.safe}_${original.safeTxHash}`;
   const stored = { [id]: { prefix: 'eth', safeAddress: original.safe, txStatus: 'AWAITING_CONFIRMATIONS', txData: { to: { value: original.to }, value: original.value, hexData: original.data, operation: original.operation }, detailedExecutionInfo: { safeTxHash: original.safeTxHash, nonce: original.nonce, confirmations: [] } } };
   const queue = await resolve(stored, 'eth', { safeAddress: original.safe });

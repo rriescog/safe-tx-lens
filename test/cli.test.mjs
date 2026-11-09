@@ -36,7 +36,7 @@ test('CLI inspects an offline Builder plan as text or machine readable JSON', ()
 });
 
 test('CLI prints one transaction, a Safe queue, and one watch poll from a stubbed source', () => {
-  const txPath = '@examples/2026-11-05-pos-council-nonce-243-rejection.json';
+  const txPath = '@examples/safe-pending.json';
   const report = cliStub('inspect', txPath, '--network', 'eth');
   assert.equal(report.status, 0, report.stderr);
   assert.match(report.stdout, /RISK/);

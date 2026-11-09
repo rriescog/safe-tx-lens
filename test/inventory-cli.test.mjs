@@ -10,7 +10,7 @@ const script = resolve('scripts/check-safe-inventory.mjs');
 function run(...args) { return spawnSync(process.execPath, ['--import', preload, script, ...args], { encoding: 'utf8', timeout: 10000, env: { ...process.env, SAFE_API_KEY: 'test-only-key' } }); }
 
 test('inventory smoke runner verifies queued and historical Safe hashes without network access', async () => {
-  const tx = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
+  const tx = JSON.parse(await readFile('examples/safe-pending.json', 'utf8'));
   const dir = await mkdtemp(join(tmpdir(), 'safe-inventory-test-'));
   const path = join(dir, 'inventory.json');
   try {
@@ -41,20 +41,20 @@ test('inventory runner validates its command line before reading files', () => {
   assert.equal(run('/missing.json', '1.5').status, 2);
 });
 
-test('inventory runner accepts an array, filters unsupported networks, and prioritizes named Safes', async () => {
-  const tx = JSON.parse(await readFile('examples/2026-11-05-pos-council-nonce-243-rejection.json', 'utf8'));
+test('inventory runner accepts an array and filters unsupported networks and non-Safes', async () => {
+  const tx = JSON.parse(await readFile('examples/safe-pending.json', 'utf8'));
   const dir = await mkdtemp(join(tmpdir(), 'safe-inventory-selection-'));
   const path = join(dir, 'inventory.json');
   try {
     await writeFile(path, JSON.stringify([
       { chain_id: 999999, address: tx.safe, name: 'Unsupported' },
       { chain_id: 1, address: tx.safe, name: 'Legacy multisig', type: null },
+      { chain_id: 1, address: tx.safe, name: 'Fixture Safe' },
       { chain_id: 1, address: '0x0000000000000000000000000000000000000001', name: 'Other' },
-      { chain_id: 1, address: tx.safe, name: 'Protocol Council fixture' },
     ]));
     const result = run(path, '1');
     assert.equal(result.status, 0, result.stderr);
-    assert.match(result.stdout, /Protocol Council fixture/);
+    assert.match(result.stdout, /Fixture Safe/);
     assert.doesNotMatch(result.stdout, /Other|Unsupported|Legacy multisig/);
     assert.match(result.stdout, /"excludedNonSafe":1/);
     await writeFile(path, JSON.stringify({ invalid: [] }));
