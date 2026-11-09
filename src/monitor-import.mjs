@@ -3,6 +3,7 @@ import { chainId } from './chains.mjs';
 import { analyze, classifyIntent } from './analyze.mjs';
 import { decodeCall, summarizeCalls } from './decode.mjs';
 import { assessRisk } from './risk.mjs';
+import { validateTransactionJson } from './input-boundary.mjs';
 
 const HASH = /^0x[0-9a-fA-F]{64}$/;
 const PREFIX = { matic: 'pol', gnosis: 'gno' };
@@ -15,7 +16,7 @@ export function isMonitorStorage(value) {
 
 function storageEntries(value) {
   const entries = value.PENDING_TXN_DATA ?? value;
-  return typeof entries === 'string' ? JSON.parse(entries) : entries;
+  return validateTransactionJson(typeof entries === 'string' ? JSON.parse(entries) : entries);
 }
 
 function hasHashFields(info) {

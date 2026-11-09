@@ -1,4 +1,5 @@
 import { Interface, getAddress, id } from 'ethers';
+import { readJsonResponse } from './response-boundary.mjs';
 
 const IFACE = new Interface([
   'function transfer(address to,uint256 amount)',
@@ -162,9 +163,7 @@ export async function lookupSelectorCandidates(selector, { request = fetch } = {
   try {
     const response = await request(`https://api.4byte.sourcify.dev/signature-database/v1/lookup?function=${key}`, { signal: AbortSignal.timeout(4000) });
     if (!response.ok) throw new Error(`Sourcify signature database ${response.status}`);
-    const raw = await response.text();
-    if (raw.length > 65536) throw new Error('Signature lookup response exceeded review limit');
-    const body = JSON.parse(raw);
+    const body = await readJsonResponse(response, 65536);
     const names = Array.isArray(body?.result?.function?.[key]) ? body.result.function[key].filter(item => !item.filtered && typeof item.name === 'string').slice(0, 12).map(item => item.name) : [];
     if (names.length) result = { names, source: 'Sourcify 4byte' };
   } catch { /* An unavailable signature database must not block inspection. */ }
@@ -172,9 +171,7 @@ export async function lookupSelectorCandidates(selector, { request = fetch } = {
     try {
       const response = await request(`https://www.4byte.directory/api/v1/signatures/?hex_signature=${key}&page_size=12`, { signal: AbortSignal.timeout(4000), headers: { Accept: 'application/json', 'User-Agent': 'SafeTxLens/0.2' } });
       if (!response.ok) throw new Error(`4byte.directory ${response.status}`);
-      const raw = await response.text();
-      if (raw.length > 65536) throw new Error('Signature lookup response exceeded review limit');
-      const body = JSON.parse(raw);
+      const body = await readJsonResponse(response, 65536);
       // Never choose a single candidate from an incomplete, paginated result.
       if (Number.isInteger(body.count) && body.count <= 12 && Array.isArray(body.results) && body.results.length === body.count) {
         result = { names: body.results.filter(item => item.hex_signature?.toLowerCase() === key && typeof item.text_signature === 'string').map(item => item.text_signature), source: '4byte.directory' };

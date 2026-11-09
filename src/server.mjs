@@ -65,7 +65,7 @@ function inspectionFailure(res, error, recordIncident) {
   if (/Safe API 404|Safe Client Gateway 404|For an offchain proposal without Safe API access/i.test(message)) {
     return reply(res, 422, { error: 'We could not retrieve this transaction from the available Safe sources. Check the network, try a Safe URL, or import its transaction JSON.', code: 'TRANSACTION_UNAVAILABLE' });
   }
-  const expectedInputError = error instanceof SyntaxError || /^(Invalid |Input |Unrecognized |Only https:\/\/app\.safe\.global|Enter |Select |The hash or address does not reveal|Execution transaction was not found|An RPC URL is required|Unsupported |Safe URL|No Transaction Service alias)/i.test(message);
+  const expectedInputError = error instanceof SyntaxError || /^(Invalid |Input |Transaction JSON |Unrecognized |Only https:\/\/app\.safe\.global|Enter |Select |The hash or address does not reveal|This onchain transaction|Execution transaction was not found|An RPC URL is required|Unsupported |Safe URL|No Transaction Service alias)/i.test(message);
   if (expectedInputError) return reply(res, 400, { error: message, code: 'INVALID_OR_UNAVAILABLE_INPUT' });
   const incidentId = recordIncident('inspection_unexpected', 500);
   return reply(res, 500, { error: 'Sorry, something went wrong while inspecting this transaction. We recorded the issue to improve the service. Please try again, or provide a Safe URL or transaction JSON.', code: 'INSPECTION_ERROR', incidentId });
@@ -190,10 +190,20 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
         if (Array.isArray(message) || !message || typeof message !== 'object') return reply(res, 400, { error: 'One MCP message per request' });
         const allowedMethods = ['initialize', 'notifications/initialized', 'ping', 'tools/list', 'tools/call'];
         if (!allowedMethods.includes(message.method)) return reply(res, 405, { error: 'MCP method unavailable' });
-        const mcpInput = message.params?.arguments?.input ?? message.params?.arguments?.safe ?? message.params?.arguments?.transaction;
-        const mcpNetwork = message.params?.arguments?.network ?? 'auto';
-        const deepReview = message.params?.name === 'inspect_json' || (message.params?.name === 'inspect' && parseInput(mcpInput, mcpNetwork).kind !== 'safe');
-        const cost = message.method === 'tools/call' ? communityCost(mcpInput, mcpNetwork, message.params?.name === 'list_history' ? 'history' : 'pending', { verifyTargets: deepReview }) : 1;
+        let cost = 1;
+        if (message.method === 'tools/call') {
+          const params = message.params;
+          const args = params?.arguments;
+          if (!params || typeof params !== 'object' || Array.isArray(params) || !args || typeof args !== 'object' || Array.isArray(args)) return reply(res, 400, { error: 'Invalid MCP tool arguments' });
+          const fields = { inspect: 'input', inspect_json: 'transaction', list_pending: 'safe', list_history: 'safe' };
+          const field = Object.hasOwn(fields, params.name) ? fields[params.name] : null;
+          if (!field) return reply(res, 400, { error: 'Unknown MCP tool' });
+          const mcpInput = args[field];
+          const mcpNetwork = args.network ?? 'auto';
+          validateInspectionRequest({ input: mcpInput, network: mcpNetwork });
+          const deepReview = params.name === 'inspect_json' || (params.name === 'inspect' && parseInput(mcpInput, mcpNetwork).kind !== 'safe');
+          cost = communityCost(mcpInput, mcpNetwork, params.name === 'list_history' ? 'history' : 'pending', { verifyTargets: deepReview });
+        }
         const ticket = community.take(clientIp, cost);
         if (!ticket.allowed) return denied(res, ticket);
         try {

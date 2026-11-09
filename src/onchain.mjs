@@ -1,9 +1,11 @@
 import { Interface, JsonRpcProvider, id } from 'ethers';
 import { analyze, calculateHash } from './analyze.mjs';
 import { chainId } from './chains.mjs';
+import { readJsonResponse } from './response-boundary.mjs';
 
 const EXEC = new Interface(['function execTransaction(address,uint256,bytes,uint8,uint256,uint256,uint256,address,address,bytes) returns (bool)']);
 const STATE = new Interface(['function nonce() view returns (uint256)']);
+const SAFE_PROBE = new Interface(['function getThreshold() view returns (uint256)', 'function getOwners() view returns (address[])']);
 const SUCCESS_TOPIC = id('ExecutionSuccess(bytes32,uint256)').toLowerCase();
 const FAILURE_TOPIC = id('ExecutionFailure(bytes32,uint256)').toLowerCase();
 
@@ -30,10 +32,10 @@ export async function discoverExecutionNetworks(hash, networks, options = {}) {
     try {
       const response = await fetcher(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getTransactionReceipt', params: [hash] }), signal: AbortSignal.timeout(4000) });
       if (!response.ok) return null;
-      const receipt = (await response.json()).result;
+      const receipt = (await readJsonResponse(response, 1_000_000)).result;
       if (!receipt?.logs?.some(log => [SUCCESS_TOPIC, FAILURE_TOPIC].includes(log.topics?.[0]?.toLowerCase()))) return null;
       const chainResponse = await fetcher(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'eth_chainId', params: [] }), signal: AbortSignal.timeout(4000) });
-      if (!chainResponse.ok || Number((await chainResponse.json()).result) !== chainId(network)) return null;
+      if (!chainResponse.ok || Number((await readJsonResponse(chainResponse, 1_000_000)).result) !== chainId(network)) return null;
       return network;
     } catch { return null; }
   }));
@@ -55,16 +57,29 @@ export function rpcFor(network, override) {
 export async function contractPresence(address, network, options = {}) {
   const rpc = rpcFor(network, options.rpcUrl);
   if (!rpc) return 'unknown';
-  const request = async (method, params) => {
+  const request = async (method, params, { safeProbe = false } = {}) => {
     const response = await (options.fetchImpl ?? fetch)(rpc, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(4000) });
     if (!response.ok) throw new Error('RPC unavailable');
-    const body = await response.json();
+    const body = await readJsonResponse(response, 1_000_000);
+    if (safeProbe && body.error?.code === 3 && /execution reverted/i.test(String(body.error.message))) return '0x';
     if (body.error || typeof body.result !== 'string') throw new Error('Invalid RPC response');
     return body.result;
   };
   try {
     if (Number(await request('eth_chainId', [])) !== chainId(network)) return 'unknown';
-    return await request('eth_getCode', [address, 'latest']) === '0x' ? 'absent' : 'present';
+    if (await request('eth_getCode', [address, 'latest']) === '0x') return 'absent';
+    // A contract at the address is not necessarily a Safe. A failed probe
+    // stays unknown when the RPC itself is unavailable; only an answer that
+    // cannot decode as a Safe owner/threshold view is marked incompatible.
+    try {
+      const thresholdResult = await request('eth_call', [{ to: address, data: SAFE_PROBE.encodeFunctionData('getThreshold', []) }, 'latest'], { safeProbe: true });
+      if (thresholdResult === '0x') return 'not_safe';
+      const ownersResult = await request('eth_call', [{ to: address, data: SAFE_PROBE.encodeFunctionData('getOwners', []) }, 'latest'], { safeProbe: true });
+      if (ownersResult === '0x') return 'not_safe';
+      const threshold = SAFE_PROBE.decodeFunctionResult('getThreshold', thresholdResult)[0];
+      const owners = SAFE_PROBE.decodeFunctionResult('getOwners', ownersResult)[0];
+      return threshold > 0n && owners.length >= Number(threshold) ? 'present' : 'not_safe';
+    } catch { return 'unknown'; }
   } catch { return 'unknown'; }
 }
 

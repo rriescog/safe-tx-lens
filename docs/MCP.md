@@ -2,6 +2,8 @@
 
 Safe Tx Lens exposes read-only MCP tools. The planned community endpoint is `https://safetxlens.org/mcp` over Streamable HTTP and shares the web UI's quota. It is **not live yet**: the domain, DNS and VPS must be ready first. A local stdio server is available when you run your own copy.
 
+Each MCP call requests only the analysis or Safe transaction list named by its tool. `list_history` means executed transactions belonging to the supplied Safe; it never reads previous users' requests. The application does not save a per-user request history, hashes, calldata, or IP addresses in its quota file. It saves aggregate daily/monthly usage counts; per-IP counters remain in process memory for the current day. Error logs contain a generated incident ID, category, time, and status without the input. An operator's reverse proxy or infrastructure may have separate access logs, so a self-hosted instance should configure those explicitly.
+
 ## Connect to the community service after launch
 
 Codex CLI/Desktop:

@@ -135,6 +135,18 @@ test('every HTTP input field rejects instruction-like invalid values structurall
   assert.equal(validateInspectionRequest({ input: { safe: SAFE, to: VAULT }, network: 'eth' }).network, 'eth');
 });
 
+test('transaction JSON cannot exhaust recursive decoders or introduce prototype keys', () => {
+  const deep = JSON.parse(`${'{"next":'.repeat(40)}0${'}'.repeat(40)}`);
+  assert.throws(() => validateInspectionRequest({ input: deep, network: 'eth' }), /too complex/);
+  assert.throws(() => validateInspectionRequest({ input: JSON.stringify(deep), network: 'eth' }), /too complex/);
+  assert.throws(() => validateInspectionRequest({ input: { meta: { name: 'x'.repeat(2000001) } }, network: 'eth' }), /too large/);
+  assert.throws(() => validateInspectionRequest({ input: JSON.parse('{"__proto__":{"admin":true}}'), network: 'eth' }), /unsupported field/);
+  assert.throws(() => validateInspectionRequest({ input: { meta: { ['a'.repeat(257)]: 'x' } }, network: 'eth' }), /unsupported field/);
+  const repeated = { safe: SAFE }; repeated.again = repeated;
+  assert.throws(() => validateInspectionRequest({ input: repeated, network: 'eth' }), /repeated object/);
+  assert.equal(validateInspectionRequest({ input: { safe: SAFE, to: VAULT }, network: 'eth' }).network, 'eth');
+});
+
 test('donation destinations are absent until explicitly configured', () => {
   const config = publicSupportConfig();
   assert.equal(config.wallets.length, 0);

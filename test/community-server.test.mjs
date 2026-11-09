@@ -89,3 +89,41 @@ test('a remote MCP client can connect and decode through the public endpoint', a
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('hosted MCP rejects complex or malformed inputs before invoking tools', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'safe-community-invalid-'));
+  const server = await serve({ port: 0, publicOrigin: origin, communityMode: true, communityQuotaFile: join(directory, 'quota.json'), credentialReader: async () => ({ SAFE_API_KEY: 'test-key' }) });
+  const base = `http://127.0.0.1:${server.address().port}/mcp`;
+  const post = message => fetch(base, { method: 'POST', headers: { 'content-type': 'application/json', 'x-client-ip': '203.0.113.19' }, body: JSON.stringify(message) });
+  try {
+    const deep = JSON.parse(`${'{"next":'.repeat(40)}0${'}'.repeat(40)}`);
+    for (const params of [
+      { name: 'inspect_json', arguments: { transaction: deep, network: 'eth' } },
+      { name: 'inspect', arguments: { input: 'https://evil.test', network: 'eth' } },
+      { name: 'inspect', arguments: 'bad' },
+      { name: '__proto__', arguments: {} },
+    ]) {
+      const response = await post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params });
+      assert.equal(response.status, 400);
+    }
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('community HTTP rejects hostile JSON as a client error without recording its payload', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'safe-community-json-'));
+  const incidents = [];
+  const server = await serve({ port: 0, publicOrigin: origin, communityMode: true, communityQuotaFile: join(directory, 'quota.json'), credentialReader: async () => ({ SAFE_API_KEY: 'test-key' }), incidentReporter: incident => incidents.push(incident) });
+  const deep = JSON.parse(`${'{"next":'.repeat(40)}0${'}'.repeat(40)}`);
+  try {
+    const response = await fetch(`http://127.0.0.1:${server.address().port}/api/inspect`, { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-client-ip': '203.0.113.41' }, body: JSON.stringify({ input: deep, network: 'eth' }) });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /too complex/);
+    assert.deepEqual(incidents, []);
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

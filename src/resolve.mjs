@@ -156,7 +156,10 @@ export async function resolve(input, network = 'eth', options = {}) {
     }
     if (settings.rpcUrl) {
       try { return await analyzeExecutionHash(parsed.hash, parsed.network, settings); }
-      catch { /* A pending Safe hash cannot be recovered from an EVM RPC. */ }
+      catch (error) {
+        if (/not a Safe execTransaction/.test(error.message)) throw new Error('This onchain transaction does not appear to be a supported Safe execTransaction. Check its hash and network.');
+        // A pending Safe hash cannot be recovered from an EVM RPC.
+      }
     }
     if (safeError.message.includes('anonymous monthly quota exhausted')) {
       throw new Error(`${monitorFound ? 'Hash not found in the explicitly enabled Tenderly monitor snapshot. ' : ''}No matching indexed execution was found. Safe API quota is exhausted, so this hash alone cannot reveal an unindexed pending proposal. Supply its transaction JSON or use an authenticated Safe API key.`);
@@ -175,6 +178,7 @@ export async function resolve(input, network = 'eth', options = {}) {
   let source = 'safe_api';
   let sourceAvailable = false;
   let addressAbsent = false;
+  let addressNotSafe = false;
   const usedSources = new Set();
   for (const part of scopes) {
     try {
@@ -191,10 +195,16 @@ export async function resolve(input, network = 'eth', options = {}) {
         reports.push({ ...report, executionStatus: executionStatusWithSource(report, page.source), evidence: { source: page.source, retrievedAt: new Date().toISOString() } });
       }
     } catch (error) {
-      if (error.message.includes('Safe API 404') && await contractPresence(parsed.address, parsed.network, { rpcUrl: settings.rpcUrl, fetchImpl: options.fetchImpl }) === 'absent') {
-        addressAbsent = true;
-        warnings.push(`No contract is deployed at ${parsed.address} on ${parsed.network} according to the selected RPC. Check the network in the Safe URL or choose another chain.`);
-        continue;
+      if (error.message.includes('Safe API 404')) {
+        const presence = await contractPresence(parsed.address, parsed.network, { rpcUrl: settings.rpcUrl, fetchImpl: options.fetchImpl });
+        if (presence === 'absent' || presence === 'not_safe') {
+          addressAbsent ||= presence === 'absent';
+          addressNotSafe ||= presence === 'not_safe';
+          warnings.push(presence === 'absent'
+            ? `No contract is deployed at ${parsed.address} on ${parsed.network} according to the selected RPC. This may be a regular wallet rather than a Safe, or the wrong network.`
+            : `The contract at ${parsed.address} on ${parsed.network} did not answer basic Safe owner and threshold checks. It does not appear to be a supported Safe. Verify the address and network.`);
+          continue;
+        }
       }
       if (part === 'pending' && options.monitorFallback === true) {
         try {
@@ -230,5 +240,5 @@ export async function resolve(input, network = 'eth', options = {}) {
       } else warnings.push(`${part} unavailable: ${error.message}`);
     }
   }
-  return { kind: 'queue', scope, source: sourceAvailable ? usedSources.size > 1 ? 'multiple_sources' : source : 'unavailable', availability: sourceAvailable ? 'available' : addressAbsent ? 'absent' : 'unavailable', network: parsed.network, safe: parsed.address, safeState: safe ? { nonce: safe.nonce, threshold: safe.threshold, owners: safe.owners } : null, truncated, warnings, reports, reviewedAt: new Date().toISOString() };
+  return { kind: 'queue', scope, source: sourceAvailable ? usedSources.size > 1 ? 'multiple_sources' : source : 'unavailable', availability: sourceAvailable ? 'available' : addressNotSafe ? 'not_safe' : addressAbsent ? 'absent' : 'unavailable', network: parsed.network, safe: parsed.address, safeState: safe ? { nonce: safe.nonce, threshold: safe.threshold, owners: safe.owners } : null, truncated, warnings, reports, reviewedAt: new Date().toISOString() };
 }

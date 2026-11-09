@@ -1,6 +1,7 @@
 import { getAddress, isAddress, keccak256 } from 'ethers';
 import { CHAINS, chainId } from './chains.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
+import { readJsonResponse } from './response-boundary.mjs';
 
 // The Etherscan V2 chain list was checked on 2026-11-08. Other named chains
 // have their own explorer API. Sourcify is attempted for every named chain.
@@ -43,13 +44,10 @@ function abiArray(value) {
 }
 
 async function jsonGet(url, { request, headers = {} } = {}) {
-  const response = await request(url, { headers: { Accept: 'application/json', 'User-Agent': 'safe-tx-lens/0.2 (+https://github.com/web3security/safe-tx-lens)', ...headers }, signal: AbortSignal.timeout(8000) });
+  const response = await request(url, { headers: { Accept: 'application/json', 'User-Agent': 'safe-tx-lens/0.2 (+https://github.com/rriescog/safe-tx-lens)', ...headers }, signal: AbortSignal.timeout(8000) });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Source API ${new URL(url).host} ${response.status}`);
-  if (typeof response.text !== 'function') return response.json();
-  const raw = await response.text();
-  if (raw.length > 4_000_000) throw new Error('Verified source response exceeded the review limit');
-  return JSON.parse(raw);
+  return readJsonResponse(response, 4_000_000);
 }
 
 export async function sourcifyLookup(network, address, { request = fetch } = {}) {

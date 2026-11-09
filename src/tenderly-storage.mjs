@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { readJsonResponse } from './response-boundary.mjs';
 
 const localConfig = fileURLToPath(new URL('../.env.local', import.meta.url));
 
@@ -43,7 +44,7 @@ export async function fetchMonitorStorage() {
   const url = `https://api.tenderly.co/api/v1/account/${config.account}/project/${config.project}/storage/all`;
   const response = await fetch(url, { headers: { Accept: 'application/json', 'X-Access-Key': config.key }, signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`Tenderly monitor storage ${response.status}`);
-  const entries = await response.json();
+  const entries = await readJsonResponse(response, 16_000_000);
   if (!Array.isArray(entries)) throw new Error('Unexpected Tenderly monitor storage response');
   const raw = entries.find(entry => entry.key === 'PENDING_TXN_DATA')?.value;
   if (raw == null) throw new Error('Tenderly monitor has no PENDING_TXN_DATA');

@@ -37,8 +37,9 @@ test('recommended projects appear only in the dark footer', async () => {
   assert.match(main, /report it on GitHub/);
   assert.match(html, /\/web\/vendor\/cytoscape\.min\.js/);
   assert.match(footer, /Sponsor inquiries on X/);
-  assert.match(footer, /href="https:\/\/github\.com\/web3security\/safe-tx-lens\/blob\/main\/docs\/MCP\.md"[^>]*>Use the MCP server/);
-  assert.doesNotMatch(main, /github\.com\/rriescog/);
+  assert.match(footer, /href="https:\/\/github\.com\/rriescog\/safe-tx-lens\/blob\/main\/docs\/MCP\.md"[^>]*>Use the MCP server/);
+  assert.match(main, /github\.com\/rriescog\/safe-tx-lens/);
+  assert.doesNotMatch(html, /github\.com\/web3security\/safe-tx-lens/);
   assert.doesNotMatch(main, /Safe queue \+ history|RPC available/);
   assert.match(main, /Amoy and Immutable zkEVM can attempt execution-hash or supplied JSON review/);
 });
@@ -631,6 +632,22 @@ test('JSON drop accepts one bounded data file and renders an attacker filename a
   await new Promise(done => setImmediate(done));
   assert.equal(page.elements.get('json-drop-hint').textContent, name);
   assert.equal(page.elements.get('json-drop-hint').innerHTML, '');
+});
+
+test('external source and simulation links reject scripts, credentials, and plain HTTP', async () => {
+  const page = ui();
+  const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
+  const report = await analyze(tx, 'eth', { fetchState: false });
+  report.targetChecks = [{ address: tx.to, status: 'verified', reason: 'matched', blockTag: 'latest', source: 'javascript:alert(1)', proxy: { forwarding: { status: 'verified_at_block', source: 'http://unsafe.test/code', pattern: 'reviewed', blockTag: 'latest' } } }];
+  report.simulation = { success: true, blockNumber: 1, url: 'https://user:pass@dashboard.tenderly.co/trace' };
+  page.context.sample = report;
+  const html = page.evaluate('reportHtml(sample)');
+  assert.doesNotMatch(html, /href="(?:javascript:|http:|https:\/\/user:pass@)/);
+  report.targetChecks[0].source = 'https://repo.sourcify.dev/verified';
+  report.simulation.url = 'https://dashboard.tenderly.co/trace';
+  const good = page.evaluate('reportHtml(sample)');
+  assert.match(good, /href="https:\/\/repo\.sourcify\.dev\/verified"/);
+  assert.match(good, /href="https:\/\/dashboard\.tenderly\.co\/trace"/);
 });
 
 test('watch keeps the execution notice visible when a proposal leaves the queue', async () => {

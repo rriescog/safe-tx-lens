@@ -2,6 +2,7 @@ import { chainId, safeServiceAlias } from './chains.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
 import { getAddress } from 'ethers';
 import { createHash } from 'node:crypto';
+import { readJsonResponse } from './response-boundary.mjs';
 
 const GATEWAY = 'https://safe-client.safe.global';
 const unsignedInteger = value => Number.isSafeInteger(value) && value >= 0 || typeof value === 'string' && /^\d+$/.test(value);
@@ -12,7 +13,7 @@ async function gatewayGet(network, path) {
   if (!/^\/[a-zA-Z0-9/_?=&.-]+$/.test(path) || path.includes('..')) throw new Error('Invalid Safe Gateway path');
   const response = await fetch(`${GATEWAY}/v1/chains/${chainId(network)}${path}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error(`Safe Client Gateway ${response.status}`);
-  return response.json();
+  return readJsonResponse(response, 16_000_000);
 }
 
 export function gatewayTransaction(raw) {
@@ -72,7 +73,7 @@ export async function safeGet(network, path, apiKey) {
     }
     throw new Error(`Safe API ${response.status}: ${[401, 403].includes(response.status) ? apiKey ? 'authenticated access rejected' : 'API key required or access denied' : 'request failed'}`);
   }
-  return response.json();
+  return readJsonResponse(response, 16_000_000);
 }
 
 export async function fetchTransaction(hash, network) {

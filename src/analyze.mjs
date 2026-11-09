@@ -7,6 +7,7 @@ import { fetchTransaction, safeGet } from './safe-api.mjs';
 import { localCredentials } from './tenderly-storage.mjs';
 import { inspectTargetCode } from './target-code.mjs';
 import { enrichTokenCalls } from './token-metadata.mjs';
+import { readJsonResponse } from './response-boundary.mjs';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 const SAFE_TYPES = { SafeTx: [
@@ -201,7 +202,7 @@ async function simulate(tx, network, safeInfo, options) {
     signal: AbortSignal.timeout(30000),
   });
   if (!response.ok) return { unavailable: `Tenderly API returned ${response.status}` };
-  const result = await response.json();
+  const result = await readJsonResponse(response, 16_000_000);
   const transaction = result.transaction ?? {};
   const info = transaction.transaction_info ?? {};
   const storageDiffs = [];

@@ -114,6 +114,40 @@ test('an unindexed offchain hash reports source failure instead of fabricating t
   await assert.rejects(() => resolve(tx.safeTxHash, 'eth', { rpcUrl: '', verifyTargets: false }), /For an offchain proposal without Safe API access/);
 }));
 
+test('regular wallets and incompatible contracts are not presented as Safe queues', async () => {
+  const original = globalThis.fetch;
+  const address = '0x1111111111111111111111111111111111111111';
+  try {
+    for (const deployed of [false, true]) {
+      globalThis.fetch = async (_url, options) => {
+        if (!options?.body) return new Response('{}', { status: 404 });
+        const request = JSON.parse(options.body);
+        const result = request.method === 'eth_chainId' ? '0x1' : request.method === 'eth_getCode' ? deployed ? '0x6000' : '0x' : '0x';
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }));
+      };
+      const result = await resolve(address, 'eth', { rpcUrl: 'https://rpc.example.test', fetchImpl: globalThis.fetch, verifyTargets: false });
+      assert.equal(result.availability, deployed ? 'not_safe' : 'absent');
+      assert.match(result.warnings.join(' '), deployed ? /does not appear to be a supported Safe/ : /regular wallet/);
+    }
+  } finally { globalThis.fetch = original; }
+});
+
+test('an unrelated onchain transaction reports that it is not a supported Safe execution', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response('{}', { status: 404 });
+  const hash = `0x${'ab'.repeat(32)}`;
+  try {
+    await assert.rejects(() => resolve(hash, 'eth', {
+      rpcUrl: 'https://rpc.example.test',
+      provider: {
+        getNetwork: async () => ({ chainId: 1n }),
+        getTransaction: async () => ({ to: tx.safe, data: '0x12345678' }),
+        getTransactionReceipt: async () => ({ blockNumber: 1 }),
+      },
+    }), /does not appear to be a supported Safe execTransaction/);
+  } finally { globalThis.fetch = original; }
+});
+
 test('an unseen hash can discover its network through the authenticated Safe Transaction Service', async () => withSources({}, async () => {
   const gno = { ...tx, safeTxHash: calculateHash(normalizeTransaction(tx), 'gno') };
   const original = globalThis.fetch;
