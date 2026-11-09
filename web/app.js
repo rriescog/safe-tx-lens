@@ -116,12 +116,12 @@ fetch('/api/network-examples').then(response => response.ok ? response.json() : 
 }).catch(() => { document.getElementById('example-coverage').textContent = 'Examples are temporarily unavailable. You can still inspect your own transaction above.'; });
 function networkCoverageText(row) {
   const lists = row.pending === 'available' && row.history === 'available'
-    ? 'Safe list APIs responded'
+    ? 'Safe list endpoints responded'
     : row.pending === 'not_tested' || row.history === 'not_tested'
-      ? 'Safe list APIs not tested'
+      ? 'Safe list endpoints not tested'
       : row.pending === 'not_available' && row.history === 'not_available'
-        ? 'Configured Safe list API returned 404'
-        : 'Safe list APIs inconclusive';
+        ? 'Safe queue/history unavailable via configured API'
+        : 'Safe list endpoints inconclusive';
   const rpc = row.rpc === 'available' ? 'RPC chain ID matched' : 'RPC chain ID not confirmed';
   return `${lists} · ${rpc}${row.indexing === 'indexer_lagging' ? ' · Indexer behind' : ''}`;
 }
@@ -137,7 +137,10 @@ fetch('/api/network-coverage').then(response => response.ok ? response.json() : 
     if (!row) continue;
     const label = document.createElement('span'); label.className = 'network-status';
     label.textContent = networkCoverageText(row);
-    if (row.pending !== 'available' || row.history !== 'available' || row.rpc !== 'available' || row.indexing !== 'available') label.classList.add('limited');
+    // Missing Safe list endpoints limit offchain discovery. They do not
+    // establish that the network or its RPC is down.
+    if (row.pending === 'not_available' && row.history === 'not_available' && row.rpc === 'available') label.classList.add('partial');
+    else if (row.pending !== 'available' || row.history !== 'available' || row.rpc !== 'available' || row.indexing !== 'available') label.classList.add('limited');
     card.append(label);
   }
 }).catch(() => {});

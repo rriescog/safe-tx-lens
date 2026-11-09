@@ -160,3 +160,4 @@ footer.site-footer{max-width:none;margin:0;padding:38px clamp(20px,4vw,64px) 44p
 .example-card .network-try{display:block;width:100%;margin-top:6px;text-align:left;font-size:12px;padding:8px 10px}
 @media(max-width:750px){.example-browser-heading{display:block}.example-browser-heading p{margin-top:5px}.example-try{flex-wrap:wrap}.example-all-link{margin-left:auto}}
 @media(max-width:540px){.masthead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px;padding:8px 14px;height:auto;min-height:60px}.masthead .brand{font-size:15px}.masthead .edition{display:none}.primary-nav{grid-column:2;margin-left:0}.masthead .primary-nav a{font-size:11px;padding:7px 5px}.masthead .refresh-app,.masthead .install-app{grid-column:1/-1;justify-self:end}.example-browser{padding:17px 16px}.example-catalog{grid-template-columns:1fr}.example-all-link{display:inline-block;margin-top:12px}}
+.network-status.partial{color:var(--muted)}

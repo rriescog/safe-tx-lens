@@ -74,10 +74,10 @@ test('home and every network example remain reachable from a result', async () =
 test('network badges describe only the checks performed by the probe', () => {
   const page = ui();
   const full = page.evaluate("networkCoverageText({ pending: 'available', history: 'available', rpc: 'available', indexing: 'available' })");
-  assert.equal(full, 'Safe list APIs responded · RPC chain ID matched');
+  assert.equal(full, 'Safe list endpoints responded · RPC chain ID matched');
   assert.doesNotMatch(full, /queue \+ history|RPC available/);
   const limited = page.evaluate("networkCoverageText({ pending: 'not_available', history: 'not_available', rpc: 'available', indexing: 'not_available' })");
-  assert.equal(limited, 'Configured Safe list API returned 404 · RPC chain ID matched');
+  assert.equal(limited, 'Safe queue/history unavailable via configured API · RPC chain ID matched');
   const lagging = page.evaluate("networkCoverageText({ pending: 'available', history: 'available', rpc: 'timeout', indexing: 'indexer_lagging' })");
   assert.match(lagging, /RPC chain ID not confirmed · Indexer behind/);
 });
