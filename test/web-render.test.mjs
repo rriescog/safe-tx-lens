@@ -337,10 +337,15 @@ test('request limits offer donation and sponsorship without claiming a bypass', 
   await page.evaluate('inspect()');
   const html = page.elements.get('report').innerHTML;
   assert.match(html, /Request limit reached/);
-  assert.match(html, /href="#community-support">Donation options/);
+  assert.match(html, /Donations open when a wallet is configured/);
+  assert.doesNotMatch(html, /href="#community-support"/);
   assert.match(html, /Sponsor the service/);
   assert.match(html, /do not bypass this limit/);
   assert.match(html, /60 seconds/);
+
+  page.evaluate('donationWalletsAvailable = true');
+  await page.evaluate('inspect()');
+  assert.match(page.elements.get('report').innerHTML, /href="#community-support">Donate to support capacity/);
 
   page.context.fetch = async () => ({ ok: false, status: 429, json: async () => ({ error: 'Service is busy', code: 'SERVICE_BUSY' }) });
   await page.evaluate('inspect()');

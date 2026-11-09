@@ -56,8 +56,10 @@ if (typeof window !== 'undefined') {
 }
 // Wallet addresses come only from validated server configuration. Build the
 // DOM with text nodes so addresses and labels cannot become HTML instructions.
+let donationWalletsAvailable = false;
 fetch('/api/public-config').then(response => response.ok ? response.json() : null).then(config => {
   if (!config?.wallets?.length) return;
+  donationWalletsAvailable = true;
   const host = document.getElementById('donation-wallets');
   host.replaceChildren();
   const names = Object.fromEntries([...document.querySelector('#network').options].filter(option => option.value !== 'auto').map(option => [option.value, option.textContent]));
@@ -629,7 +631,8 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
   } catch (error) {
     const recorded = error.incidentId ? `<p class="meta">We recorded this issue to improve the service. Reference: <code>${esc(error.incidentId)}</code></p>` : '';
     const limited = error.code === 'USAGE_LIMIT' || error.code === 'UPSTREAM_LIMITED';
-    const support = limited ? '<div class="limit-support"><strong>Help us increase public capacity</strong><p>Donations and infrastructure sponsors can fund more transaction lookups, RPC access, and simulations. They do not bypass this limit or guarantee immediate availability.</p><div><a href="#community-support">Donation options</a><a href="https://x.com/rriescog" target="_blank" rel="noopener noreferrer">Sponsor the service ↗</a></div></div>' : '';
+    const donationAction = donationWalletsAvailable ? '<a href="#community-support">Donate to support capacity</a>' : '<span>Donations open when a wallet is configured</span>';
+    const support = limited ? `<div class="limit-support"><strong>Help us increase public capacity</strong><p>Donations and infrastructure sponsors can fund more transaction lookups, RPC access, and simulations. They do not bypass this limit or guarantee immediate availability.</p><div>${donationAction}<a href="https://x.com/rriescog" target="_blank" rel="noopener noreferrer">Sponsor the service ↗</a></div></div>` : '';
     status.textContent = limited ? 'Request limit reached' : error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'Check the input or network' : 'Sorry, we could not complete the inspection';
     report.innerHTML = `<div class="empty"><h2>${limited ? 'Request limit reached' : error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'We could not inspect this input' : 'Sorry, something went wrong'}</h2><p>${esc(error.message)}</p>${recorded}${support}</div>`;
   }
