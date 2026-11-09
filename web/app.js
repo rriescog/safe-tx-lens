@@ -192,15 +192,15 @@ updateWizard();
 document.getElementById('try-example').addEventListener('click', () => {
   // Use a published Safe hash and the ordinary live inspection path. A saved
   // report would conceal whether the transaction source and RPC work today.
-  const exampleHash = '0x7bcc49dac788990018d8715a05502991ead142de209f3c8bc0adc72e252a67bb';
+  const exampleHash = '0x53de3b97560824bbe774b2290e70bfdc37c5b9c502ac5e62d652e5f24190dc2a';
   importedJson = null;
   inputMode.value = 'hash';
   input.value = exampleHash;
-  network.value = 'arb1';
+  network.value = 'eth';
   document.getElementById('custom-chain-group').hidden = true;
   updateWizard();
-  report.innerHTML = '<div class="empty" role="status"><h2>Inspecting the example live</h2><p>Reading the published Arbitrum transaction and checking its target contracts through RPC.</p></div>';
-  return inspect({ overrideInput: exampleHash, overrideNetwork: 'arb1' });
+  report.innerHTML = '<div class="empty" role="status"><h2>Inspecting the example live</h2><p>Reading the published Ethereum transaction and checking its target contracts through RPC.</p></div>';
+  return inspect({ overrideInput: exampleHash, overrideNetwork: 'eth' });
 });
 // A copied local link may include a transaction hash in its query string.
 // Prefill only a valid hash and require an explicit review click, so merely

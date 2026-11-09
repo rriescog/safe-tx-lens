@@ -307,22 +307,22 @@ test('deep link prefills only a valid transaction hash without fetching data', (
   assert.equal(invalid.elements.get('input').value, '');
 });
 
-test('one-click Arbitrum example runs the live inspection path and RPC checks', async () => {
+test('one-click community rewards example runs the live Ethereum inspection path and RPC checks', async () => {
   const page = ui();
   const tx = { safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 };
   const review = await analyze(tx, 'eth', { fetchState: false });
   review.checks.push({ name: 'Safe contract hash', method: 'onchain_rpc', status: 'pass', detail: review.hash });
   review.targetVerificationAttempted = true;
   review.targetChecks = [{ address: tx.to, status: 'verified', reason: 'matched', blockTag: 'latest' }];
-  review.evidence = { source: 'safe_api', requestedHash: '0x7bcc49dac788990018d8715a05502991ead142de209f3c8bc0adc72e252a67bb', retrievedAt: 'now' };
+  review.evidence = { source: 'safe_api', requestedHash: '0x53de3b97560824bbe774b2290e70bfdc37c5b9c502ac5e62d652e5f24190dc2a', retrievedAt: 'now' };
   const requests = [];
   page.context.fetch = async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => review }; };
   await page.elements.get('try-example').on_click();
-  assert.equal(page.elements.get('input').value, '0x7bcc49dac788990018d8715a05502991ead142de209f3c8bc0adc72e252a67bb');
-  assert.equal(page.elements.get('network').value, 'arb1');
+  assert.equal(page.elements.get('input').value, '0x53de3b97560824bbe774b2290e70bfdc37c5b9c502ac5e62d652e5f24190dc2a');
+  assert.equal(page.elements.get('network').value, 'eth');
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, '/api/inspect');
-  assert.equal(JSON.parse(requests[0].options.body).network, 'arb1');
+  assert.equal(JSON.parse(requests[0].options.body).network, 'eth');
   assert.equal(JSON.parse(requests[0].options.body).verifyTargets, true);
   assert.match(page.elements.get('report').innerHTML, /Safe Transaction Service/);
   assert.match(page.elements.get('report').innerHTML, /Safe contract calculation by RPC/);
