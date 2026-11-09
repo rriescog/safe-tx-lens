@@ -22,6 +22,7 @@ const publicFacing = publicMode || communityMode;
 const loopbackHost = ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(globalThis.location?.hostname);
 const simulationEnabled = document.body.dataset.simulationEnabled === 'true';
 const howModes = ['safe-hash', 'execution-hash', 'safe-address', 'transaction-json'];
+const featuredExampleHash = '0x53de3b97560824bbe774b2290e70bfdc37c5b9c502ac5e62d652e5f24190dc2a';
 let selectedHowMode = 'safe-hash';
 function showHowMode(mode) {
   selectedHowMode = mode;
@@ -232,8 +233,7 @@ function launchExample(hash, selectedNetwork, kind) {
 document.getElementById('try-example').addEventListener('click', () => {
   // Use a published Safe hash and the ordinary live inspection path. A saved
   // report would conceal whether the transaction source and RPC work today.
-  const exampleHash = '0x53de3b97560824bbe774b2290e70bfdc37c5b9c502ac5e62d652e5f24190dc2a';
-  return launchExample(exampleHash, 'eth');
+  return launchExample(featuredExampleHash, 'eth');
 });
 // A copied local link may include a transaction hash in its query string.
 // Prefill only a valid hash and require an explicit review click, so merely
@@ -549,6 +549,9 @@ function lifecycleBadge(state) {
 }
 function reportHtml(r, retryNote = '') {
   const tx = r.transaction;
+  const exampleContext = r.network === 'eth' && r.hash?.toLowerCase() === featuredExampleHash
+    ? `<div class="example-context"><strong>About this example</strong><p>This public Ethereum transaction was linked by the Safe Ecosystem Foundation in its <a href="https://forum.safefoundation.org/t/sep-55-phase-2-fund-safenet-beta-for-safe-token-utility/6967/16" target="_blank" rel="noopener noreferrer">community forum post ↗</a>. It is sample data for this independent review tool, not a partnership or endorsement.</p></div>`
+    : '';
   const safeUiKnown = r.network !== 'kat';
   const safeUrl = safeUiKnown ? `https://app.safe.global/home?safe=${encodeURIComponent(`${r.network === 'xlayer' ? 'okb' : r.network}:${tx.safe}`)}` : `https://katanascan.com/address/${encodeURIComponent(tx.safe)}`;
   const evidence = r.evidence?.source === 'onchain_execution'
@@ -571,7 +574,7 @@ function reportHtml(r, retryNote = '') {
   const bytecodeStatus = targetVerificationSummary(r);
   const lifecycle = lifecycleStatus(r);
   const stage = lifecycle.detail;
-  return `<div class="report-header"><div class="safe-identity"><span>SAFE MULTISIG · ${esc(r.network)}</span><a href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${safeUiKnown ? 'Open Safe' : 'Open contract'} ${esc(tx.safe)} on ${safeUiKnown ? 'Safe Global' : 'KatanaScan'}">${esc(tx.safe)} ↗</a><small>${safeUiKnown ? 'Open in Safe' : 'Open in KatanaScan · Safe web UI availability not verified'}</small></div><div class="report-heading">${lifecycleBadge(lifecycle)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(stage)}</span></div><div class="hash-line mono">${esc(r.hash)}</div><div class="header-verification">${bytecodeStatus.tone === 'partial' ? '<span class="pill partial">Past code unchecked</span>' : pill(bytecodeStatus.tone)}<span>${esc(bytecodeStatus.label)}</span></div></div>${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('1 · Evidence and hash checks', verificationHtml(r))}${section('2 · What this transaction can do', `${riskHtml}${flow}<details class="technical"><summary>Technical details: decoded arguments and raw calldata for this call graph</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`)}${section('3 · Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('4 · Target bytecode and verified source', targetChecksHtml(r, retryNote))}${section('5 · Measured effects and simulation', `${sim}${effects}${checks}${simulateAction}`)}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', lifecycle.label)}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}`;
+  return `<div class="report-header"><div class="safe-identity"><span>SAFE MULTISIG · ${esc(r.network)}</span><a href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${safeUiKnown ? 'Open Safe' : 'Open contract'} ${esc(tx.safe)} on ${safeUiKnown ? 'Safe Global' : 'KatanaScan'}">${esc(tx.safe)} ↗</a><small>${safeUiKnown ? 'Open in Safe' : 'Open in KatanaScan · Safe web UI availability not verified'}</small></div><div class="report-heading">${lifecycleBadge(lifecycle)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(stage)}</span></div><div class="hash-line mono">${esc(r.hash)}</div><div class="header-verification">${bytecodeStatus.tone === 'partial' ? '<span class="pill partial">Past code unchecked</span>' : pill(bytecodeStatus.tone)}<span>${esc(bytecodeStatus.label)}</span></div></div>${exampleContext}${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('1 · Evidence and hash checks', verificationHtml(r))}${section('2 · What this transaction can do', `${riskHtml}${flow}<details class="technical"><summary>Technical details: decoded arguments and raw calldata for this call graph</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`)}${section('3 · Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('4 · Target bytecode and verified source', targetChecksHtml(r, retryNote))}${section('5 · Measured effects and simulation', `${sim}${effects}${checks}${simulateAction}`)}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', lifecycle.label)}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}`;
 }
 function queueHtml(result) {
   const title = result.availability === 'not_safe' ? 'This address does not appear to be a Safe' : result.availability === 'absent' ? 'No Safe contract on this network' : result.scope === 'history' ? 'Executed history' : result.scope === 'both' ? 'Pending and executed' : 'Queued proposals';

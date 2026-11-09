@@ -204,8 +204,10 @@ footer.site-footer{max-width:none;margin:0;padding:38px clamp(20px,4vw,64px) 44p
 .intro-actions .start-review:hover{background:#063d58}
 .intro-actions button{padding:10px 15px;border:1px solid #a8c9d6;background:#eaf3f6;color:var(--blue-dark);font-size:13px}
 .intro-actions button:hover{background:#dcecf3}
-.intro-actions small{flex-basis:100%;color:var(--muted);font-size:11px}
+.example-context{margin:16px 28px 0;padding:13px 16px;border:1px solid #b7d5df;border-left:4px solid var(--blue);border-radius:7px;background:#f0f7fa;color:var(--ink)}
+.example-context strong{font-size:13px}.example-context p{margin:5px 0 0;font-size:12px;line-height:1.55;color:var(--muted)}
+@media(max-width:540px){.example-context{margin:14px 16px 0}}
 #inspect-form{scroll-margin-top:85px}
 .workspace>.how-it-works{grid-column:1/-1;width:100%;max-width:none;margin:4px 0 0}
 @media(max-width:780px){.workspace>.how-it-works{order:3}.workspace .sponsor-rail{order:4}}
-@media(max-width:540px){.intro-actions{margin-top:14px}.intro-actions .start-review,.intro-actions button{flex:1;text-align:center;white-space:nowrap;padding:9px 8px;font-size:12px}.intro-actions small{font-size:10px}}
+@media(max-width:540px){.intro-actions{margin-top:14px}.intro-actions .start-review,.intro-actions button{flex:1;text-align:center;white-space:nowrap;padding:9px 8px;font-size:12px}}
