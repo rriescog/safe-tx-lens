@@ -80,6 +80,9 @@ test('a remote MCP client can connect and decode through the public endpoint', a
     const result = await client.callTool({ name: 'inspect_json', arguments: { transaction: plan, network: 'eth' } });
     assert.equal(result.isError, undefined);
     assert.equal(result.structuredContent?.kind, 'builder');
+    const forbiddenRpc = await client.callTool({ name: 'inspect_json', arguments: { transaction: plan, network: 'eth', rpcUrl: 'http://127.0.0.1:8545' } });
+    assert.equal(forbiddenRpc.isError, true);
+    assert.match(JSON.stringify(forbiddenRpc.content), /rpcUrl|unrecognized/i);
   } finally {
     await client.close();
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

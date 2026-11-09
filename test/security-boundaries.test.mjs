@@ -49,6 +49,12 @@ test('Safe URL parsing rejects a mismatched origin, malformed Safe, and unknown 
   assert.equal(parseInput(`https://app.safe.global/home?safe=katana:${SAFE}`, 'auto').network, 'kat');
   for (const input of [
     `https://app.safe.global.evil.example/home?safe=eth:${SAFE}`,
+    `http://app.safe.global/home?safe=eth:${SAFE}`,
+    `https://user@app.safe.global/home?safe=eth:${SAFE}`,
+    `https://app.safe.global:444/home?safe=eth:${SAFE}`,
+    `https://app.safe.global/home?safe=eth:${SAFE}&safe=pol:${SAFE}`,
+    `https://app.safe.global/transactions/tx?safe=eth:${SAFE}&id=multisig_${OTHER}_${'0x' + 'a'.repeat(64)}`,
+    `https://app.safe.global/home?safe=eth:${SAFE}&id=`,
     `https://app.safe.global/home?safe=eth:0x123`,
     'https://app.safe.global/home',
     `https://app.safe.global/home?safe=unknown:${SAFE}`,
@@ -57,7 +63,7 @@ test('Safe URL parsing rejects a mismatched origin, malformed Safe, and unknown 
   assert.throws(() => parseInput(null, 'auto'), /Input must be/);
   assert.deepEqual(parseInput(' {"nonce":7} ', 'eth').transaction, { nonce: 7 });
   assert.throws(() => parseInput('{broken', 'eth'), /JSON/);
-  assert.equal(parseInput(`https://app.safe.global/transactions/tx?safe=eth:${SAFE}&id=malformed`, 'auto').kind, 'safe');
+  assert.throws(() => parseInput(`https://app.safe.global/transactions/tx?safe=eth:${SAFE}&id=malformed`, 'auto'), /Invalid Safe URL transaction id/);
   const lowercaseSafe = '0xc74efc7fdb3bec9c6930e91ffdf761b160df79db';
   assert.equal(parseInput(lowercaseSafe, 'auto').address, getAddress(lowercaseSafe));
   assert.equal(parseInput(`https://app.safe.global/home?safe=eth:${lowercaseSafe}`, 'auto').address, getAddress(lowercaseSafe));

@@ -1,26 +1,23 @@
 # MCP usage
 
-Safe Tx Lens exposes two read-only MCP transports. The local stdio server uses your local configuration. A future hosted community deployment exposes `/mcp` over Streamable HTTP and shares the web UI's quota. The private GitHub repository is not yet a public hosted service.
+Safe Tx Lens exposes read-only MCP tools. The planned community endpoint is `https://safetxlens.org/mcp` over Streamable HTTP and shares the web UI's quota. It is **not live yet**: the domain, DNS and VPS must be ready first. A local stdio server is available when you run your own copy.
 
-## Local setup
+## Connect to the community service after launch
 
-Install dependencies with `npm ci` and register the checkout in your MCP client:
+Codex CLI/Desktop:
 
 ```sh
-codex mcp add safe-tx-lens -- node /absolute/path/to/safe-tx-lens/bin/safe-tx-lens-mcp.mjs
+codex mcp add safe-tx-lens --url https://safetxlens.org/mcp
 ```
 
-For a client that accepts JSON configuration:
+Other MCP clients should add `https://safetxlens.org/mcp` as a **Streamable HTTP** server using that client's own configuration format. The hosted endpoint exposes `inspect`, `inspect_json`, `list_pending`, and `list_history`; it does not run arbitrary URLs or accept a caller-supplied RPC endpoint. Web and MCP requests share daily, monthly and per-IP limits.
 
-```json
-{
-  "mcpServers": {
-    "safe-tx-lens": {
-      "command": "node",
-      "args": ["/absolute/path/to/safe-tx-lens/bin/safe-tx-lens-mcp.mjs"]
-    }
-  }
-}
+## Run your own local MCP
+
+Clone the repository and run `npm ci`. From the checkout root, register the local process:
+
+```sh
+codex mcp add safe-tx-lens-local -- node "$PWD/bin/safe-tx-lens-mcp.mjs"
 ```
 
 Keep `SAFE_API_KEY`, Tenderly credentials, and any `RPC_URL_<NETWORK>` in the local process environment or `.env.local`; do not put keys in prompts or MCP tool arguments. EVM RPC defaults are public endpoints and can fail or lack archive state. An offchain pending Safe hash needs a reachable proposal source. A Safe URL supplies the chain and address. A bare hash has neither, so automatic discovery checks only the configured mainnet integrations.
@@ -35,10 +32,10 @@ Keep `SAFE_API_KEY`, Tenderly credentials, and any `RPC_URL_<NETWORK>` in the lo
 | `list_pending` | `safe`, optional `network`, `rpcUrl`, `simulate` | Up to 20 unexecuted records; stale nonces are identified; API confirmations are not independently verified |
 | `list_history` | `safe`, optional `network`, `rpcUrl`, `simulate` | Up to 20 executed records; a recent RPC fallback may cover only a bounded block range |
 
-After registering the server, restart your MCP client so it discovers the tools. Try a published, executed Polygon PoS Council transaction on Ethereum:
+After registering the server, restart your MCP client so it discovers the tools. Try the published Safenet Beta rewards distribution on Ethereum:
 
 ```text
-Use safe-tx-lens.inspect with input 0x13b5c50574eb3eed73b3538843699f3080cd5d847818ae8364e7af4dd1b4a8c3 and network eth. Show the Safe address, nonce, nested calls, source of each check, and remaining evidence gaps.
+Use safe-tx-lens.inspect with input 0x53de3b97560824bbe774b2290e70bfdc37c5b9c502ac5e62d652e5f24190dc2a and network eth. Show the Safe address, nonce, decoded calls, source of each check, and remaining evidence gaps.
 ```
 
 For a queued proposal, call `list_pending` with its Safe address and network, then pass one returned Safe hash to `inspect`. A Safe transaction hash identifies the signed fields, but it does not contain the network or Safe address; discovery depends on a reachable proposal source. If a lookup fails, provide the Safe URL or exported transaction JSON. A local MCP client can inspect JSON without sending it to a hosted Safe Tx Lens instance.
@@ -47,7 +44,7 @@ The local server can run a Tenderly simulation only when `simulate: true` and cr
 
 ## Hosted `/mcp`
 
-When `serve --community` is deployed behind HTTPS, use `https://YOUR_DOMAIN/mcp` with an MCP client that supports Streamable HTTP. This endpoint exposes `inspect`, `inspect_json`, `list_pending`, and `list_history`. It caps queue/history results at five, input bodies at 256 KB, and rejects caller-supplied RPC URLs, credentials, polling and simulation parameters. It does not expose `inspect_execution` as a separate tool; `inspect` accepts an execution hash. The web UI and MCP share an operator-wide daily/monthly budget and a per-IP request allowance. On exhaustion the HTTP response is 429 with `Retry-After`.
+When `serve --community` is deployed behind HTTPS, use `https://safetxlens.org/mcp` with an MCP client that supports Streamable HTTP. This endpoint exposes `inspect`, `inspect_json`, `list_pending`, and `list_history`. It caps queue/history results at five, input bodies at 256 KB, and rejects caller-supplied RPC URLs, credentials, polling and simulation parameters. Supplied URLs must be HTTPS links to `app.safe.global`; the service parses them for Safe fields and never fetches them as URLs. Bare hashes, Safe addresses, and transaction JSON remain valid data inputs. It does not expose `inspect_execution` as a separate tool; `inspect` accepts an execution hash. The web UI and MCP share an operator-wide daily/monthly budget and a per-IP request allowance. On exhaustion the HTTP response is 429 with `Retry-After`.
 
 MCP tool descriptions are instructions to the client about input format, not a security guarantee. Treat transaction metadata, ABI text, JSON files, and contract source as untrusted data. Verify every important hash on a signing device and compare critical results with a separate implementation.
 

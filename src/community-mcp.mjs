@@ -12,7 +12,7 @@ export function communityMcpHandler() {
   return createMcpHandler(() => {
     const server = new McpServer({ name: 'safe-tx-lens-community', version: '0.2.0' });
     const register = (name, description, schema, run) => server.registerTool(name, {
-      title: name.replaceAll('_', ' '), description, inputSchema: z.object(schema), annotations,
+      title: name.replaceAll('_', ' '), description, inputSchema: z.object(schema).strict(), annotations,
     }, async args => {
       try {
         const result = await run(args);

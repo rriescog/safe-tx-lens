@@ -65,7 +65,7 @@ function inspectionFailure(res, error, recordIncident) {
   if (/Safe API 404|Safe Client Gateway 404|For an offchain proposal without Safe API access/i.test(message)) {
     return reply(res, 422, { error: 'We could not retrieve this transaction from the available Safe sources. Check the network, try a Safe URL, or import its transaction JSON.', code: 'TRANSACTION_UNAVAILABLE' });
   }
-  const expectedInputError = error instanceof SyntaxError || /^(Invalid |Input |Unrecognized |Enter |Select |The hash or address does not reveal|Execution transaction was not found|An RPC URL is required|Unsupported |Safe URL|No Transaction Service alias)/i.test(message);
+  const expectedInputError = error instanceof SyntaxError || /^(Invalid |Input |Unrecognized |Only https:\/\/app\.safe\.global|Enter |Select |The hash or address does not reveal|Execution transaction was not found|An RPC URL is required|Unsupported |Safe URL|No Transaction Service alias)/i.test(message);
   if (expectedInputError) return reply(res, 400, { error: message, code: 'INVALID_OR_UNAVAILABLE_INPUT' });
   const incidentId = recordIncident('inspection_unexpected', 500);
   return reply(res, 500, { error: 'Sorry, something went wrong while inspecting this transaction. We recorded the issue to improve the service. Please try again, or provide a Safe URL or transaction JSON.', code: 'INSPECTION_ERROR', incidentId });

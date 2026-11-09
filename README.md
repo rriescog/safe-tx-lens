@@ -15,7 +15,7 @@ A compromised multisig interface can show a benign description while presenting 
 3. Read the decoded call tree; the interactive graph is an optional additional view. Check the proposed changes and whether target bytecode verification actually ran and matched source at the relevant block.
 4. If configured, run one simulation and read only the state changes the provider returned. Use a separate implementation and a separately trusted source for the final review.
 
-The UI has a one-click example based on [a public Polygon PoS Council Safe execution on Ethereum](https://etherscan.io/tx/0xfc7e21d4edaaedd49a404a7c07539fc75368cd6a32b538c4ddc239327109427b). The button sends that execution hash through the same live inspection path as a user-supplied hash: the RPC supplies the execution transaction and receipt, the tool recalculates its Safe hash, and the target-code checks run when the provider responds. This consumes a service request and may report unavailable evidence when an upstream provider fails.
+The UI has a one-click example based on [a published Safenet Beta rewards distribution](https://forum.safefoundation.org/t/sep-55-phase-2-fund-safenet-beta-for-safe-token-utility/6967/16) on Ethereum. The button sends its Safe hash through the same live inspection path as a user-supplied hash: the transaction source supplies the fields, the tool recalculates the Safe hash, and RPC checks the Safe contract hash and target bytecode when its provider responds. This consumes a service request and may report unavailable evidence when an upstream provider fails.
 
 On Chrome, the UI can be installed as an app when served on localhost or HTTPS. The service worker caches only an offline explanation page; transaction inputs, API responses and reports are never cached for offline viewing. The moving network strip includes Katana and X Layer icons from their respective [Katana brand kit](https://docs.katana.network/katana/additional-resources/brand-kit/) and [X Layer media kit](https://github.com/okx/xlayer-docs/tree/main/media-kit). Chain marks remain the property of their owners; their display does not imply endorsement or grant trademark rights under this project's MIT license.
 
@@ -125,26 +125,19 @@ See the [MCP setup and tool reference](docs/MCP.md) for local and hosted transpo
 
 `node bin/safe-tx-lens-mcp.mjs` starts a local stdio MCP server using the [official TypeScript SDK](https://ts.sdk.modelcontextprotocol.io/v2/). It exposes five read-only tools: `inspect`, `inspect_json`, `inspect_execution`, `list_pending`, and `list_history`. `inspect_json` can review offchain proposals without any API key; `inspect_execution` uses public Ethereum RPC. `list_pending` needs a reachable Safe Transaction Service. `list_history` can fall back to recent Ethereum RPC logs.
 
-In Codex CLI/Desktop, register this checkout with:
+For the public service, once DNS and the VPS are live, register its Streamable HTTP endpoint in Codex CLI/Desktop:
 
 ```sh
-codex mcp add safe-tx-lens -- node /absolute/path/to/safe-tx-lens/bin/safe-tx-lens-mcp.mjs
+codex mcp add safe-tx-lens --url https://safetxlens.org/mcp
 ```
 
-Example MCP host configuration (replace the path with your checkout):
+The endpoint is not live until deployment. To run the MCP entirely on your own machine, clone this repository, run `npm ci`, then from its root register the local process without manually writing a path:
 
-```json
-{
-  "mcpServers": {
-    "safe-tx-lens": {
-      "command": "node",
-      "args": ["/absolute/path/to/safe-tx-lens/bin/safe-tx-lens-mcp.mjs"]
-    }
-  }
-}
+```sh
+codex mcp add safe-tx-lens-local -- node "$PWD/bin/safe-tx-lens-mcp.mjs"
 ```
 
-The [VPS deployment guide](deploy/README.md) prepares a community service with a dedicated Safe API key, shared web/MCP quota, and CI/CD. Tenderly simulation is optional and requires a separate community project. A VPS and domain have not yet been configured, so this repository is not a live public SaaS.
+The [VPS deployment guide](deploy/README.md) prepares `safetxlens.org` with a dedicated Safe API key, shared web/MCP quota, and CI/CD. Tenderly simulation is optional and requires a separate community project. DNS and a VPS have not yet been configured, so this repository is not a live public SaaS.
 
 ## What the report distinguishes
 
@@ -174,7 +167,7 @@ The browser's 30-second watch control is available only on a loopback hostname i
 
 ## Security and limitations
 
-- Supported Safe Transaction Service network prefixes are listed in `src/chains.mjs`. A Safe URL must be on `app.safe.global`.
+- Supported Safe Transaction Service network prefixes are listed in `src/chains.mjs`. A supplied Safe URL must be on `https://app.safe.global` without credentials. The URL is parsed, never fetched. Hashes, addresses, and JSON are accepted as data; hosted callers cannot supply an RPC URL or another outbound endpoint.
 - Other EVM chain IDs can be entered explicitly in the UI, CLI (`--network 130`), or MCP. JSON with a valid chain ID can select that chain automatically for offline decoding and EIP-712 hashing. Safe Client Gateway must serve that chain for pending proposals; set `RPC_URL_<CHAIN_ID>` or `--rpc` to check contract bytecode. Hash-only or address-only automatic chain discovery remains limited to the ten mainnet integrations: a 32-byte hash has no chain ID, and probing every Safe-supported chain on each public request would exhaust provider quotas. For another chain, supply its chain ID or a Safe URL that contains it. An unavailable Safe service is reported rather than guessed.
 - [Dated network coverage](docs/NETWORK-COVERAGE.md) records actual Safe indexing, pending and history endpoint responses alongside RPC chain-ID checks. The UI displays the same dated snapshot; a live request may differ. Recheck with `npm run check:networks -- --live --snapshot web/network-coverage.json`. The script caps and paces Safe requests, stops on HTTP 429 or low remaining quota, and never publishes the key or quota headers in the UI snapshot.
 - The tool fetches from fixed Safe, Tenderly, Sourcify, Etherscan V2, Blockscout, and OKLink endpoints plus network-specific public RPCs. `--rpc` or `RPC_URL_<NETWORK>` selects another RPC. The local UI listens on `127.0.0.1` and does not expose API keys to the browser.

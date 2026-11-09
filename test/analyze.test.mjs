@@ -100,7 +100,7 @@ test('Safe URL parser uses the embedded network and hash', () => {
   const parsed = parseInput(`https://app.safe.global/transactions/tx?safe=pol:${SAFE}&id=multisig_${SAFE}_${hash}`, 'eth');
   assert.equal(parsed.network, 'pol');
   assert.equal(parsed.hash, hash);
-  assert.throws(() => parseInput(`https://evil.example/?safe=eth:${SAFE}`), /Only app.safe.global/);
+  assert.throws(() => parseInput(`https://evil.example/?safe=eth:${SAFE}`), /Only https:\/\/app.safe.global/);
 });
 
 test('public PoS Council examples reproduce their Safe transaction hashes', async () => {

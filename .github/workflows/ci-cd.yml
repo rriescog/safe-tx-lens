@@ -27,7 +27,7 @@ jobs:
       - name: Check deploy configuration
         run: |
           touch deploy/safe-api-key
-          DOMAIN=example.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml config --quiet
+          DOMAIN=safetxlens.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml config --quiet
 
   publish:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -79,7 +79,7 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
         run: |
-          [[ "$DEPLOY_DOMAIN" =~ ^[a-zA-Z0-9.-]+$ ]]
+          [[ "$DEPLOY_DOMAIN" == safetxlens.org ]]
           [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.:-]+$ ]]
           [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]*$ ]]
           [[ "$DEPLOY_TENDERLY_ENABLED" == true || "$DEPLOY_TENDERLY_ENABLED" == false || -z "$DEPLOY_TENDERLY_ENABLED" ]]

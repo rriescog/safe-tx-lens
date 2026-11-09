@@ -76,6 +76,11 @@ test('local API accepts an offline plan, rejects cross-origin posts, and limits 
 
     const malformed = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{' });
     assert.equal(malformed.status, 400);
+    const unsafeUrl = await post({ input: `http://app.safe.global/home?safe=eth:${SAFE}`, network: 'eth' });
+    assert.equal(unsafeUrl.status, 400);
+    assert.equal((await unsafeUrl.json()).code, 'INVALID_OR_UNAVAILABLE_INPUT');
+    const injectedRpc = await post({ input: SAFE, network: 'eth', rpcUrl: 'http://127.0.0.1:8545' });
+    assert.equal(injectedRpc.status, 400);
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }

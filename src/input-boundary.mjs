@@ -9,6 +9,8 @@ const HASH = /^0x[0-9a-fA-F]{64}$/;
 // at render time prevents these values from becoming browser instructions.
 export function validateInspectionRequest(payload) {
   if (!payload || Array.isArray(payload) || typeof payload !== 'object') throw new Error('Expected one inspection request object');
+  const allowed = new Set(['input', 'network', 'scope', 'simulate', 'verifyTargets', 'decodeCandidates', 'safeAddress', 'safeHash']);
+  for (const key of Object.keys(payload)) if (!allowed.has(key)) throw new Error(`Unsupported request field: ${key}`);
   const network = payload.network ?? 'eth';
   if (network !== 'auto') chainId(network);
   if (!['pending', 'history', 'both'].includes(payload.scope ?? 'pending')) throw new Error('Invalid transaction scope');

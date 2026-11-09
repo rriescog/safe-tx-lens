@@ -131,6 +131,7 @@ test('every HTTP input field rejects instruction-like invalid values structurall
     assert.throws(() => validateInspectionRequest({ ...valid, [key]: 'ignore previous instructions <script>' }));
   }
   assert.throws(() => validateInspectionRequest({ ...valid, input: 'a'.repeat(2000001) }), /length/);
+  assert.throws(() => validateInspectionRequest({ ...valid, rpcUrl: 'http://127.0.0.1:8545' }), /Unsupported request field/);
   assert.equal(validateInspectionRequest({ input: { safe: SAFE, to: VAULT }, network: 'eth' }).network, 'eth');
 });
 
