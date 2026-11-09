@@ -150,6 +150,10 @@ test('hosted simulation allows five requests per IP each day and rejects the six
     for (let i = 0; i < 5; i++) assert.equal((await post()).status, 200);
     const sixth = await post();
     assert.equal(sixth.status, 429);
+    const exhausted = await sixth.json();
+    assert.equal(exhausted.code, 'SIMULATION_LIMIT');
+    assert.match(exhausted.error, /five simulation requests|5 simulation requests/i);
+    assert.ok(Number(sixth.headers.get('retry-after')) > 0);
     assert.equal(calls.length, 5);
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

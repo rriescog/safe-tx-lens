@@ -41,8 +41,12 @@ function communityCost(input, network, scope, { simulate = false, verifyTargets 
 
 function denied(res, ticket) {
   const seconds = ticket.retryAfterSeconds ?? 2;
-  const error = ticket.reason === 'busy' ? 'The service is busy. Please retry shortly.' : `Usage limit reached. Please try again in ${seconds} seconds.`;
-  return reply(res, 429, { error, code: ticket.reason === 'busy' ? 'SERVICE_BUSY' : 'USAGE_LIMIT', retryAfterSeconds: seconds }, 'application/json', { 'Retry-After': String(seconds) });
+  const simulationLimit = ticket.reason === 'simulation_client_limit' || ticket.reason === 'simulation_monthly_limit';
+  const error = ticket.reason === 'busy' ? 'The service is busy. Please retry shortly.'
+    : ticket.reason === 'simulation_client_limit' ? `You have used all ${ticket.limit} simulation requests for this IP today. Inspect without simulation or try again after the UTC daily reset in ${seconds} seconds.`
+      : ticket.reason === 'simulation_monthly_limit' ? `The service's monthly simulation capacity is exhausted. Inspect without simulation or try again after the monthly reset in ${seconds} seconds.`
+        : `Usage limit reached. Please try again in ${seconds} seconds.`;
+  return reply(res, 429, { error, code: ticket.reason === 'busy' ? 'SERVICE_BUSY' : simulationLimit ? 'SIMULATION_LIMIT' : 'USAGE_LIMIT', ...(simulationLimit ? { simulationScope: ticket.reason === 'simulation_client_limit' ? 'daily' : 'monthly' } : {}), retryAfterSeconds: seconds }, 'application/json', { 'Retry-After': String(seconds) });
 }
 
 export function redactPrivateSimulationUrl(result) {
