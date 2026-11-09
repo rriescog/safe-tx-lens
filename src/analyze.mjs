@@ -343,7 +343,9 @@ export async function analyze(raw, network = 'eth', options = {}) {
     const proposed = new Map();
     const visit = node => {
       if (node.method?.startsWith('updateImplementation(')) {
-        const next = node.args?.find(arg => arg.name === 'newImplementation')?.value;
+        // The verified contract may call this parameter _newProxyTo or omit
+        // its name. The ABI signature fixes its sole address at position 0.
+        const next = node.args?.[0]?.value;
         if (isAddress(next)) proposed.set(node.to.toLowerCase(), getAddress(next));
       }
       node.children?.forEach(visit);

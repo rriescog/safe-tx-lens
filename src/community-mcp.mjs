@@ -6,25 +6,25 @@ import { parseInput } from './inputs.mjs';
 const network = z.union([z.enum(['auto', 'eth', 'gno', 'pol', 'arb1', 'oeth', 'base', 'sep', 'amoy', 'kat', 'xlayer', 'imx', 'bnb', 'avax']), z.string().regex(/^[1-9][0-9]{0,15}$/)]).default('auto');
 const annotations = { readOnlyHint: true, destructiveHint: false };
 
-// The hosted MCP deliberately has no caller-supplied RPC URL, credentials,
-// polling, or simulation. It uses the same upstream budget as the web UI.
-export function communityMcpHandler() {
+// The hosted MCP accepts no caller-supplied RPC URL, credentials, or polling.
+// Explicit simulations use the server's configured project and shared quota.
+export function communityMcpHandler({ inspectionResolver = resolve, redactResult = result => result } = {}) {
   return createMcpHandler(() => {
     const server = new McpServer({ name: 'safe-tx-lens-community', version: '0.2.0' });
     const register = (name, description, schema, run) => server.registerTool(name, {
       title: name.replaceAll('_', ' '), description, inputSchema: z.object(schema).strict(), annotations,
     }, async args => {
       try {
-        const result = await run(args);
+        const result = redactResult(await run(args));
         return { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: result };
       } catch (error) {
         return { isError: true, content: [{ type: 'text', text: error.message }] };
       }
     });
-    register('inspect', 'Inspect a Safe hash, execution hash, URL, or address on supported networks.', { input: z.string().min(1).max(262144), network }, ({ input, network }) => resolve(input, network, { limit: 5, verifyTargets: parseInput(input, network).kind !== 'safe', decodeCandidates: true, fetchState: false }));
-    register('inspect_json', 'Decode a supplied Safe transaction or Builder export.', { transaction: z.record(z.string(), z.unknown()), network }, ({ transaction, network }) => resolve(transaction, network === 'auto' ? 'eth' : network, { limit: 5, verifyTargets: true, decodeCandidates: true, fetchState: false }));
-    register('list_pending', 'List up to five queued proposals for a Safe.', { safe: z.string().min(1).max(512), network }, ({ safe, network }) => resolve(safe, network, { scope: 'pending', limit: 5, verifyTargets: false, fetchState: false }));
-    register('list_history', 'List up to five executed transactions for a Safe.', { safe: z.string().min(1).max(512), network }, ({ safe, network }) => resolve(safe, network, { scope: 'history', limit: 5, verifyTargets: false, fetchState: false }));
+    register('inspect', 'Inspect a Safe hash, execution hash, URL, or address on supported networks. Set simulate=true only for a single transaction when Tenderly is configured.', { input: z.string().min(1).max(262144), network, simulate: z.boolean().default(false) }, ({ input, network, simulate }) => inspectionResolver(input, network, { limit: 5, verifyTargets: parseInput(input, network).kind !== 'safe', decodeCandidates: true, fetchState: simulate, simulate }));
+    register('inspect_json', 'Decode a supplied Safe transaction or Builder export. Set simulate=true only for a complete Safe transaction when Tenderly is configured.', { transaction: z.record(z.string(), z.unknown()), network, simulate: z.boolean().default(false) }, ({ transaction, network, simulate }) => inspectionResolver(transaction, network === 'auto' ? 'eth' : network, { limit: 5, verifyTargets: true, decodeCandidates: true, fetchState: simulate, simulate }));
+    register('list_pending', 'List up to five queued proposals for a Safe.', { safe: z.string().min(1).max(512), network }, ({ safe, network }) => inspectionResolver(safe, network, { scope: 'pending', limit: 5, verifyTargets: false, fetchState: false }));
+    register('list_history', 'List up to five executed transactions for a Safe.', { safe: z.string().min(1).max(512), network }, ({ safe, network }) => inspectionResolver(safe, network, { scope: 'history', limit: 5, verifyTargets: false, fetchState: false }));
     return server;
   }, { responseMode: 'json', legacy: 'stateless', maxRequestBodySize: 262144 });
 }

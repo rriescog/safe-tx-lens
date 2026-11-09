@@ -61,9 +61,55 @@ test('community server needs a Safe key and keeps simulation opt-in', async () =
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/inspect`, { method: 'POST', headers: { origin, 'content-type': 'application/json', 'x-client-ip': '203.0.113.1' }, body: JSON.stringify({ input: plan, network: 'eth', simulate: true }) });
     assert.equal(response.status, 503);
     assert.match((await response.json()).error, /not configured/);
+    const unavailableMcpSimulation = await fetch(`http://127.0.0.1:${server.address().port}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-client-ip': '203.0.113.2' }, body: JSON.stringify({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'inspect', arguments: { input: `0x${'a'.repeat(64)}`, network: 'eth', simulate: true } } }) });
+    assert.equal(unavailableMcpSimulation.status, 503);
+    assert.match((await unavailableMcpSimulation.json()).error, /not configured/);
     const invalid = await fetch(`http://127.0.0.1:${server.address().port}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-client-ip': '203.0.113.1' }, body: JSON.stringify({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'inspect_json', arguments: { transaction: {}, network: 'eth' } } }) });
     assert.equal(invalid.status, 200);
     assert.match(await invalid.text(), /isError.*true|"isError":true/);
+  } finally {
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('hosted MCP simulation is explicit, metered, and hides private Tenderly links', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'safe-community-mcp-sim-'));
+  const calls = [];
+  const server = await serve({ port: 0, publicOrigin: origin, communityMode: true, communityQuotaFile: join(directory, 'quota.json'), communityDailyUnits: 200, communityMonthlyUnits: 200, credentialReader: async () => ({ SAFE_API_KEY: 'test-key', TENDERLY_ACCESS_KEY: 'test-tenderly-key', TENDERLY_ACCOUNT: 'account', TENDERLY_PROJECT: 'project' }), inspectionResolver: async (_input, _network, options) => {
+    calls.push(options);
+    return { kind: 'transaction', simulation: { success: true, stateDiffAvailable: true, url: 'https://dashboard.tenderly.co/private/project/simulator/1' }, effects: [{ kind: 'storage', before: '0', after: '1' }] };
+  } });
+  const base = `http://127.0.0.1:${server.address().port}/mcp`;
+  const post = (ip, args) => fetch(base, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-client-ip': ip }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'inspect', arguments: args } }) });
+  const readMcp = async response => {
+    const body = await response.text();
+    const message = body.startsWith('event:') ? body.split('\n').find(line => line.startsWith('data: '))?.slice(6) : body;
+    return JSON.parse(message);
+  };
+  const args = { input: `0x${'a'.repeat(64)}`, network: 'eth', simulate: true };
+  try {
+    const response = await post('203.0.113.10', args);
+    assert.equal(response.status, 200);
+    const data = await readMcp(response);
+    assert.equal(data.result.structuredContent.simulation.success, true);
+    assert.deepEqual(data.result.structuredContent.effects, [{ kind: 'storage', before: '0', after: '1' }]);
+    assert.doesNotMatch(JSON.stringify(data), /dashboard\.tenderly\.co|test-tenderly-key/);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].simulate, true);
+    assert.equal(calls[0].fetchState, true);
+    const repeated = await post('203.0.113.10', args);
+    assert.equal(repeated.status, 429);
+    assert.equal(calls.length, 1);
+    const invalidRpc = await post('203.0.113.11', { ...args, rpcUrl: 'https://attacker.example/rpc' });
+    assert.equal(invalidRpc.status, 400);
+    assert.match((await invalidRpc.json()).error, /RPC URLs/);
+    assert.equal(calls.length, 1);
+    const web = await fetch(`http://127.0.0.1:${server.address().port}/api/inspect`, { method: 'POST', headers: { 'content-type': 'application/json', origin, 'x-client-ip': '203.0.113.12' }, body: JSON.stringify({ input: args.input, network: 'eth', simulate: true }) });
+    assert.equal(web.status, 200);
+    assert.equal((await web.json()).simulation.url, undefined);
+    assert.equal(calls[1].simulate, true);
+    assert.equal(calls[1].fetchState, true);
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     await rm(directory, { recursive: true, force: true });
@@ -76,13 +122,14 @@ test('a remote MCP client can connect and decode through the public endpoint', a
   const client = new Client({ name: 'remote-test', version: '1.0.0' });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.address().port}/mcp`), { requestInit: { headers: { 'x-client-ip': '203.0.113.9' } } }));
-    assert.ok((await client.listTools()).tools.some(tool => tool.name === 'inspect_json'));
+    const tools = (await client.listTools()).tools;
+    assert.ok(tools.some(tool => tool.name === 'inspect_json'));
+    assert.equal(tools.find(tool => tool.name === 'inspect')?.inputSchema?.properties?.simulate?.type, 'boolean');
+    assert.equal(tools.find(tool => tool.name === 'inspect')?.inputSchema?.properties?.rpcUrl, undefined);
     const result = await client.callTool({ name: 'inspect_json', arguments: { transaction: plan, network: 'eth' } });
     assert.equal(result.isError, undefined);
     assert.equal(result.structuredContent?.kind, 'builder');
-    const forbiddenRpc = await client.callTool({ name: 'inspect_json', arguments: { transaction: plan, network: 'eth', rpcUrl: 'http://127.0.0.1:8545' } });
-    assert.equal(forbiddenRpc.isError, true);
-    assert.match(JSON.stringify(forbiddenRpc.content), /rpcUrl|unrecognized/i);
+    await assert.rejects(client.callTool({ name: 'inspect_json', arguments: { transaction: plan, network: 'eth', rpcUrl: 'http://127.0.0.1:8545' } }), /Caller-supplied RPC URLs/);
   } finally {
     await client.close();
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
