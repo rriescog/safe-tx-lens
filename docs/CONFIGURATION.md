@@ -4,7 +4,7 @@ Safe Tx Lens runs without credentials for local JSON decoding and best-effort on
 
 ## Local process
 
-Copy `.env.example` to `.env` and fill only the services you intend to use. The file is ignored by Git. Load it with Node.js:
+Copy `.env.example` to `.env` and fill only the services you intend to use. The file is ignored by Git. The example inventories all local settings, production Compose values, GitHub deployment variables and secrets, and VPS key files; the GitHub values are configured in repository settings, not read from the local `.env`. Load a local process with Node.js:
 
 ```sh
 node --env-file=.env bin/safe-tx-lens.mjs serve

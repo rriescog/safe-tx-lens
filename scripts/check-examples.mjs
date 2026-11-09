@@ -30,5 +30,7 @@ if (!process.argv.includes('--live')) {
       console.log(JSON.stringify({ network: row.network, result: 'failed', reason: String(error.message).slice(0, 200) }));
     }
   }
-  if (failures) process.exitCode = 1;
+  // A failed public RPC can leave ethers provider retry timers alive even
+  // after the inspection resolved. The one-shot smoke check must terminate.
+  process.exit(failures ? 1 : 0);
 }
