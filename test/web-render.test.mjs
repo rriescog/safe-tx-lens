@@ -926,6 +926,19 @@ test('web report renders transaction evidence, target verification, effects, and
   assert.match(page.evaluate('reportHtml(sample)'), /safe=okb%3A0x1111111111111111111111111111111111111111/);
   page.context.sample = { ...review, network: 'pol' };
   assert.match(page.evaluate('reportHtml(sample)'), /safe=matic%3A0x1111111111111111111111111111111111111111/);
+  page.context.evidenceCheck = { address: '0x0000000000000000000000000000000000001010', status: 'explorer_abi', sourceEvidence: [
+    { provider: 'sourcify', label: 'Sourcify', outcome: 'different_bytecode', detail: 'Has a verified source (MRC20, 0.5.11), but for different runtime bytecode: 7851 bytes versus 5315 bytes returned by the RPC.', url: 'https://repo.sourcify.dev/137/0x0000000000000000000000000000000000001010' },
+    { provider: 'etherscan', label: 'PolygonScan (Etherscan API)', outcome: 'abi_only', detail: 'Verified source and ABI available, but this API does not return compiled bytecode.' },
+    { provider: 'sourcify_import', label: 'sourcify_import', outcome: 'rejected', detail: 'Sourcify already holds a verified version <script>' },
+  ] };
+  const evidence = page.evaluate('evidenceHtml(evidenceCheck.sourceEvidence)');
+  assert.match(evidence, /What each source returned/);
+  assert.match(evidence, /Verified, but different bytecode/);
+  assert.match(evidence, /7851 bytes versus 5315 bytes/);
+  assert.match(evidence, /Import rejected/);
+  assert.doesNotMatch(evidence, /<script>/);
+  assert.match(page.evaluate('evidenceHeadline(evidenceCheck)'), /Sourcify verified different bytecode; PolygonScan \(Etherscan API\) has source and ABI but no bytecode to compare; Sourcify import of the explorer source did not verify it/);
+  assert.match(page.evaluate('targetVerificationSummary({ targetVerificationAttempted: true, targetChecks: [evidenceCheck] }).detail'), /0x0000000000000000000000000000000000001010: Sourcify verified different bytecode/);
   page.context.sample = { ...review, network: 'kat' };
   assert.match(page.evaluate('reportHtml(sample)'), /katanascan\.com\/address\//);
   page.context.sample = review;

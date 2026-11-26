@@ -407,6 +407,30 @@ function verificationHtml(r) {
   const rpcDetail = r.rpc?.label ?? 'RPC provider not reported by this version.';
   return `<p class="meta"><strong>Transaction fields:</strong> ${esc(source)}. ${stateSource}</p><p class="meta"><strong>Onchain check:</strong> ${esc(rpcKind)}.${r.rpc?.kind === 'none' ? '' : ' Its responses add another source only if you trust that RPC separately.'}</p><details class="rpc-details"><summary>Which RPC answered?</summary><p>${esc(rpcDetail)}${r.rpc?.kind === 'public' ? '. Shared endpoint; no personal RPC key was provided.' : ''}</p></details>${requestStep}${localStep}${contractStep}<p class="meta">A matching hash does not prove the target code, signer approvals, or execution outcome. Review the decoded calls and target bytecode before signing.</p>`;
 }
+const EVIDENCE_OUTCOME = Object.freeze({
+  match: ['pass', 'Matches RPC bytecode'], different_bytecode: ['fail', 'Verified, but different bytecode'], abi_only: ['partial', 'Source and ABI only'],
+  not_verified: ['unverified', 'Not verified'], not_configured: ['unverified', 'Not configured'], rate_limited: ['warning', 'Rate limited'], error: ['warning', 'Unavailable'],
+  rejected: ['warning', 'Import rejected'], failed: ['warning', 'Import failed'], pending: ['partial', 'Import in progress'],
+});
+function evidenceHtml(evidence) {
+  if (!evidence?.length) return '';
+  return `<div class="source-evidence"><p class="meta"><strong>What each source returned</strong></p><ul>${evidence.map(item => {
+    const [tone, label] = EVIDENCE_OUTCOME[item.outcome] ?? ['unverified', item.outcome];
+    const link = safeExternalUrl(item.url) ? ` <a href="${esc(safeExternalUrl(item.url))}" target="_blank" rel="noopener noreferrer">↗</a>` : '';
+    return `<li><span class="pill ${tone}">${esc(label)}</span> <strong>${esc(item.label)}</strong>${link}<br><span>${esc(item.detail)}</span></li>`;
+  }).join('')}</ul></div>`;
+}
+function evidenceHeadline(check) {
+  const evidence = check.sourceEvidence ?? [];
+  const pick = outcome => evidence.filter(item => item.outcome === outcome).map(item => item.label);
+  const parts = [];
+  if (pick('different_bytecode').length) parts.push(`${pick('different_bytecode').join(', ')} verified different bytecode`);
+  if (pick('abi_only').length) parts.push(`${pick('abi_only').join(', ')} has source and ABI but no bytecode to compare`);
+  if (pick('rejected').length || pick('failed').length) parts.push('Sourcify import of the explorer source did not verify it');
+  if (pick('pending').length) parts.push('Sourcify import still running');
+  if (pick('rate_limited').length || pick('error').length) parts.push(`${[...pick('rate_limited'), ...pick('error')].join(', ')} unavailable`);
+  return parts.join('; ');
+}
 function targetVerificationSummary(r) {
   const checks = r.targetChecks ?? [];
   if (!r.targetVerificationAttempted && !checks.length) return { tone: 'unverified', label: 'Bytecode check not run', detail: 'No target runtime bytecode has been compared yet.' };
@@ -414,7 +438,10 @@ function targetVerificationSummary(r) {
   if (!targets.length) return { tone: 'unavailable', label: 'Bytecode check unavailable', detail: 'The check ran but returned no target results.' };
   const matched = targets.filter(target => ['verified', 'verified_current'].includes(target.status)).length;
   if (targets.some(target => target.status === 'mismatch')) return { tone: 'fail', label: `Bytecode mismatch · ${matched}/${targets.length} matched`, detail: 'At least one RPC runtime bytecode differs from the verified source. Review before signing.' };
-  if (matched !== targets.length) return { tone: 'warning', label: `Bytecode check incomplete · ${matched}/${targets.length} matched`, detail: 'One or more targets or proxy implementations could not be matched with verified source.' };
+  if (matched !== targets.length) {
+    const reasons = targets.filter(target => !['verified', 'verified_current'].includes(target.status)).map(target => target.protocolReplacement ? `${target.address ?? 'target'}: ${target.protocolReplacement.label}` : `${target.address ?? 'target'}: ${evidenceHeadline(target) || target.reason || target.status}`);
+    return { tone: 'warning', label: `Bytecode check incomplete · ${matched}/${targets.length} matched`, detail: `Not matched with verified source. ${reasons.join(' · ')}` };
+  }
   if (targets.some(target => target.status === 'verified_current')) return { tone: 'partial', label: `Current bytecode matches · ${matched}/${targets.length}`, detail: 'All inspected contracts match verified source now. The RPC could not return bytecode from before this execution, so past code remains unverified.' };
   return { tone: 'pass', label: `Verified bytecode · ${matched}/${targets.length}`, detail: 'Every inspected runtime bytecode matched verified source from a named provider at the checked block. This does not prove the code is safe.' };
 }
@@ -440,9 +467,9 @@ function targetChecksHtml(r, retryNote = '') {
     const effective = check.proxy ? check.proxy.implementationCode : check;
     const abi = effective?.abiSelectors?.length ? `<p>Selectors in ${effective.status === 'explorer_abi' ? 'explorer' : 'verified'} ${check.proxy ? 'implementation' : 'target'} ABI: ${effective.abiSelectors.map(item => `${esc(item.selector)} ${item.present ? 'yes' : 'no'}`).join(' · ')}</p>` : effective?.abiWarning ? `<p>${esc(effective.abiWarning)}</p>` : '';
     const badge = check.status === 'verified_current' ? '<span class="pill verified_current">Current code matched</span>' : check.status === 'explorer_abi' ? (check.protocolReplacement ? '<span class="pill warning">Hard-fork code · ABI only</span>' : '<span class="pill warning">Explorer ABI only</span>') : pill(check.status);
-    const plainResult = check.status === 'verified_current' ? 'Current code matches verified source. Code at execution time was not checked.' : check.status === 'verified' ? 'Code at the inspected block matches verified source.' : check.status === 'mismatch' ? 'Verified source and onchain bytecode differ. Stop and investigate.' : check.reason;
+    const plainResult = check.status === 'verified_current' ? 'Current code matches verified source. Code at execution time was not checked.' : check.status === 'verified' ? 'Code at the inspected block matches verified source.' : check.status === 'mismatch' ? 'Verified source and onchain bytecode differ. Stop and investigate.' : check.protocolReplacement ? `${check.protocolReplacement.label}. Its bytecode matches the client configuration, but no source provider verified that code.` : evidenceHeadline(check) || check.reason;
     const technical = `<details><summary>Technical evidence</summary><p>${esc(check.reason)} · block ${esc(check.blockTag)}${check.bytecodeHash ? `<br>Runtime bytecode hash: <span class="mono">${esc(check.bytecodeHash)}</span>` : ''}</p>${abi}${proxy}${planned}</details>`;
-    return `<div class="item">${badge}<div class="item-content"><strong class="mono">${esc(check.address)}</strong><p>${esc(plainResult)}${safeExternalUrl(check.source) ? `<br><a href="${esc(safeExternalUrl(check.source))}" target="_blank" rel="noopener noreferrer">Inspect ${check.status === 'explorer_abi' ? 'explorer ABI record' : 'verified source'}</a>` : ''}</p>${observedUpgrade}${technical}</div></div>`;
+    return `<div class="item">${badge}<div class="item-content"><strong class="mono">${esc(check.address)}</strong><p>${esc(plainResult)}${safeExternalUrl(check.source) ? `<br><a href="${esc(safeExternalUrl(check.source))}" target="_blank" rel="noopener noreferrer">Inspect ${check.status === 'explorer_abi' ? 'explorer ABI record' : 'verified source'}</a>` : ''}</p>${evidenceHtml(check.sourceEvidence)}${observedUpgrade}${technical}</div></div>`;
   }).join('');
   const archiveNextStep = summary.tone === 'partial' ? `<div class="next-step"><strong>To verify code at execution time</strong><p>${publicFacing ? 'This service needs an archive-capable RPC for this network. The service operator must add one; clicking again on the current public RPC will not change this result. You can also run the open-source tool locally with an archive RPC.' : `Set RPC_URL_${esc(String(r.network ?? '').toUpperCase())} to an archive-capable endpoint, restart the local service, and inspect this transaction again. Clicking again with the same RPC will not change this result.`}</p></div>` : '';
   const action = publicMode ? ['pass', 'partial', 'fail'].includes(summary.tone) ? '' : '<p class="meta">The public demo checks at most four targets per selected transaction. For an unchecked target, run the open-source tool with your own RPC.</p>' : ['pass', 'partial', 'fail'].includes(summary.tone) ? '' : `<div class="simulation-action"><button type="button" id="verify-targets">${checks.length ? 'Check bytecode again' : 'Check target bytecode'}</button><p>Asks this network’s RPC for runtime bytecode and compares it with Sourcify or a supported Blockscout explorer. Etherscan and OKLink can supply an ABI when no matching bytecode source is available; those labels stay unconfirmed.</p></div>`;

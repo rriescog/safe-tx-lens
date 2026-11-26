@@ -393,6 +393,12 @@ export async function analyze(raw, network = 'eth', options = {}) {
   const findings = classifyIntent(call);
   for (const target of targetChecks) {
     if (target.status === 'mismatch') findings.push({ severity: 'critical', code: 'TARGET_CODE_MISMATCH', path: target.address, message: target.reason });
+    // A verified source for different bytecode is a fact the signer must see,
+    // even when another source supplies an ABI for the current code.
+    const divergent = (target.sourceEvidence ?? []).filter(item => item.outcome === 'different_bytecode');
+    if (target.status !== 'mismatch' && !['verified', 'verified_current'].includes(target.status) && divergent.length) {
+      findings.push({ severity: target.protocolReplacement ? 'info' : 'warning', code: 'TARGET_SOURCE_DIVERGENCE', path: target.address, message: `${divergent.map(item => `${item.label}: ${item.detail}`).join(' ')}${target.protocolReplacement ? ` ${target.protocolReplacement.label}; the RPC code is the code the protocol installed.` : ' No source verified the code the RPC returned.'}` });
+    }
     // A plain value transfer to an EOA has no runtime code by design.
     if (target.status === 'no_code' && target.selectors.length) findings.push({ severity: 'warning', code: 'TARGET_NO_CODE', path: target.address, message: target.reason });
     // Proxy ABI describes dispatch, not the functions that run through it.

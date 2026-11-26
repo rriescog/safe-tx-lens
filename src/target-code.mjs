@@ -71,6 +71,13 @@ const PROTOCOL_CODE_REPLACEMENTS = new Map([
   }],
 ]);
 
+// One line per source, in query order, so every report states what each
+// provider actually answered instead of a generic "not verified".
+export function evidenceReason(evidence = [], fallback = '') {
+  const lines = (evidence ?? []).map(item => `${item.label}: ${item.detail}`);
+  return lines.length ? lines.join(' ') : fallback;
+}
+
 export function recognizeGetterFallback(check) {
   if (check.status !== 'verified' || check.proxy?.standard !== 'implementation() fallback' || check.proxy.implementationCode?.status !== 'verified') return null;
   const known = VERIFIED_GETTER_FALLBACKS.get(check.bytecodeHash?.toLowerCase());
@@ -138,40 +145,50 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
   const result = { ...base, bytecodeHash, byteLength: (code.length - 2) / 2, status: 'unverified', source: null, reason: 'No matching verified source was found' };
   try {
     let source = await lookup(network, entry.address, { runtimeCode: code, blockTag: effectiveBlockTag });
+    if (Array.isArray(source?.evidence)) result.sourceEvidence = source.evidence;
+    if (source?.noSource) source = null;
+    if (!source) result.reason = evidenceReason(result.sourceEvidence, 'No source provider has a verified source for this address');
     if (source) {
       const matchedBytecode = source.runtimeBytecode?.onchainBytecode;
-      if (source.explorerAbi && !matchedBytecode && Array.isArray(source.abi)) {
+      const matches = /^0x(?:[0-9a-fA-F]{2})+$/.test(matchedBytecode ?? '') && keccak256(matchedBytecode) === bytecodeHash;
+      const sourcifyCode = source.sourcifyCandidate?.runtimeBytecode?.onchainBytecode ?? (source.explorerAbi ? null : matchedBytecode);
+      const replacement = PROTOCOL_CODE_REPLACEMENTS.get(`${chainId(network)}:${entry.address.toLowerCase()}:${bytecodeHash}`);
+      const pinnedReplacement = !matches && replacement && /^0x(?:[0-9a-fA-F]{2})+$/.test(sourcifyCode ?? '') && keccak256(sourcifyCode) === replacement.previousCodeHash;
+      if (matches) {
+        if (!['exact_match', 'match'].includes(source.runtimeMatch ?? source.match)) {
+          result.reason = 'Source provider returned no recognized runtime match status';
+        } else {
+          result.status = base.historicalUnavailable ? 'verified_current' : 'verified';
+          result.reason = `${source.importedFrom ? `Sourcify (source imported from ${source.importedFrom})` : source.sourceProvider ?? 'Sourcify'} ${source.runtimeMatch ?? source.match}; runtime bytecode matches ${base.historicalUnavailable ? 'current RPC only (historical state unavailable)' : 'RPC at the inspected block'}`;
+          result.source = source.sourceUrl ?? `https://repo.sourcify.dev/${chainId(network)}/${entry.address}`;
+          result.sourceProvider = source.sourceProvider ?? 'sourcify';
+        }
+      } else if (pinnedReplacement) {
+        // Prefer the explorer ABI (published for the current code); otherwise
+        // reuse the earlier verified ABI minus selectors the new code dropped.
+        const removed = new Set(replacement.removedSelectors);
+        const earlierAbi = (source.sourcifyCandidate?.abi ?? source.abi ?? []).filter(item => {
+          if (item?.type !== 'function') return true;
+          try { return !removed.has(FunctionFragment.from(item).selector); } catch { return false; }
+        });
+        const explorerAbi = source.explorerAbi && Array.isArray(source.abi);
+        source = { ...source, abi: explorerAbi ? source.abi : earlierAbi };
+        result.status = 'explorer_abi';
+        result.sourceProvider = 'Client hard-fork allocation';
+        result.source = replacement.source;
+        result.protocolReplacement = { label: replacement.label, previousSource: `https://repo.sourcify.dev/${chainId(network)}/${entry.address}`, abiFrom: explorerAbi ? source.sourceProvider : 'earlier verified version' };
+        result.sourceEvidence = [...(result.sourceEvidence ?? []), { provider: 'protocol', label: 'Client hard-fork configuration', outcome: 'match', detail: `${replacement.label}. The RPC bytecode hash equals the code pinned in the client configuration, and Sourcify's verified source is the version that code replaced.`, url: replacement.source }];
+        result.reason = `${replacement.label}. ${evidenceReason(result.sourceEvidence)}`;
+      } else if (source.explorerAbi && Array.isArray(source.abi)) {
         result.status = 'explorer_abi';
         result.source = source.sourceUrl ?? null;
         result.sourceProvider = source.sourceProvider;
-        result.reason = `ABI supplied by ${source.sourceProvider}; runtime bytecode was not independently matched to verified source${blockTag !== 'latest' ? ' at the historical block' : ''}`;
-      } else if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(matchedBytecode ?? '')) {
-        result.reason = 'Source provider did not return runtime bytecode for an independent comparison';
-      } else if (keccak256(matchedBytecode) !== bytecodeHash) {
-        const replacement = PROTOCOL_CODE_REPLACEMENTS.get(`${chainId(network)}:${entry.address.toLowerCase()}:${bytecodeHash}`);
-        if (replacement && keccak256(matchedBytecode) === replacement.previousCodeHash && Array.isArray(source.abi)) {
-          const removed = new Set(replacement.removedSelectors);
-          const abi = source.abi.filter(item => {
-            if (item?.type !== 'function') return true;
-            try { return !removed.has(FunctionFragment.from(item).selector); } catch { return false; }
-          });
-          source = { ...source, abi };
-          result.status = 'explorer_abi';
-          result.sourceProvider = 'Client hard-fork allocation';
-          result.source = replacement.source;
-          result.protocolReplacement = { label: replacement.label, previousSource: source.sourceUrl ?? `https://repo.sourcify.dev/${chainId(network)}/${entry.address}` };
-          result.reason = `${replacement.label}. RPC bytecode matches the code pinned in the client's hard-fork configuration; it has no verified source. ABI reused from the earlier verified version, excluding removed functions`;
-        } else {
-          result.status = 'mismatch';
-          result.reason = 'Explorer verified bytecode differs from RPC bytecode at the selected block';
-        }
-      } else if (!['exact_match', 'match'].includes(source.runtimeMatch ?? source.match)) {
-        result.reason = 'Source provider returned no recognized runtime match status';
+        result.reason = `ABI from ${source.sourceProvider}; runtime bytecode not matched to verified source${blockTag !== 'latest' ? ' at the historical block' : ''}. ${evidenceReason(result.sourceEvidence)}`;
+      } else if (/^0x(?:[0-9a-fA-F]{2})+$/.test(matchedBytecode ?? '')) {
+        result.status = 'mismatch';
+        result.reason = `Verified source describes different bytecode than the RPC returned at the selected block. ${evidenceReason(result.sourceEvidence)}`;
       } else {
-        result.status = base.historicalUnavailable ? 'verified_current' : 'verified';
-        result.reason = `${source.sourceProvider ?? 'Sourcify'} ${source.runtimeMatch ?? source.match}; runtime bytecode matches ${base.historicalUnavailable ? 'current RPC only (historical state unavailable)' : 'RPC at the inspected block'}`;
-        result.source = source.sourceUrl ?? `https://repo.sourcify.dev/${chainId(network)}/${entry.address}`;
-        result.sourceProvider = source.sourceProvider ?? 'sourcify';
+        result.reason = `Source provider did not return runtime bytecode for an independent comparison. ${evidenceReason(result.sourceEvidence)}`;
       }
       if (['verified', 'verified_current', 'explorer_abi'].includes(result.status)) {
         if (Array.isArray(source.abi) && entry.selectors.size && source.abi.length > 512) {
