@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { Interface, id, keccak256 } from 'ethers';
 import { inspectTargetCode, recognizeGetterFallback, recognizeLegacyFallback, sourcifyLookup } from '../src/target-code.mjs';
 import { analyze, calculateHash, normalizeTransaction } from '../src/analyze.mjs';
@@ -312,26 +313,46 @@ test('target graph skips invalid addresses and accepts Sourcify match field with
   assert.equal(reports[0].abiSelectors[0].present, false);
 });
 
-test('Polygon MRC20 replaced by the Ahmedabad hard fork decodes with the earlier verified ABI, never as verified', async () => {
-  const { ahmedabadCode, previousCode, abi: mrc20Abi } = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./support/polygon-mrc20.json', import.meta.url), 'utf8'));
+const replacements = JSON.parse(readFileSync(new URL('./support/protocol-replacements.json', import.meta.url), 'utf8')).contracts;
+const CHAIN_IDS = { pol: 137n, amoy: 80002n, bnb: 56n };
+
+test('Polygon MRC20 replaced by the Ahmedabad hard fork decodes withdraw with the earlier verified ABI, never as verified', async () => {
+  const { rpcCode, sourcifyCode, abi: mrc20Abi } = replacements['pol:0x0000000000000000000000000000000000001010'];
   const MRC20 = '0x0000000000000000000000000000000000001010';
   const withdraw = new Interface(['function withdraw(uint256)']).encodeFunctionData('withdraw', [1n]);
   const mrc20Call = { to: MRC20, selector: withdraw.slice(0, 10), data: withdraw, operation: 0, children: [] };
-  const lookup = async () => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: previousCode }, abi: mrc20Abi, sourceUrl: `https://repo.sourcify.dev/137/${MRC20}` });
-  const [target] = await inspectTargetCode(mrc20Call, 'pol', { provider: provider({ code: ahmedabadCode, chainId: 137n }), sourceLookup: lookup });
+  const lookup = async () => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: sourcifyCode }, abi: mrc20Abi, sourceUrl: `https://repo.sourcify.dev/137/${MRC20}` });
+  const rpc = provider({ code: rpcCode, chainId: 137n });
+  const [target] = await inspectTargetCode(mrc20Call, 'pol', { provider: rpc, sourceLookup: lookup });
   assert.equal(target.status, 'explorer_abi');
-  assert.equal(target.sourceProvider, 'Polygon Bor hard-fork allocation');
-  assert.match(target.source, /0xPolygon\/bor\/blob\/[0-9a-f]{40}\//);
+  assert.equal(target.sourceProvider, 'Client hard-fork allocation');
   assert.match(target.reason, /Ahmedabad/);
   assert.deepEqual(target.abiSelectors, [{ selector: '0x2e1a7d4d', present: true }]);
-  const review = await analyze({ safe: TARGET, to: MRC20, value: '0', data: withdraw, operation: 0, nonce: 1 }, 'pol', { fetchState: false, verifyTargets: true, targetProvider: provider({ code: ahmedabadCode, chainId: 137n }), sourceLookup: lookup });
+  const review = await analyze({ safe: TARGET, to: MRC20, value: '0', data: withdraw, operation: 0, nonce: 1 }, 'pol', { fetchState: false, verifyTargets: true, targetProvider: rpc, sourceLookup: lookup });
   assert.equal(review.call.method, 'withdraw(uint256)');
   assert.equal(review.call.decodeBasis, 'explorer_abi');
   assert.ok(!review.findings.some(finding => finding.code === 'TARGET_CODE_MISMATCH'));
-  // Any other runtime code, another chain, or another earlier source still fails closed.
-  const tampered = `${ahmedabadCode.slice(0, -2)}00`;
-  assert.equal((await inspectTargetCode(mrc20Call, 'pol', { provider: provider({ code: tampered, chainId: 137n }), sourceLookup: lookup }))[0].status, 'mismatch');
-  assert.equal((await inspectTargetCode(mrc20Call, 'amoy', { provider: provider({ code: ahmedabadCode, chainId: 80002n }), sourceLookup: lookup }))[0].status, 'mismatch');
-  const otherSource = async () => ({ ...(await lookup()), runtimeBytecode: { onchainBytecode: '0x60016000' } });
-  assert.equal((await inspectTargetCode(mrc20Call, 'pol', { provider: provider({ code: ahmedabadCode, chainId: 137n }), sourceLookup: otherSource }))[0].status, 'mismatch');
 });
+
+for (const [key, { rpcCode, sourcifyCode, abi: earlierAbi }] of Object.entries(replacements)) {
+  test(`hard-fork system contract ${key} is pinned exactly and fails closed otherwise`, async () => {
+    const [network, address] = key.split(':');
+    const fn = earlierAbi.find(item => item.type === 'function' && (item.stateMutability === 'nonpayable' || item.stateMutability === 'payable'));
+    const iface = new Interface([fn]);
+    const fragment = iface.fragments[0];
+    const encoded = iface.encodeFunctionData(fragment, fragment.inputs.map(input => input.baseType === 'address' ? TARGET : input.baseType === 'bool' ? false : input.baseType === 'string' ? '' : input.baseType === 'array' ? [] : input.baseType.startsWith('bytes') ? (input.type === 'bytes' ? '0x' : `0x${'00'.repeat(Number(input.type.slice(5)))}`) : 0n));
+    const call = { to: address, selector: encoded.slice(0, 10), data: encoded, operation: 0, children: [] };
+    const lookup = async () => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: sourcifyCode }, abi: earlierAbi });
+    const rpc = code => provider({ code, chainId: CHAIN_IDS[network] });
+    const [target] = await inspectTargetCode(call, network, { provider: rpc(rpcCode), sourceLookup: lookup });
+    assert.equal(target.status, 'explorer_abi');
+    assert.match(target.source, /^https:\/\/github\.com\/(0xPolygon\/bor|bnb-chain\/bsc)\/blob\/[0-9a-f]{40}\//);
+    assert.match(target.reason, /hard fork/);
+    assert.ok(target.protocolReplacement);
+    assert.equal((await inspectTargetCode(call, network, { provider: rpc(`${rpcCode.slice(0, -2)}00`), sourceLookup: lookup }))[0].status, 'mismatch');
+    const otherEarlier = async () => ({ ...(await lookup()), runtimeBytecode: { onchainBytecode: '0x60016000' } });
+    assert.equal((await inspectTargetCode(call, network, { provider: rpc(rpcCode), sourceLookup: otherEarlier }))[0].status, 'mismatch');
+    const otherChain = network === 'bnb' ? 'eth' : network === 'pol' ? 'amoy' : 'pol';
+    assert.equal((await inspectTargetCode(call, otherChain, { provider: provider({ code: rpcCode, chainId: { eth: 1n, amoy: 80002n, pol: 137n }[otherChain] }), sourceLookup: lookup }))[0].status, 'mismatch');
+  });
+}
