@@ -1,4 +1,4 @@
-import { Interface, JsonRpcProvider, getAddress, isAddress, keccak256 } from 'ethers';
+import { FunctionFragment, Interface, JsonRpcProvider, getAddress, isAddress, keccak256 } from 'ethers';
 import { chainId } from './chains.mjs';
 import { lookupContractSource, sourcifyLookup } from './abi-sources.mjs';
 
@@ -18,6 +18,57 @@ const VERIFIED_GETTER_FALLBACKS = new Map([
 ]);
 const VERIFIED_LEGACY_FALLBACKS = new Map([
   ['0xd80d4b7c890cb9d6a4893e6b52bc34b56b25335cb13716e0d1d31383e6b41505', { pattern: 'Circle FiatTokenProxy delegatecall fallback', source: 'https://repo.sourcify.dev/1/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' }],
+]);
+
+// Protocol hard forks can replace a system contract's runtime code in place
+// (Polygon Bor `blockAlloc`, BSC `core/systemcontracts` upgrades). Source verifiers may then hold only the earlier
+// version. Each entry pins the exact replacement code hash from the client
+// configuration and the exact earlier code hash whose verified ABI is reused,
+// minus selectors the replacement no longer dispatches. Any other code still
+// fails as a mismatch.
+const PROTOCOL_CODE_REPLACEMENTS = new Map([
+  ['137:0x0000000000000000000000000000000000001001:0xaa002524bd13fa0fbfb6a6a7d709631ae5de76234759499503616ad1edb21b82', {
+    label: 'Polygon StateReceiver replaced by the Bor Uburu hard fork at block 96787900',
+    previousCodeHash: '0x8347355457cf3921b2f8358ef5a79b3935328ae40d6519238f2487525bade90d',
+    removedSelectors: [],
+    source: 'https://github.com/0xPolygon/bor/blob/156755608234bb4220460abd4d8c9ef691691010/internal/cli/server/chains/mainnet.go#L133',
+  }],
+  ['137:0x0000000000000000000000000000000000001010:0x82c4ebd167e81e53bef0589ab868a9399ebc29b3d6dcbbe3c4cfe54644bf9d58', {
+    label: 'Polygon MRC20 (POL native token) replaced by the Bor Ahmedabad hard fork at block 62278656',
+    previousCodeHash: '0xb6bc58482cd4072e43dcd798c70a4fc727f8115490558f747acc14e13aac0ccf',
+    removedSelectors: ['0x7019d41a'],
+    source: 'https://github.com/0xPolygon/bor/blob/156755608234bb4220460abd4d8c9ef691691010/internal/cli/server/chains/mainnet.go#L116',
+  }],
+  ['80002:0x0000000000000000000000000000000000001001:0x161913be6f75f70eb639c4f48e4fc39bb08b2d50abc8073b9c8581544fe667e1', {
+    label: 'Polygon Amoy StateReceiver replaced by the Bor Uburu hard fork at block 51978200',
+    previousCodeHash: '0xafb3ac1ecfe7e09981532289ed99255d53923adaa801edeec3763fbd49437376',
+    removedSelectors: [],
+    source: 'https://github.com/0xPolygon/bor/blob/156755608234bb4220460abd4d8c9ef691691010/builder/files/genesis-amoy.json#L87',
+  }],
+  ['56:0x0000000000000000000000000000000000001004:0x823b8a71daca169b3880c7c2b0ff7bce9e44a295d19ab9f44180c9b2d90b1d43', {
+    label: 'BNB Chain TokenHub replaced by the BSC Pascal hard fork',
+    previousCodeHash: '0x8019bd2d9e60807df3309c5d7028e6dab1c19c46bbef615f8e6105c995ab0e66',
+    removedSelectors: ['0xfb063e8f', '0xfc3e5908', '0xff9c0027', '0xebf71d53', '0xf0148472', '0xf1fad104', '0xd9e6dae9', '0xa496fba2', '0xa7c9f02d', '0x96713da9', '0x8b87b21f', '0x7942fd05', '0x70fd5bad', '0x718a8aa8', '0x66dea52a', '0x4a3acdf4', '0x4bf6c882', '0x3dffc387', '0x0bee7a67'],
+    source: 'https://github.com/bnb-chain/bsc/blob/4bd1c73016e31038a0ce9fdadce24d19d7128e25/core/systemcontracts/pascal/mainnet/TokenHubContract',
+  }],
+  ['56:0x0000000000000000000000000000000000001005:0x8444c96b44d320e76019c082e60cf5f1c6c25c853b87aa986afa396c02c73815', {
+    label: 'BNB Chain RelayerIncentivize replaced by the BSC Pascal hard fork',
+    previousCodeHash: '0x034a95df5ae5fa54aaa99d7a21f5994a579ff5391bc72365f26e78b13e1f22e8',
+    removedSelectors: ['0xe75d72c7', '0xfc3e5908', '0xbd4cc830', '0xaf400681', '0x96713da9', '0x70fd5bad', '0x7942fd05', '0x4bf6c882', '0x54133307', '0x3dffc387', '0x08f2ec06', '0x0bee7a67'],
+    source: 'https://github.com/bnb-chain/bsc/blob/4bd1c73016e31038a0ce9fdadce24d19d7128e25/core/systemcontracts/pascal/mainnet/RelayerIncentivizeContract',
+  }],
+  ['56:0x0000000000000000000000000000000000001008:0xd287b3cd3ee885f935ef0a2464e0ec3db253ae7318194dafe9ffd9bfab17a513', {
+    label: 'BNB Chain TokenManager replaced by the BSC Pascal hard fork',
+    previousCodeHash: '0xba01fba414d7817fad08adcbd99f181f8deda65a5fd19e42e28d6c24c5cd87e5',
+    removedSelectors: ['0xfa9e9159', '0xfc3e5908', '0xfe3a2af5', '0xd9e6dae9', '0xc8e704a4', '0xd7109ce6', '0xb7950317', '0xbd32d3f9', '0xab67a485', '0x9a854bbd', '0x859180fb', '0x95b9ad26', '0x96713da9', '0x7d078e13', '0x7942fd05', '0x66dea52a', '0x70fd5bad', '0x5d499b1b', '0x5f558f86', '0x61368475', '0x4bc81c00', '0x4bf6c882', '0x401809f9', '0x487c88ac', '0x3dffc387', '0x1f91600b', '0x23996b53', '0x2d89ac32', '0x0bee7a67', '0x0f212b1b'],
+    source: 'https://github.com/bnb-chain/bsc/blob/4bd1c73016e31038a0ce9fdadce24d19d7128e25/core/systemcontracts/pascal/mainnet/TokenManagerContract',
+  }],
+  ['56:0x0000000000000000000000000000000000002004:0x14fd07d5f04900d20ac14ce8b39cfada460105b156d694370127b144964e7a68', {
+    label: 'BNB Chain BSCGovernor replaced by the BSC Pasteur hard fork',
+    previousCodeHash: '0x7ae300ba9ca804d2ae45d86928e518eb806263d17a905b6e89afcee4998296c1',
+    removedSelectors: [],
+    source: 'https://github.com/bnb-chain/bsc/blob/4bd1c73016e31038a0ce9fdadce24d19d7128e25/core/systemcontracts/pasteur/mainnet/GovernorContract',
+  }],
 ]);
 
 export function recognizeGetterFallback(check) {
@@ -86,7 +137,7 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
   const bytecodeHash = keccak256(code);
   const result = { ...base, bytecodeHash, byteLength: (code.length - 2) / 2, status: 'unverified', source: null, reason: 'No matching verified source was found' };
   try {
-    const source = await lookup(network, entry.address, { runtimeCode: code, blockTag: effectiveBlockTag });
+    let source = await lookup(network, entry.address, { runtimeCode: code, blockTag: effectiveBlockTag });
     if (source) {
       const matchedBytecode = source.runtimeBytecode?.onchainBytecode;
       if (source.explorerAbi && !matchedBytecode && Array.isArray(source.abi)) {
@@ -97,8 +148,23 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
       } else if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(matchedBytecode ?? '')) {
         result.reason = 'Source provider did not return runtime bytecode for an independent comparison';
       } else if (keccak256(matchedBytecode) !== bytecodeHash) {
-        result.status = 'mismatch';
-        result.reason = 'Explorer verified bytecode differs from RPC bytecode at the selected block';
+        const replacement = PROTOCOL_CODE_REPLACEMENTS.get(`${chainId(network)}:${entry.address.toLowerCase()}:${bytecodeHash}`);
+        if (replacement && keccak256(matchedBytecode) === replacement.previousCodeHash && Array.isArray(source.abi)) {
+          const removed = new Set(replacement.removedSelectors);
+          const abi = source.abi.filter(item => {
+            if (item?.type !== 'function') return true;
+            try { return !removed.has(FunctionFragment.from(item).selector); } catch { return false; }
+          });
+          source = { ...source, abi };
+          result.status = 'explorer_abi';
+          result.sourceProvider = 'Client hard-fork allocation';
+          result.source = replacement.source;
+          result.protocolReplacement = { label: replacement.label, previousSource: source.sourceUrl ?? `https://repo.sourcify.dev/${chainId(network)}/${entry.address}` };
+          result.reason = `${replacement.label}. RPC bytecode matches the code pinned in the client's hard-fork configuration; it has no verified source. ABI reused from the earlier verified version, excluding removed functions`;
+        } else {
+          result.status = 'mismatch';
+          result.reason = 'Explorer verified bytecode differs from RPC bytecode at the selected block';
+        }
       } else if (!['exact_match', 'match'].includes(source.runtimeMatch ?? source.match)) {
         result.reason = 'Source provider returned no recognized runtime match status';
       } else {

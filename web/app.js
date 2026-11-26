@@ -281,6 +281,7 @@ function callSource(call) {
     : { tone: 'matched', label: 'ABI matches checked code', detail: 'The runtime bytecode at the inspected block matches the verified source used for this ABI. A function name still does not prove the outcome.' };
   if (call.decodeBasis === 'verified_proxy_abi') return { tone: 'matched', label: 'Proxy route checked at this block', detail: 'The proxy bytecode matches a reviewed delegatecall fallback. Its implementation address at the inspected block points to code whose checked ABI decoded this call. An execution trace is still needed to confirm the path actually taken.' };
   if (call.decodeBasis === 'proxy_candidate_abi') return { tone: 'partial', label: 'Proxy route unconfirmed', detail: 'The implementation ABI decodes the calldata, but the proxy forwarding path has not been independently confirmed.' };
+  if (call.decodeBasis === 'explorer_abi' && /hard-fork/i.test(call.decodeSource ?? '')) return { tone: 'partial', label: 'Hard-fork code · ABI only', detail: 'The protocol replaced this contract\'s code in a hard fork. The code matches the client configuration, but has no verified source; the ABI comes from the earlier verified version.' };
   if (call.decodeBasis === 'explorer_abi') return { tone: 'partial', label: 'Explorer ABI only', detail: 'An explorer supplied this ABI. Its runtime bytecode was not independently matched here.' };
   if (call.decodeBasis === 'selector_candidate') return { tone: 'candidate', label: 'Possible function name', detail: `${call.decodeCandidateSource ?? 'A signature database'} supplied this candidate. Its arguments fit the calldata, but the target contract has not been matched to that ABI.` };
   if (call.decodeBasis === 'known_signature') return { tone: 'candidate', label: 'Function format recognized; contract unchecked', detail: 'A built-in ABI decoded the calldata. This review has not matched that ABI to the called contract or its implementation, so the function name is provisional.' };
@@ -438,7 +439,7 @@ function targetChecksHtml(r, retryNote = '') {
     const planned = check.plannedImplementationCode ? `<p>Proposed upgrade to <span class="mono">${esc(check.plannedImplementation)}</span>: ${esc(check.plannedImplementationCode.status)}.${observation ? ' The post-block implementation was checked by RPC.' : ' Its ABI can describe later calls only if the upgrade executes first.'}</p>` : '';
     const effective = check.proxy ? check.proxy.implementationCode : check;
     const abi = effective?.abiSelectors?.length ? `<p>Selectors in ${effective.status === 'explorer_abi' ? 'explorer' : 'verified'} ${check.proxy ? 'implementation' : 'target'} ABI: ${effective.abiSelectors.map(item => `${esc(item.selector)} ${item.present ? 'yes' : 'no'}`).join(' · ')}</p>` : effective?.abiWarning ? `<p>${esc(effective.abiWarning)}</p>` : '';
-    const badge = check.status === 'verified_current' ? '<span class="pill verified_current">Current code matched</span>' : check.status === 'explorer_abi' ? '<span class="pill warning">Explorer ABI only</span>' : pill(check.status);
+    const badge = check.status === 'verified_current' ? '<span class="pill verified_current">Current code matched</span>' : check.status === 'explorer_abi' ? (check.protocolReplacement ? '<span class="pill warning">Hard-fork code · ABI only</span>' : '<span class="pill warning">Explorer ABI only</span>') : pill(check.status);
     const plainResult = check.status === 'verified_current' ? 'Current code matches verified source. Code at execution time was not checked.' : check.status === 'verified' ? 'Code at the inspected block matches verified source.' : check.status === 'mismatch' ? 'Verified source and onchain bytecode differ. Stop and investigate.' : check.reason;
     const technical = `<details><summary>Technical evidence</summary><p>${esc(check.reason)} · block ${esc(check.blockTag)}${check.bytecodeHash ? `<br>Runtime bytecode hash: <span class="mono">${esc(check.bytecodeHash)}</span>` : ''}</p>${abi}${proxy}${planned}</details>`;
     return `<div class="item">${badge}<div class="item-content"><strong class="mono">${esc(check.address)}</strong><p>${esc(plainResult)}${safeExternalUrl(check.source) ? `<br><a href="${esc(safeExternalUrl(check.source))}" target="_blank" rel="noopener noreferrer">Inspect ${check.status === 'explorer_abi' ? 'explorer ABI record' : 'verified source'}</a>` : ''}</p>${observedUpgrade}${technical}</div></div>`;
@@ -550,13 +551,15 @@ function lifecycleStatus(r, stale = false, source = r.evidence?.source) {
 function lifecycleBadge(state) {
   return `<span class="lifecycle-badge lifecycle-${state.kind}">${esc(state.label)}</span>`;
 }
+// app.safe.global uses EIP-3770 short names, which differ from internal keys for some chains.
+const SAFE_UI_PREFIX = Object.freeze({ pol: 'matic', xlayer: 'okb' });
 function reportHtml(r, retryNote = '') {
   const tx = r.transaction;
   const exampleContext = r.network === 'eth' && r.hash?.toLowerCase() === featuredExampleHash
     ? `<div class="example-context"><strong>About this example</strong><p>This public Ethereum transaction was linked by the Safe Ecosystem Foundation in its <a href="https://forum.safefoundation.org/t/sep-55-phase-2-fund-safenet-beta-for-safe-token-utility/6967/16" target="_blank" rel="noopener noreferrer">community forum post ↗</a>. It is sample data for this independent review tool, not a partnership or endorsement.</p></div>`
     : '';
   const safeUiKnown = r.network !== 'kat';
-  const safeUrl = safeUiKnown ? `https://app.safe.global/home?safe=${encodeURIComponent(`${r.network === 'xlayer' ? 'okb' : r.network}:${tx.safe}`)}` : `https://katanascan.com/address/${encodeURIComponent(tx.safe)}`;
+  const safeUrl = safeUiKnown ? `https://app.safe.global/home?safe=${encodeURIComponent(`${SAFE_UI_PREFIX[r.network] ?? r.network}:${tx.safe}`)}` : `https://katanascan.com/address/${encodeURIComponent(tx.safe)}`;
   const evidence = r.evidence?.source === 'onchain_execution'
     ? `<div class="notice" style="margin:16px 28px 0"><strong>Verified from ${esc(r.network)} onchain execution</strong> · block ${esc(r.evidence.blockNumber)}${r.evidence.blockTime ? ` · ${esc(r.evidence.blockTime)}` : ''}<br>Execution transaction: <span class="mono">${esc(r.evidence.executionHash)}</span>. ${r.evidence.discoveredBy === 'etherscan_index' ? 'Located through an indexed Safe event. ' : ''}The call graph comes from its execTransaction calldata. State changes below require a separate trace or simulation.</div>`
     : ['safe_api', 'safe_api_untrusted', 'safe_gateway'].includes(r.evidence?.source)

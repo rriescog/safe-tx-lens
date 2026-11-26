@@ -52,7 +52,7 @@ test('Safe URL parsing rejects a mismatched origin, malformed Safe, and unknown 
     `http://app.safe.global/home?safe=eth:${SAFE}`,
     `https://user@app.safe.global/home?safe=eth:${SAFE}`,
     `https://app.safe.global:444/home?safe=eth:${SAFE}`,
-    `https://app.safe.global/home?safe=eth:${SAFE}&safe=pol:${SAFE}`,
+    `https://app.safe.global/home?safe=eth:${SAFE}&safe=matic:${SAFE}`,
     `https://app.safe.global/transactions/tx?safe=eth:${SAFE}&id=multisig_${OTHER}_${'0x' + 'a'.repeat(64)}`,
     `https://app.safe.global/home?safe=eth:${SAFE}&id=`,
     `https://app.safe.global/home?safe=eth:0x123`,

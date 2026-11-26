@@ -924,6 +924,8 @@ test('web report renders transaction evidence, target verification, effects, and
   assert.match(html, /https:\/\/app\.safe\.global\/home\?safe=eth%3A0x1111111111111111111111111111111111111111/);
   page.context.sample = { ...review, network: 'xlayer' };
   assert.match(page.evaluate('reportHtml(sample)'), /safe=okb%3A0x1111111111111111111111111111111111111111/);
+  page.context.sample = { ...review, network: 'pol' };
+  assert.match(page.evaluate('reportHtml(sample)'), /safe=matic%3A0x1111111111111111111111111111111111111111/);
   page.context.sample = { ...review, network: 'kat' };
   assert.match(page.evaluate('reportHtml(sample)'), /katanascan\.com\/address\//);
   page.context.sample = review;
