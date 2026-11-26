@@ -90,7 +90,10 @@ test('unverified explorer response does not invent an ABI', async () => {
   const request = async url => String(url).includes('sourcify.dev')
     ? new Response('', { status: 404 })
     : response({ status: '0', result: 'Contract source code not verified' });
-  assert.equal(await lookupContractSource('eth', ADDRESS, { runtimeCode, request, credentialsReader, useCache: false }), null);
+  const result = await lookupContractSource('eth', ADDRESS, { runtimeCode, request, credentialsReader, useCache: false });
+  assert.equal(result.noSource, true);
+  assert.equal(result.abi, undefined);
+  assert.deepEqual(result.evidence.map(item => [item.provider, item.outcome]), [['sourcify', 'not_verified'], ['etherscan', 'not_verified']]);
 });
 
 test('historical bytecode mismatch cannot be promoted by a current explorer ABI', async () => {
@@ -100,4 +103,70 @@ test('historical bytecode mismatch cannot be promoted by a current explorer ABI'
   const source = await lookupContractSource('eth', ADDRESS, { runtimeCode, request, credentialsReader, useCache: false });
   assert.equal(source.sourceProvider, 'etherscan');
   assert.equal(source.explorerAbi, true);
+});
+
+const json = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), { status, headers });
+const OTHER_CODE = '0x60026000';
+const explorerRow = { status: '1', result: [{ ABI: JSON.stringify(contractAbi), SourceCode: 'contract Example {}', ContractName: 'Example', CompilerVersion: 'v0.8.20+commit.a1b79de6', Implementation: '' }] };
+
+test('report states each source answer: Sourcify has other bytecode, explorer has ABI only, import rejected', async () => {
+  const calls = [];
+  const request = async (url, options = {}) => {
+    const href = String(url);
+    calls.push({ href, method: options.method ?? 'GET', body: options.body });
+    if (href.includes('/v2/contract/')) return json({ match: 'exact_match', runtimeMatch: 'exact_match', verifiedAt: '2024-08-08T11:22:32Z', compilation: { name: 'Example', compilerVersion: '0.5.11' }, runtimeBytecode: { onchainBytecode: OTHER_CODE }, abi: contractAbi });
+    if (href.includes('/v2/verify/etherscan/')) return json({ verificationId: 'job-1' }, 202);
+    if (href.includes('/v2/verify/job-1')) return json({ isJobCompleted: true, contract: { match: null }, error: { customCode: 'already_verified', message: "The contract is already verified and the job didn't yield a better match." } });
+    return json(explorerRow);
+  };
+  const source = await lookupContractSource('pol', ADDRESS, { runtimeCode, request, credentialsReader, useCache: false, importWaitMs: 0 });
+  assert.equal(source.sourceProvider, 'etherscan');
+  assert.deepEqual(source.evidence.map(item => [item.provider, item.outcome]), [['sourcify', 'different_bytecode'], ['etherscan', 'abi_only'], ['sourcify_import', 'rejected']]);
+  assert.match(source.evidence[0].detail, /4 bytes .* versus 4 bytes/);
+  assert.match(source.evidence[0].detail, /2024-08-08/);
+  assert.equal(source.evidence[1].label, 'PolygonScan (Etherscan API)');
+  assert.match(source.evidence[2].detail, /keeps serving the earlier version/);
+  const post = calls.find(call => call.method === 'POST');
+  assert.match(post.href, /\/v2\/verify\/etherscan\/137\/0x2222/);
+  assert.ok(!String(post.body).includes('test-key'), 'our Etherscan key must never be sent to Sourcify');
+  const provider = { getNetwork: async () => ({ chainId: 137n }), getCode: async () => runtimeCode, getStorage: async () => '0x' };
+  const [target] = await inspectTargetCode(decodeCall({ to: ADDRESS, data: calldata, value: '0' }), 'pol', { provider, sourceLookup: () => source });
+  assert.equal(target.status, 'explorer_abi');
+  assert.match(target.reason, /Sourcify: Has a verified source .* different runtime bytecode/);
+  assert.match(target.reason, /PolygonScan \(Etherscan API\): Verified source and ABI available/);
+  assert.equal(target.sourceEvidence.length, 3);
+});
+
+test('a successful Sourcify import of the explorer source verifies the target', async () => {
+  let imported = false;
+  const request = async (url, options = {}) => {
+    const href = String(url);
+    if (href.includes('/v2/contract/')) return imported ? json({ match: 'match', runtimeMatch: 'match', runtimeBytecode: { onchainBytecode: runtimeCode }, abi: contractAbi }) : new Response('', { status: 404 });
+    if (href.includes('/v2/verify/etherscan/')) return json({ verificationId: 'job-2' }, 202);
+    if (href.includes('/v2/verify/job-2')) { imported = true; return json({ isJobCompleted: true, contract: { match: 'match', runtimeMatch: 'match' } }); }
+    return json(explorerRow);
+  };
+  const source = await lookupContractSource('eth', '0x3333333333333333333333333333333333333333', { runtimeCode, request, credentialsReader, useCache: false, importWaitMs: 0 });
+  assert.equal(source.runtimeBytecode.onchainBytecode, runtimeCode);
+  assert.equal(source.importedFrom, 'Etherscan (Etherscan API)');
+  assert.deepEqual(source.evidence.map(item => [item.provider, item.outcome]), [['sourcify', 'not_verified'], ['etherscan', 'abi_only'], ['sourcify_import', 'match']]);
+});
+
+test('rate limits and outages are reported as such, retried once, and not hidden', async () => {
+  let sourcifyCalls = 0;
+  const request = async url => {
+    if (String(url).includes('/v2/contract/')) { sourcifyCalls++; return new Response('', { status: 429, headers: { 'retry-after': '0' } }); }
+    return json({ status: '0', message: 'NOTOK', result: 'Max calls per sec rate limit reached (5/sec)' });
+  };
+  const result = await lookupContractSource('eth', '0x4444444444444444444444444444444444444444', { runtimeCode, request, credentialsReader, useCache: false, sourcifyImport: false });
+  assert.equal(sourcifyCalls, 2);
+  assert.equal(result.noSource, true);
+  assert.deepEqual(result.evidence.map(item => [item.provider, item.outcome]), [['sourcify', 'rate_limited'], ['etherscan', 'rate_limited']]);
+  assert.match(result.evidence[0].detail, /HTTP 429/);
+});
+
+test('missing explorer key is stated instead of reported as unverified', async () => {
+  const request = async () => new Response('', { status: 404 });
+  const result = await lookupContractSource('eth', '0x5555555555555555555555555555555555555555', { runtimeCode, request, credentialsReader: async () => ({}), useCache: false });
+  assert.deepEqual(result.evidence.map(item => [item.provider, item.outcome]), [['sourcify', 'not_verified'], ['etherscan', 'not_configured']]);
 });

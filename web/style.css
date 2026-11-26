@@ -211,3 +211,4 @@ footer.site-footer{max-width:none;margin:0;padding:38px clamp(20px,4vw,64px) 44p
 .workspace>.how-it-works{grid-column:1/-1;width:100%;max-width:none;margin:4px 0 0}
 @media(max-width:780px){.workspace>.how-it-works{order:3}.workspace .sponsor-rail{order:4}}
 @media(max-width:540px){.intro-actions{margin-top:14px}.intro-actions .start-review,.intro-actions button{flex:1;text-align:center;white-space:nowrap;padding:9px 8px;font-size:12px}}
+.source-evidence{margin:10px 0 4px}.source-evidence ul{list-style:none;margin:6px 0 0;padding:0}.source-evidence li{margin:0 0 8px;font-size:13px;line-height:1.45;overflow-wrap:anywhere}.source-evidence li span:not(.pill){color:var(--muted)}.source-evidence .pill{margin-right:4px}

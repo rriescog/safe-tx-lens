@@ -35,3 +35,20 @@ For an upgradeable contract, the tool reads ERC-1967 implementation storage, rec
 Etherscan requests are paced below its documented free tier rate. All source requests have a timeout, bounded response size, fixed destination, and cache. A public deployment still needs its own quotas and provider budget. Provider errors should appear as unavailable evidence rather than a fabricated verification result.
 
 Provider documentation: [Etherscan V2 supported chains](https://docs.etherscan.io/supported-chains), [Etherscan getsourcecode](https://docs.etherscan.io/api-reference/endpoint/getsourcecode), [Blockscout smart contract API](https://docs.blockscout.com/api-reference/get-smart-contract), [OKLink API](https://www.oklink.com/docs/en/), [Sourcify API](https://docs.sourcify.dev/docs/api/).
+
+## Per-source evidence and Sourcify import
+
+Every target check lists what each source returned, in query order, instead of a single "not verified":
+
+| Outcome | Meaning |
+| --- | --- |
+| `match` | The source's verified runtime bytecode is identical to the RPC bytecode. |
+| `different_bytecode` | The source has a verified contract at this address, but for different bytecode (sizes and hashes are shown). The code at the address is not what that source describes. |
+| `abi_only` | An explorer has verified source and ABI, but its API returns no compiled bytecode, so it cannot be compared here. |
+| `not_verified` / `not_configured` | No verified source, or the explorer key is not configured on this service. |
+| `rate_limited` / `error` | The provider was unavailable. One retry honours a short `Retry-After`; these results are cached for one minute only, never as "not verified". |
+| `rejected` / `failed` / `pending` | Result of the Sourcify import described below. |
+
+When no source matches and only an Etherscan-family explorer holds the source, the tool asks Sourcify to import it (`POST /v2/verify/etherscan/{chainId}/{address}`). Sourcify fetches the source, compiles it on its own infrastructure (Solidity or Vyper) and compares it with the current chain code; this tool compiles nothing and runs no downloaded code. A match is then served by Sourcify and the target becomes `verified`. The import publishes a public Sourcify verification. This service never sends its own Etherscan key to Sourcify. Set `SOURCIFY_IMPORT=off` to disable it. Sourcify rejects an import when it already holds an exact match for an earlier version at the same address (for example, a system contract replaced by a hard fork); the report then says so.
+
+A verified source for different bytecode always produces a `TARGET_SOURCE_DIVERGENCE` finding (a warning, or info when a pinned hard-fork allocation explains it), even when another source supplies an ABI.
