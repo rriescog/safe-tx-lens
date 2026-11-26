@@ -97,8 +97,11 @@ test('upgradeToAndCall decodes initializer in the proxy context', () => {
 
 test('Safe URL parser uses the embedded network and hash', () => {
   const hash = `0x${'a'.repeat(64)}`;
-  const parsed = parseInput(`https://app.safe.global/transactions/tx?safe=pol:${SAFE}&id=multisig_${SAFE}_${hash}`, 'eth');
+  const parsed = parseInput(`https://app.safe.global/transactions/tx?safe=matic:${SAFE}&id=multisig_${SAFE}_${hash}`, 'eth');
   assert.equal(parsed.network, 'pol');
+  const matic = parseInput(`https://app.safe.global/transactions/tx?safe=matic:${SAFE}&id=multisig_${SAFE}_${hash}`, 'eth');
+  assert.equal(matic.network, 'pol');
+  assert.equal(parseInput(`https://app.safe.global/home?safe=matic:${SAFE}`, 'eth').network, 'pol');
   assert.equal(parsed.hash, hash);
   assert.throws(() => parseInput(`https://evil.example/?safe=eth:${SAFE}`), /Only https:\/\/app.safe.global/);
 });

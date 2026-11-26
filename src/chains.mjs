@@ -8,7 +8,10 @@ export const CHAINS = Object.freeze({
 // some Agglayer networks. Keep chain IDs as the source of EIP-712 truth.
 export const SAFE_SERVICE_ALIAS = Object.freeze({ kat: 'katana', xlayer: 'okb', amoy: 'pol-amoy' });
 export function safeServiceAlias(network) { return SAFE_SERVICE_ALIAS[network] ?? network; }
-export function internalNetwork(alias) { return Object.keys(SAFE_SERVICE_ALIAS).find(network => SAFE_SERVICE_ALIAS[network] === alias) ?? alias; }
+// EIP-3770 short names used by app.safe.global URLs (e.g. `safe=matic:0x…`)
+// that differ from this tool's internal network keys.
+export const SAFE_URL_PREFIX_ALIAS = Object.freeze({ matic: 'pol', gnosis: 'gno' });
+export function internalNetwork(alias) { return SAFE_URL_PREFIX_ALIAS[alias] ?? Object.keys(SAFE_SERVICE_ALIAS).find(network => SAFE_SERVICE_ALIAS[network] === alias) ?? alias; }
 
 export function chainId(prefix) {
   if (typeof prefix === 'string' && /^[1-9][0-9]{0,15}$/.test(prefix) && Number.isSafeInteger(Number(prefix))) return Number(prefix);

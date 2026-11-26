@@ -311,3 +311,27 @@ test('target graph skips invalid addresses and accepts Sourcify match field with
   assert.equal(reports[0].status, 'verified');
   assert.equal(reports[0].abiSelectors[0].present, false);
 });
+
+test('Polygon MRC20 replaced by the Ahmedabad hard fork decodes with the earlier verified ABI, never as verified', async () => {
+  const { ahmedabadCode, previousCode, abi: mrc20Abi } = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('./support/polygon-mrc20.json', import.meta.url), 'utf8'));
+  const MRC20 = '0x0000000000000000000000000000000000001010';
+  const withdraw = new Interface(['function withdraw(uint256)']).encodeFunctionData('withdraw', [1n]);
+  const mrc20Call = { to: MRC20, selector: withdraw.slice(0, 10), data: withdraw, operation: 0, children: [] };
+  const lookup = async () => ({ runtimeMatch: 'exact_match', runtimeBytecode: { onchainBytecode: previousCode }, abi: mrc20Abi, sourceUrl: `https://repo.sourcify.dev/137/${MRC20}` });
+  const [target] = await inspectTargetCode(mrc20Call, 'pol', { provider: provider({ code: ahmedabadCode, chainId: 137n }), sourceLookup: lookup });
+  assert.equal(target.status, 'explorer_abi');
+  assert.equal(target.sourceProvider, 'Polygon Bor hard-fork allocation');
+  assert.match(target.source, /0xPolygon\/bor\/blob\/[0-9a-f]{40}\//);
+  assert.match(target.reason, /Ahmedabad/);
+  assert.deepEqual(target.abiSelectors, [{ selector: '0x2e1a7d4d', present: true }]);
+  const review = await analyze({ safe: TARGET, to: MRC20, value: '0', data: withdraw, operation: 0, nonce: 1 }, 'pol', { fetchState: false, verifyTargets: true, targetProvider: provider({ code: ahmedabadCode, chainId: 137n }), sourceLookup: lookup });
+  assert.equal(review.call.method, 'withdraw(uint256)');
+  assert.equal(review.call.decodeBasis, 'explorer_abi');
+  assert.ok(!review.findings.some(finding => finding.code === 'TARGET_CODE_MISMATCH'));
+  // Any other runtime code, another chain, or another earlier source still fails closed.
+  const tampered = `${ahmedabadCode.slice(0, -2)}00`;
+  assert.equal((await inspectTargetCode(mrc20Call, 'pol', { provider: provider({ code: tampered, chainId: 137n }), sourceLookup: lookup }))[0].status, 'mismatch');
+  assert.equal((await inspectTargetCode(mrc20Call, 'amoy', { provider: provider({ code: ahmedabadCode, chainId: 80002n }), sourceLookup: lookup }))[0].status, 'mismatch');
+  const otherSource = async () => ({ ...(await lookup()), runtimeBytecode: { onchainBytecode: '0x60016000' } });
+  assert.equal((await inspectTargetCode(mrc20Call, 'pol', { provider: provider({ code: ahmedabadCode, chainId: 137n }), sourceLookup: otherSource }))[0].status, 'mismatch');
+});

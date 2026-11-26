@@ -1,4 +1,4 @@
-import { Interface, JsonRpcProvider, getAddress, isAddress, keccak256 } from 'ethers';
+import { FunctionFragment, Interface, JsonRpcProvider, getAddress, isAddress, keccak256 } from 'ethers';
 import { chainId } from './chains.mjs';
 import { lookupContractSource, sourcifyLookup } from './abi-sources.mjs';
 
@@ -18,6 +18,21 @@ const VERIFIED_GETTER_FALLBACKS = new Map([
 ]);
 const VERIFIED_LEGACY_FALLBACKS = new Map([
   ['0xd80d4b7c890cb9d6a4893e6b52bc34b56b25335cb13716e0d1d31383e6b41505', { pattern: 'Circle FiatTokenProxy delegatecall fallback', source: 'https://repo.sourcify.dev/1/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48' }],
+]);
+
+// Protocol hard forks can replace a system contract's runtime code in place
+// (Polygon Bor `blockAlloc`). Source verifiers may then hold only the earlier
+// version. Each entry pins the exact replacement code hash from the client
+// configuration and the exact earlier code hash whose verified ABI is reused,
+// minus selectors the replacement no longer dispatches. Any other code still
+// fails as a mismatch.
+const PROTOCOL_CODE_REPLACEMENTS = new Map([
+  ['137:0x0000000000000000000000000000000000001010:0x82c4ebd167e81e53bef0589ab868a9399ebc29b3d6dcbbe3c4cfe54644bf9d58', {
+    label: 'Polygon MRC20 (POL native token) replaced by the Bor Ahmedabad hard fork at block 62278656',
+    previousCodeHash: '0xb6bc58482cd4072e43dcd798c70a4fc727f8115490558f747acc14e13aac0ccf',
+    removedSelectors: ['0x7019d41a'],
+    source: 'https://github.com/0xPolygon/bor/blob/156755608234bb4220460abd4d8c9ef691691010/internal/cli/server/chains/mainnet.go#L116',
+  }],
 ]);
 
 export function recognizeGetterFallback(check) {
@@ -86,7 +101,7 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
   const bytecodeHash = keccak256(code);
   const result = { ...base, bytecodeHash, byteLength: (code.length - 2) / 2, status: 'unverified', source: null, reason: 'No matching verified source was found' };
   try {
-    const source = await lookup(network, entry.address, { runtimeCode: code, blockTag: effectiveBlockTag });
+    let source = await lookup(network, entry.address, { runtimeCode: code, blockTag: effectiveBlockTag });
     if (source) {
       const matchedBytecode = source.runtimeBytecode?.onchainBytecode;
       if (source.explorerAbi && !matchedBytecode && Array.isArray(source.abi)) {
@@ -97,8 +112,23 @@ async function inspectOne(entry, provider, network, blockTag, lookup, depth = 0,
       } else if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(matchedBytecode ?? '')) {
         result.reason = 'Source provider did not return runtime bytecode for an independent comparison';
       } else if (keccak256(matchedBytecode) !== bytecodeHash) {
-        result.status = 'mismatch';
-        result.reason = 'Explorer verified bytecode differs from RPC bytecode at the selected block';
+        const replacement = PROTOCOL_CODE_REPLACEMENTS.get(`${chainId(network)}:${entry.address.toLowerCase()}:${bytecodeHash}`);
+        if (replacement && keccak256(matchedBytecode) === replacement.previousCodeHash && Array.isArray(source.abi)) {
+          const removed = new Set(replacement.removedSelectors);
+          const abi = source.abi.filter(item => {
+            if (item?.type !== 'function') return true;
+            try { return !removed.has(FunctionFragment.from(item).selector); } catch { return false; }
+          });
+          source = { ...source, abi };
+          result.status = 'explorer_abi';
+          result.sourceProvider = 'Polygon Bor hard-fork allocation';
+          result.source = replacement.source;
+          result.protocolReplacement = { label: replacement.label, previousSource: source.sourceUrl ?? `https://repo.sourcify.dev/${chainId(network)}/${entry.address}` };
+          result.reason = `${replacement.label}. RPC bytecode matches the code pinned in the Bor client configuration; it has no verified source. ABI reused from the earlier verified version, excluding removed functions`;
+        } else {
+          result.status = 'mismatch';
+          result.reason = 'Explorer verified bytecode differs from RPC bytecode at the selected block';
+        }
       } else if (!['exact_match', 'match'].includes(source.runtimeMatch ?? source.match)) {
         result.reason = 'Source provider returned no recognized runtime match status';
       } else {
