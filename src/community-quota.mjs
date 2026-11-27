@@ -33,7 +33,7 @@ export function communityQuota({ file, dailyUnits = 600, monthlyUnits = 10000, c
       const key = createHash('sha256').update(salt).update(clientIp).digest('hex');
       const previous = controlClients.get(key);
       const used = previous?.minute === minute ? previous.used : 0;
-      if (used >= 60) return { allowed: false, reason: 'control_limit', retryAfterSeconds: Math.max(1, Math.ceil(((minute + 1) * 60_000 - now()) / 1000)) };
+      if (used >= 60) return { allowed: false, reason: 'control_limit', limit: 60, retryAfterSeconds: Math.max(1, Math.ceil(((minute + 1) * 60_000 - now()) / 1000)) };
       if (controlClients.size >= 10_000) {
         for (const [identity, record] of controlClients) if (record.minute !== minute) controlClients.delete(identity);
         if (controlClients.size >= 10_000 && !controlClients.has(key)) return { allowed: false, reason: 'busy', retryAfterSeconds: 2 };
@@ -47,7 +47,7 @@ export function communityQuota({ file, dailyUnits = 600, monthlyUnits = 10000, c
       const day = date();
       const clientKey = createHash('sha256').update(salt).update(clientIp).digest('hex');
       const client = clients.get(clientKey);
-      if (client?.day === day && client.used >= clientDailyRequests) return { allowed: false, reason: 'client_limit', retryAfterSeconds: retryAfter() };
+      if (client?.day === day && client.used >= clientDailyRequests) return { allowed: false, reason: 'client_limit', limit: clientDailyRequests, retryAfterSeconds: retryAfter() };
       if (simulation && client?.day === day && client.simulations >= simulationClientDaily) return { allowed: false, reason: 'simulation_client_limit', limit: simulationClientDaily, retryAfterSeconds: retryAfter() };
       const record = read();
       if (record.dayUnits + cost > dailyUnits) return { allowed: false, reason: 'daily_limit', retryAfterSeconds: retryAfter() };

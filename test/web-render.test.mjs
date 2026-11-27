@@ -1058,3 +1058,42 @@ test('web queue and Builder renderers distinguish choices, absence and unavailab
   page.context.sample = builder;
   assert.match(page.evaluate('builderHtml(sample)'), /Builder plan|Review/);
 });
+
+test('every failed inspection says what stopped it and when to retry', async () => {
+  const page = ui();
+  page.elements.get('input').value = `0x${'a'.repeat(64)}`;
+  const reply = (status, text, headers = {}) => async () => ({ ok: false, status, text: async () => text, headers: { get: name => headers[name.toLowerCase()] ?? null } });
+  const run = async fetchImpl => { page.context.fetch = fetchImpl; await page.evaluate('inspect()'); return { html: page.elements.get('report').innerHTML, status: page.elements.get('status').textContent }; };
+
+  let view = await run(reply(429, JSON.stringify({ error: 'You have used all 20 inspection requests allowed per IP address today. Try again in 5 h 3 min (UTC daily reset).', code: 'USAGE_LIMIT', limitScope: 'ip_daily', retryAfterSeconds: 18180 })));
+  assert.match(view.html, /Your daily request limit is used up/);
+  assert.match(view.html, /all 20 inspection requests allowed per IP address today/);
+  assert.match(view.html, /Available again in 5 h 3 min/);
+  assert.match(view.html, /do not bypass this limit/);
+  assert.equal(view.status, 'Your daily request limit is used up');
+
+  view = await run(reply(429, JSON.stringify({ error: 'The shared service has used its daily capacity for all users.', code: 'USAGE_LIMIT', limitScope: 'service_daily', retryAfterSeconds: 600 })));
+  assert.match(view.html, /Daily service capacity reached/);
+  assert.match(view.html, /Available again in 10 min/);
+
+  view = await run(reply(429, '<html><title>Access denied | safetxlens.org used Cloudflare to restrict access</title><span class="cf-error-code">1015</span> You are being rate limited</html>', { 'retry-after': '120', 'cf-ray': 'abc' }));
+  assert.match(view.html, /Rate limited before reaching the service/);
+  assert.match(view.html, /Cloudflare error 1015, HTTP 429/);
+  assert.match(view.html, /not this service&#39;s quota/);
+  assert.match(view.html, /Available again in 2 min/);
+  assert.doesNotMatch(view.html, /do not bypass this limit/, 'donation text is only for our own quota');
+
+  view = await run(reply(403, '<html>Attention Required! | Cloudflare</html>', { 'cf-ray': 'abc' }));
+  assert.match(view.html, /Blocked before reaching the service/);
+  assert.match(view.html, /VPN or company proxy/);
+
+  view = await run(reply(522, '<html>Connection timed out | cloudflare</html>', { 'cf-ray': 'abc' }));
+  assert.match(view.html, /The service is not responding/);
+  assert.match(view.html, /HTTP 522/);
+
+  view = await run(async () => { throw new TypeError('Failed to fetch'); });
+  assert.match(view.html, /Could not reach safetxlens.org/);
+  assert.match(view.html, /VPN, company firewall or content filter/);
+  assert.match(view.html, /Failed to fetch/);
+  assert.equal(view.status, 'Could not reach safetxlens.org');
+});

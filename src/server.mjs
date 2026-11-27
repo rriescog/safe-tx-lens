@@ -39,14 +39,36 @@ function communityCost(input, network, scope, { simulate = false, verifyTargets 
   return Math.min(100, base * (network === 'auto' ? 4 : 1) * (scope === 'both' ? 2 : 1) + (verifyTargets ? 15 : 0) + (simulate ? 40 : 0));
 }
 
+// "in 3 h 12 min" reads better than "in 11520 seconds" on every client.
+export function formatWait(seconds) {
+  const total = Math.max(1, Math.ceil(Number(seconds) || 0));
+  if (total < 90) return `${total} second${total === 1 ? '' : 's'}`;
+  const minutes = Math.round(total / 60);
+  if (minutes < 90) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} h${minutes % 60 ? ` ${minutes % 60} min` : ''}`;
+  return `${Math.round(hours / 24)} days`;
+}
+
+// Each denial names whose limit was reached (this IP or the whole service),
+// which window it belongs to, and when it resets.
+const LIMIT_TEXT = {
+  busy: () => ({ scope: 'busy', text: 'The service is processing another inspection right now (one at a time).' }),
+  client_limit: ticket => ({ scope: 'ip_daily', text: `You have used all ${ticket.limit ?? ''} inspection requests allowed per IP address today.`.replace('all  ', 'all ') }),
+  control_limit: ticket => ({ scope: 'ip_minute', text: `Too many requests from your IP address in the last minute (limit ${ticket.limit ?? 60}).` }),
+  daily_limit: () => ({ scope: 'service_daily', text: 'The shared service has used its daily capacity for all users (it limits upstream API usage).' }),
+  monthly_limit: () => ({ scope: 'service_monthly', text: 'The shared service has used its monthly capacity for all users.' }),
+  simulation_client_limit: ticket => ({ scope: 'ip_simulation_daily', text: `You have used all ${ticket.limit} simulation requests for this IP address today. Inspect without simulation, or` }),
+  simulation_monthly_limit: () => ({ scope: 'service_simulation_monthly', text: "The service's monthly simulation capacity is exhausted. Inspect without simulation, or" }),
+};
+
 function denied(res, ticket) {
   const seconds = ticket.retryAfterSeconds ?? 2;
   const simulationLimit = ticket.reason === 'simulation_client_limit' || ticket.reason === 'simulation_monthly_limit';
-  const error = ticket.reason === 'busy' ? 'The service is busy. Please retry shortly.'
-    : ticket.reason === 'simulation_client_limit' ? `You have used all ${ticket.limit} simulation requests for this IP today. Inspect without simulation or try again after the UTC daily reset in ${seconds} seconds.`
-      : ticket.reason === 'simulation_monthly_limit' ? `The service's monthly simulation capacity is exhausted. Inspect without simulation or try again after the monthly reset in ${seconds} seconds.`
-        : `Usage limit reached. Please try again in ${seconds} seconds.`;
-  return reply(res, 429, { error, code: ticket.reason === 'busy' ? 'SERVICE_BUSY' : simulationLimit ? 'SIMULATION_LIMIT' : 'USAGE_LIMIT', ...(simulationLimit ? { simulationScope: ticket.reason === 'simulation_client_limit' ? 'daily' : 'monthly' } : {}), retryAfterSeconds: seconds }, 'application/json', { 'Retry-After': String(seconds) });
+  const { scope, text } = (LIMIT_TEXT[ticket.reason] ?? (() => ({ scope: 'unknown', text: 'Usage limit reached.' })))(ticket);
+  const reset = scope === 'service_daily' || scope === 'ip_daily' || scope === 'ip_simulation_daily' ? ' (UTC daily reset)' : scope.endsWith('monthly') ? ' (monthly reset)' : '';
+  const error = `${text} ${simulationLimit ? 'try' : 'Try'} again in ${formatWait(seconds)}${reset}.${scope.startsWith('service') ? ' For bulk or urgent reviews, run the open-source tool locally.' : ''}`;
+  return reply(res, 429, { error, code: ticket.reason === 'busy' ? 'SERVICE_BUSY' : simulationLimit ? 'SIMULATION_LIMIT' : 'USAGE_LIMIT', limitScope: scope, ...(simulationLimit ? { simulationScope: ticket.reason === 'simulation_client_limit' ? 'daily' : 'monthly' } : {}), retryAfterSeconds: seconds, retryAt: new Date(Date.now() + seconds * 1000).toISOString() }, 'application/json', { 'Retry-After': String(seconds) });
 }
 
 export function redactPrivateSimulationUrl(result) {
