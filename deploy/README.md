@@ -25,3 +25,9 @@ Unexpected failures and missing routes return a user-facing incident reference. 
 ## RPC coverage and production limits
 
 The community container uses the public RPC defaults in `src/onchain.mjs` and rejects `RPC_URL` and `RPC_URL_<NETWORK>` in its environment. Adding a private endpoint to the VPS environment will **not** activate it. Public RPC availability therefore remains a dependency. Historical bytecode and storage checks require an RPC that serves the inspected block. See [configuration](../docs/CONFIGURATION.md) and [network coverage](../docs/NETWORK-COVERAGE.md).
+
+## Cloudflare and other sites on the VPS
+
+`safetxlens.org` is proxied by Cloudflare. The Caddyfile accepts connections only from Cloudflare's published ranges and takes the visitor address from `CF-Connecting-IP`; the per-IP quota depends on it. Update both range lists in `deploy/Caddyfile` when https://www.cloudflare.com/ips changes.
+
+Other sites hosted on the same VPS belong in `~/safe-tx-lens/sites/*.caddy` on the server. Deployments create that directory but never copy into or overwrite it, and every deployment validates and reloads Caddy so the running configuration always matches the files on disk. Do not edit `~/safe-tx-lens/Caddyfile` on the server: the next deployment replaces it.
