@@ -29,6 +29,8 @@ jobs:
           touch deploy/etherscan-api-key deploy/oklink-api-key
           DOMAIN=safetxlens.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml config --quiet
           DOMAIN=safetxlens.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml -f deploy/compose.etherscan.yaml -f deploy/compose.oklink.yaml config --quiet
+          mkdir -p /tmp/caddy-sites
+          docker run --rm -e DOMAIN=safetxlens.org -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" -v /tmp/caddy-sites:/etc/caddy/sites:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
   publish:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
@@ -119,7 +121,7 @@ jobs:
           GHCR_READ_USER: ${{ github.repository_owner }}
           IMAGE: ${{ needs.publish.outputs.image }}
         run: |
-          ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p "$HOME/safe-tx-lens"'
+          ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p "$HOME/safe-tx-lens/sites"'
           scp -o StrictHostKeyChecking=yes deploy/compose.yaml deploy/compose.tenderly.yaml deploy/compose.etherscan.yaml deploy/compose.oklink.yaml deploy/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:safe-tx-lens/"
           printf '%s' "$GHCR_READ_TOKEN" | ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '$GHCR_READ_USER' --password-stdin >/dev/null"
           ssh -o StrictHostKeyChecking=yes "$DEPLOY_USER@$DEPLOY_HOST" "bash -s -- '$DEPLOY_DOMAIN' '$IMAGE' '$DEPLOY_TENDERLY_ENABLED' '$DEPLOY_TENDERLY_ACCOUNT' '$DEPLOY_TENDERLY_PROJECT' '$DEPLOY_ETHERSCAN_ENABLED' '$DEPLOY_OKLINK_ENABLED'" <<'REMOTE'
@@ -152,5 +154,9 @@ jobs:
           fi
           docker compose --env-file .env "${compose_files[@]}" pull
           docker compose --env-file .env "${compose_files[@]}" up -d --remove-orphans
+          # A changed Caddyfile is a bind mount: without a reload the running
+          # config silently drifts from the file on disk.
+          docker compose --env-file .env "${compose_files[@]}" exec -T caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          docker compose --env-file .env "${compose_files[@]}" exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
           docker compose --env-file .env "${compose_files[@]}" ps
           REMOTE

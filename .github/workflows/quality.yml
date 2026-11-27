@@ -30,3 +30,5 @@ jobs:
           touch deploy/etherscan-api-key deploy/oklink-api-key
           DOMAIN=safetxlens.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml config --quiet
           DOMAIN=safetxlens.org IMAGE=ghcr.io/example/safe-tx-lens@sha256:$(printf '0%.0s' {1..64}) docker compose -f deploy/compose.yaml -f deploy/compose.etherscan.yaml -f deploy/compose.oklink.yaml config --quiet
+          mkdir -p /tmp/caddy-sites
+          docker run --rm -e DOMAIN=safetxlens.org -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" -v /tmp/caddy-sites:/etc/caddy/sites:ro caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
