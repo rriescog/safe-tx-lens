@@ -39,15 +39,11 @@ function communityCost(input, network, scope, { simulate = false, verifyTargets 
   return Math.min(100, base * (network === 'auto' ? 4 : 1) * (scope === 'both' ? 2 : 1) + (verifyTargets ? 15 : 0) + (simulate ? 40 : 0));
 }
 
-// "in 3 h 12 min" reads better than "in 11520 seconds" on every client.
+// "1 day 3 h 12 min 5 s" reads better than "in 97925 seconds" on every client.
 export function formatWait(seconds) {
   const total = Math.max(1, Math.ceil(Number(seconds) || 0));
-  if (total < 90) return `${total} second${total === 1 ? '' : 's'}`;
-  const minutes = Math.round(total / 60);
-  if (minutes < 90) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours} h${minutes % 60 ? ` ${minutes % 60} min` : ''}`;
-  return `${Math.round(hours / 24)} days`;
+  const parts = [[Math.floor(total / 86400), 'day'], [Math.floor(total % 86400 / 3600), 'h'], [Math.floor(total % 3600 / 60), 'min'], [total % 60, 's']];
+  return parts.filter(([value]) => value).map(([value, unit]) => unit === 'day' ? `${value} day${value === 1 ? '' : 's'}` : `${value} ${unit}`).join(' ');
 }
 
 // Each denial names whose limit was reached (this IP or the whole service),

@@ -1065,10 +1065,10 @@ test('every failed inspection says what stopped it and when to retry', async () 
   const reply = (status, text, headers = {}) => async () => ({ ok: false, status, text: async () => text, headers: { get: name => headers[name.toLowerCase()] ?? null } });
   const run = async fetchImpl => { page.context.fetch = fetchImpl; await page.evaluate('inspect()'); return { html: page.elements.get('report').innerHTML, status: page.elements.get('status').textContent }; };
 
-  let view = await run(reply(429, JSON.stringify({ error: 'You have used all 20 inspection requests allowed per IP address today. Try again in 5 h 3 min (UTC daily reset).', code: 'USAGE_LIMIT', limitScope: 'ip_daily', retryAfterSeconds: 18180 })));
+  let view = await run(reply(429, JSON.stringify({ error: 'You have used all 20 inspection requests allowed per IP address today. Try again in 5 h 3 min (UTC daily reset).', code: 'USAGE_LIMIT', limitScope: 'ip_daily', retryAfterSeconds: 18185 })));
   assert.match(view.html, /Your daily request limit is used up/);
   assert.match(view.html, /all 20 inspection requests allowed per IP address today/);
-  assert.match(view.html, /Available again in 5 h 3 min/);
+  assert.match(view.html, /Available again in 5 h 3 min 5 s /);
   assert.match(view.html, /do not bypass this limit/);
   assert.equal(view.status, 'Your daily request limit is used up');
 

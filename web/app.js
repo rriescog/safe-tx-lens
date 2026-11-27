@@ -671,11 +671,8 @@ function showTransactionReport(result, retryNote = '') {
 // connection at all. Never a bare "Failed to fetch".
 function waitText(seconds) {
   const total = Math.max(1, Math.ceil(Number(seconds) || 0));
-  if (total < 90) return `${total} second${total === 1 ? '' : 's'}`;
-  const minutes = Math.round(total / 60);
-  if (minutes < 90) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours} h${minutes % 60 ? ` ${minutes % 60} min` : ''}`;
+  const parts = [[Math.floor(total / 86400), 'day'], [Math.floor(total % 86400 / 3600), 'h'], [Math.floor(total % 3600 / 60), 'min'], [total % 60, 's']];
+  return parts.filter(([value]) => value).map(([value, unit]) => unit === 'day' ? `${value} day${value === 1 ? '' : 's'}` : `${value} ${unit}`).join(' ');
 }
 function retryHint(seconds) {
   if (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0) return '';
