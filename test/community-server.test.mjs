@@ -219,3 +219,13 @@ test('community HTTP rejects hostile JSON as a client error without recording it
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('limit messages name the limit and a human reset time', async () => {
+  const { formatWait } = await import('../src/server.mjs');
+  assert.equal(formatWait(45), '45 s');
+  assert.equal(formatWait(600), '10 min');
+  assert.equal(formatWait(18185), '5 h 3 min 5 s');
+  assert.equal(formatWait(86400 + 3 * 3600 + 12 * 60 + 5), '1 day 3 h 12 min 5 s');
+  assert.equal(formatWait(3 * 86400), '3 days');
+  assert.equal(formatWait(0), '1 s');
+});

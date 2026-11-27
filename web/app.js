@@ -666,6 +666,45 @@ function showTransactionReport(result, retryNote = '') {
     else inspect({ overrideInput: activeReportInput, overrideNetwork: activeReportNetwork, verifyTargets: true, retryTargets: true });
   }));
 }
+// A failed request must say what stopped it: our quota (JSON with a code),
+// an edge or proxy in front of the service (HTML or empty body), or no
+// connection at all. Never a bare "Failed to fetch".
+function waitText(seconds) {
+  const total = Math.max(1, Math.ceil(Number(seconds) || 0));
+  const parts = [[Math.floor(total / 86400), 'day'], [Math.floor(total % 86400 / 3600), 'h'], [Math.floor(total % 3600 / 60), 'min'], [total % 60, 's']];
+  return parts.filter(([value]) => value).map(([value, unit]) => unit === 'day' ? `${value} day${value === 1 ? '' : 's'}` : `${value} ${unit}`).join(' ');
+}
+function retryHint(seconds) {
+  if (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0) return '';
+  const at = new Date(Date.now() + Number(seconds) * 1000);
+  return `Available again in ${waitText(seconds)} (about ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} your time).`;
+}
+async function readServiceFailure(response) {
+  const text = typeof response.text === 'function' ? await response.text().catch(() => '') : '';
+  let body = null;
+  if (text) { try { body = JSON.parse(text); } catch {} }
+  else if (typeof response.json === 'function') body = await response.json().catch(() => null);
+  const header = Number(response.headers?.get?.('retry-after'));
+  const retryAfterSeconds = body?.retryAfterSeconds ?? (Number.isFinite(header) && header > 0 ? header : null);
+  if (body?.error) return Object.assign(new Error(body.error), { code: body.code ?? (response.status === 429 ? 'USAGE_LIMIT' : 'SERVICE_ERROR'), limitScope: body.limitScope ?? null, simulationScope: body.simulationScope ?? 'daily', incidentId: body.incidentId ?? null, retryAfterSeconds });
+  const cloudflare = /cloudflare|cf-ray|cf-error|cdn-cgi/i.test(text) || Boolean(response.headers?.get?.('cf-ray'));
+  const cfCode = /error code:?\s*(1\d{3})|cf-error-code[^0-9]*(\d{4})/i.exec(text);
+  const code = cfCode?.[1] ?? cfCode?.[2] ?? null;
+  const via = cloudflare ? `Cloudflare${code ? ` error ${code}` : ''}, HTTP ${response.status}` : `HTTP ${response.status}`;
+  if (response.status === 429 || code === '1015') return Object.assign(new Error(`The request was rate limited before it reached safetxlens.org (${via}). This limit is not this service's quota; it comes from the network edge or a proxy between you and the service, often shared by everyone behind the same VPN or office IP.`), { code: 'EDGE_RATE_LIMITED', retryAfterSeconds });
+  if (response.status === 403 || /^10(0\d|1\d|2\d)$/.test(code ?? '') || /just a moment|attention required|access denied|blocked/i.test(text)) return Object.assign(new Error(`The request was blocked before it reached safetxlens.org (${via}). A security check, firewall, VPN or company proxy is refusing it. If you are on a company network or VPN, try without it or ask its administrator to allow safetxlens.org.`), { code: 'EDGE_BLOCKED' });
+  if ([502, 503, 504, 520, 521, 522, 523, 524, 525, 526].includes(response.status)) return Object.assign(new Error(`safetxlens.org is not responding right now (${via}). The service may be restarting or overloaded.`), { code: 'ORIGIN_UNAVAILABLE', retryAfterSeconds: retryAfterSeconds ?? 30 });
+  return Object.assign(new Error(`The service returned an unexpected response (${via}).`), { code: 'SERVICE_ERROR' });
+}
+function networkFailure(error) {
+  return Object.assign(new Error(`Your browser could not connect to safetxlens.org (${error?.message || 'network error'}). Check your connection. A VPN, company firewall or content filter may be blocking this site; it is a new domain, which some filters block by default.`), { code: 'NETWORK_UNREACHABLE' });
+}
+const FAILURE_TITLES = {
+  ip_daily: 'Your daily request limit is used up', ip_minute: 'Too many requests in a short time', service_daily: 'Daily service capacity reached',
+  service_monthly: 'Monthly service capacity reached', busy: 'The service is busy', EDGE_RATE_LIMITED: 'Rate limited before reaching the service',
+  EDGE_BLOCKED: 'Blocked before reaching the service', ORIGIN_UNAVAILABLE: 'The service is not responding', NETWORK_UNREACHABLE: 'Could not reach safetxlens.org',
+  UPSTREAM_LIMITED: 'The transaction source is at its request limit', SERVICE_BUSY: 'The service is busy',
+};
 async function inspect({ silent = false, overrideInput = null, overrideNetwork = null, simulate = false, verifyTargets = !publicMode && (!communityMode || ['hash', 'json'].includes(selectedInputMode())), retryTargets = false } = {}) {
   const selectedInput = overrideInput ?? importedJson ?? input.value.trim();
   const previousTargetChecks = retryTargets ? activeReportTargetChecks : null;
@@ -676,15 +715,10 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
   if (!silent) { submit.disabled = true; status.textContent = simulate ? 'Simulating Safe execution and measuring state changes…' : 'Inspecting Safe data and recalculating hashes…'; }
   try {
     const isJson = selectedInputMode() === 'json';
-    const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? selectedNetwork(), scope: scope.value, simulate, verifyTargets, decodeCandidates: true, safeAddress: isJson ? safeAddress.value.trim() || undefined : undefined, safeHash: isJson ? safeHash.value.trim() || undefined : undefined }) });
+    const response = await fetch('/api/inspect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ input: selectedInput, network: overrideNetwork ?? selectedNetwork(), scope: scope.value, simulate, verifyTargets, decodeCandidates: true, safeAddress: isJson ? safeAddress.value.trim() || undefined : undefined, safeHash: isJson ? safeHash.value.trim() || undefined : undefined }) }).catch(error => { throw networkFailure(error); });
+    if (!response.ok) throw await readServiceFailure(response);
     const result = await response.json().catch(() => null);
-    if (!result || !response.ok) {
-      const failure = new Error(result?.error ?? 'The service returned an unexpected response. Please retry.');
-      failure.code = result?.code ?? (response.status === 429 ? 'USAGE_LIMIT' : 'SERVICE_ERROR');
-      failure.simulationScope = result?.simulationScope ?? 'daily';
-      failure.incidentId = result?.incidentId ?? null;
-      throw failure;
-    }
+    if (!result) throw Object.assign(new Error('The service returned an unreadable response. Please retry.'), { code: 'SERVICE_ERROR' });
     report.classList.remove('empty');
     document.body.classList.add('has-report');
     if (result.kind === 'builder') { report.innerHTML = builderHtml(result); status.textContent = 'Builder JSON decoded'; }
@@ -732,17 +766,20 @@ async function inspect({ silent = false, overrideInput = null, overrideNetwork =
   } catch (error) {
     const recorded = error.incidentId ? `<p class="meta">We recorded this issue to improve the service. Reference: <code>${esc(error.incidentId)}</code></p>` : '';
     const simulationLimited = error.code === 'SIMULATION_LIMIT';
-    const limited = simulationLimited || error.code === 'USAGE_LIMIT' || error.code === 'UPSTREAM_LIMITED';
-    const limitTitle = simulationLimited ? `${error.simulationScope === 'monthly' ? 'Monthly' : 'Daily'} simulation limit reached` : 'Request limit reached';
+    const limited = simulationLimited || ['USAGE_LIMIT', 'UPSTREAM_LIMITED', 'SERVICE_BUSY'].includes(error.code);
+    const quotaLimited = simulationLimited || error.code === 'USAGE_LIMIT';
+    const limitTitle = simulationLimited ? `${error.simulationScope === 'monthly' ? 'Monthly' : 'Daily'} simulation limit reached` : FAILURE_TITLES[error.limitScope] ?? FAILURE_TITLES[error.code] ?? 'Request limit reached';
+    const edgeTitle = FAILURE_TITLES[error.code];
+    const retry = retryHint(error.retryAfterSeconds) ? `<p class="meta"><strong>${esc(retryHint(error.retryAfterSeconds))}</strong></p>` : '';
     const donationAction = donationWalletsAvailable ? '<a href="#community-support">Donate to support capacity</a>' : '<span>Donations open when a wallet is configured</span>';
-    const support = limited ? `<div class="limit-support"><strong>Help us increase public capacity</strong><p>Donations and infrastructure sponsors can fund more transaction lookups, RPC access, and simulations. They do not bypass this limit or guarantee immediate availability.</p><div>${donationAction}<a href="https://x.com/rriescog" target="_blank" rel="noopener noreferrer">Sponsor the service ↗</a></div></div>` : '';
-    status.textContent = limited ? limitTitle : error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'Check the input or network' : 'Sorry, we could not complete the inspection';
+    const support = quotaLimited ? `<div class="limit-support"><strong>Help us increase public capacity</strong><p>Donations and infrastructure sponsors can fund more transaction lookups, RPC access, and simulations. They do not bypass this limit or guarantee immediate availability.</p><div>${donationAction}<a href="https://x.com/rriescog" target="_blank" rel="noopener noreferrer">Sponsor the service ↗</a></div></div>` : '';
+    status.textContent = limited ? limitTitle : edgeTitle ?? (error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'Check the input or network' : 'Sorry, we could not complete the inspection');
     if (simulate && simulationLimited && activeReportInput) {
       report.querySelector('.simulation-limit-notice')?.remove?.();
-      report.insertAdjacentHTML('afterbegin', `<div class="notice simulation-limit-notice" role="alert"><strong>${limitTitle}</strong><p>${esc(error.message)}</p>${support}</div>`);
+      report.insertAdjacentHTML('afterbegin', `<div class="notice simulation-limit-notice" role="alert"><strong>${limitTitle}</strong><p>${esc(error.message)}</p>${retry}${support}</div>`);
       return;
     }
-    report.innerHTML = `<div class="empty"><h2>${limited ? limitTitle : error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'We could not inspect this input' : 'Sorry, something went wrong'}</h2><p>${esc(error.message)}</p>${recorded}${support}</div>`;
+    report.innerHTML = `<div class="empty" role="alert"><h2>${esc(limited ? limitTitle : edgeTitle ?? (error.code === 'INVALID_OR_UNAVAILABLE_INPUT' || error.code === 'TRANSACTION_UNAVAILABLE' ? 'We could not inspect this input' : 'Sorry, something went wrong'))}</h2><p>${esc(error.message)}</p>${retry}${recorded}${support}</div>`;
   }
   finally { submit.disabled = false; }
 }
