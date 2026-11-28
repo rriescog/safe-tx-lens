@@ -15,10 +15,10 @@ test('recommended projects appear only in the dark footer', async () => {
   const css = await readFile(pathResolve('web/style.css'), 'utf8');
   const [main, footer] = html.split('</main>');
   assert.doesNotMatch(main, /pcaversaccio|external-panel|independent-checks/);
-  assert.match(footer, /<footer class="site-footer">/);
+  assert.match(footer, /<footer class="lp-site-footer lp">/);
   assert.match(footer, /Other recommended projects/);
   assert.match(footer, /github\.com\/pcaversaccio\/safe-tx-hashes-util/);
-  assert.match(css, /footer\.site-footer\{[^}]*background:#102734/);
+  for (const skin of ['retro', 'modern']) assert.match(await readFile(pathResolve(`web/skins/${skin}.css`), 'utf8'), /footer\.lp\{[^}]*(background|border-top)/, skin);
   assert.match(main, /Free independent tx review/);
   assert.match(main, /Before signing · while queued · after execution/);
   assert.match(main, /Ask about sponsorship on X/);
@@ -67,7 +67,7 @@ test('the inspection form and live example precede the detailed process map', as
   assert.match(html, /href="#inspect-form"[^>]*>Start a review/);
   assert.match(html, /Independent project; not affiliated with Safe or the Safe Ecosystem Foundation/);
   assert.match(html, /not affiliated with or endorsed by Safe or the Safe Ecosystem Foundation/);
-  assert.doesNotMatch(html.match(/<div class="intro-actions">[\s\S]*?<\/div>/)?.[0] ?? '', /Safe Ecosystem Foundation|nonce 60|Example source/);
+  assert.doesNotMatch(html.match(/<div class="lp-cta-row lp-intro-actions">[\s\S]*?<\/div>/)?.[0] ?? '', /Safe Ecosystem Foundation|nonce 60|Example source/);
 });
 
 test('How it works switches its route when the user chooses another input', () => {
@@ -87,8 +87,9 @@ test('How it works switches its route when the user chooses another input', () =
 
 test('home and every network example remain reachable from a result', async () => {
   const html = await readFile(pathResolve('web/index.html'), 'utf8');
-  assert.match(html, /<a class="brand" href="\/" aria-label="Safe Tx Lens home">/);
-  assert.match(html, /<nav class="primary-nav"[^>]*><a href="\/">Home<\/a><a href="#how-it-works">How it works<\/a><a href="#examples">Examples<\/a>/);
+  assert.match(html, /<a class="lp-brand" href="\/" aria-label="Safe Tx Lens home">/);
+  const nav = html.match(/<nav class="lp-primary-nav"[\s\S]*?<\/nav>/)?.[0] ?? '';
+  for (const target of ['#inspect-form', '#how-it-works', '#examples', '#community-support']) assert.match(nav, new RegExp(`href="${target}"`));
   assert.match(html, /<section id="examples" class="example-browser"/);
   const catalog = {
     networks: [
@@ -1096,4 +1097,23 @@ test('every failed inspection says what stopped it and when to retry', async () 
   assert.match(view.html, /VPN, company firewall or content filter/);
   assert.match(view.html, /Failed to fetch/);
   assert.equal(view.status, 'Could not reach safetxlens.org');
+});
+
+test('landing page obeys the strict CSP and offers both designs with retro first', async () => {
+  const html = await readFile(pathResolve('web/index.html'), 'utf8');
+  assert.doesNotMatch(html, / style="/, 'inline styles are blocked by style-src self');
+  assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/, 'inline scripts are blocked by script-src self');
+  assert.doesNotMatch(html, /https?:\/\/(fonts\.|cdn|unpkg|cdnjs)/, 'no third-party asset hosts');
+  assert.match(html, /<link rel="stylesheet" href="\/web\/skins\/retro\.css" id="skin-retro">/);
+  assert.match(html, /<link rel="stylesheet" href="\/web\/skins\/modern\.css" id="skin-modern" media="not all">/);
+  assert.match(html, /data-skin-pick="retro" aria-pressed="true"[\s\S]*data-skin-pick="modern" aria-pressed="false"/);
+  assert.match(html, /codex mcp add safe-tx-lens --url https:\/\/safetxlens\.org\/mcp/);
+  assert.doesNotMatch(html, /Bybit|WazirX|Radiant/i, 'the story names attack patterns, not victims');
+  assert.match(html, /A salted hash of your IP address, used only to apply the daily request limit/);
+  for (const skin of ['retro', 'modern']) {
+    const css = await readFile(pathResolve(`web/skins/${skin}.css`), 'utf8');
+    assert.doesNotMatch(css, /https?:\/\//, `${skin} loads nothing from another origin`);
+    for (const token of ['--ink', '--paper', '--white', '--surface-2', '--btn', '--on-accent', '--red-bg', '--amber-bg', '--green-bg']) assert.match(css, new RegExp(`${token}:`), `${skin} defines ${token}`);
+  }
+  assert.doesNotMatch((await readFile(pathResolve('web/style.css'), 'utf8')).split('\n').slice(1).join('\n'), /#[0-9a-f]{3,8}\b/i, 'component colours come from skin tokens');
 });

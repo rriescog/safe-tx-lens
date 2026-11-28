@@ -154,6 +154,13 @@ export async function serve({ port = 4173, rpcUrl, publicMode = false, community
     if (req.method === 'GET' && new URL(req.url ?? '/', 'http://localhost').pathname === '/') return reply(res, 200, html, 'text/html');
     if (req.method === 'GET' && req.url === '/web/app.js') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/app.js', import.meta.url)), 'utf8'), 'text/javascript');
     if (req.method === 'GET' && req.url === '/web/vendor/cytoscape.min.js') return reply(res, 200, await readFile(fileURLToPath(new URL('../node_modules/cytoscape/dist/cytoscape.min.js', import.meta.url)), 'utf8'), 'text/javascript');
+    // Skins, the design switch, the decorative 3D heroes and bundled fonts.
+    // Fixed allowlists: no caller-supplied path ever reaches the filesystem.
+    const skinAsset = req.method === 'GET' ? /^\/web\/(skin\.js|hero-(?:retro|modern)\.js|skins\/(?:retro|modern)\.css)$/.exec(req.url ?? '') : null;
+    if (skinAsset) return reply(res, 200, await readFile(fileURLToPath(new URL(`../web/${skinAsset[1]}`, import.meta.url)), 'utf8'), skinAsset[1].endsWith('.css') ? 'text/css' : 'text/javascript');
+    if (req.method === 'GET' && req.url === '/web/vendor/three.min.js') return reply(res, 200, await readFile(fileURLToPath(new URL('../node_modules/three/build/three.min.js', import.meta.url)), 'utf8'), 'text/javascript');
+    const font = req.method === 'GET' ? /^\/web\/fonts\/(vt323|pixelify-sans|ibm-plex-mono-400|ibm-plex-mono-600|bricolage-grotesque|instrument-sans)\.woff2$/.exec(req.url ?? '') : null;
+    if (font) return reply(res, 200, await readFile(fileURLToPath(new URL(`../web/fonts/${font[1]}.woff2`, import.meta.url))), 'font/woff2', { 'Cache-Control': 'public, max-age=31536000, immutable' });
     if (req.method === 'GET' && req.url === '/web/style.css') return reply(res, 200, await readFile(fileURLToPath(new URL('../web/style.css', import.meta.url)), 'utf8'), 'text/css');
     const icon = req.method === 'GET' ? /^\/web\/assets\/chains\/([a-z0-9]+)\.png$/.exec(req.url ?? '') : null;
     if (icon && Object.hasOwn(CHAINS, icon[1])) return reply(res, 200, await readFile(fileURLToPath(new URL(`../web/assets/chains/${icon[1]}.png`, import.meta.url))), 'image/png');

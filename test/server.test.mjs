@@ -121,3 +121,17 @@ test('upstream Safe quota failure is a service error with a machine-readable cod
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 });
+
+test('skin assets, vendored three.js and bundled fonts are served from fixed allowlists', async () => {
+  const server = await serve({ port: 0, incidentReporter: () => {} });
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    for (const [path, type] of [['/web/skin.js', 'text/javascript'], ['/web/hero-retro.js', 'text/javascript'], ['/web/hero-modern.js', 'text/javascript'], ['/web/skins/retro.css', 'text/css'], ['/web/skins/modern.css', 'text/css'], ['/web/vendor/three.min.js', 'text/javascript'], ['/web/fonts/vt323.woff2', 'font/woff2']]) {
+      const response = await fetch(base + path);
+      assert.equal(response.status, 200, path);
+      assert.match(response.headers.get('content-type'), new RegExp(type), path);
+      assert.match(response.headers.get('content-security-policy'), /default-src 'self'/);
+    }
+    for (const path of ['/web/skins/other.css', '/web/fonts/app.js', '/web/fonts/evil.woff2', '/web/hero-x.js']) assert.equal((await fetch(base + path)).status, 404, path);
+  } finally { await new Promise(done => server.close(done)); }
+});
