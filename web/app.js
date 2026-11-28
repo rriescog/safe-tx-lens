@@ -358,6 +358,23 @@ function graphElements(r) {
   return { elements, omitted };
 }
 let activeGraph;
+// The call graph is drawn on a canvas, so it cannot read CSS. Take its
+// colours from the active design's tokens, with the original palette as the
+// fallback where styles are unavailable.
+function graphStyle() {
+  const computed = typeof getComputedStyle === 'function' ? getComputedStyle(document.documentElement) : null;
+  const token = (name, fallback) => computed?.getPropertyValue(name).trim() || fallback;
+  const line = token('--line', '#6ca7bd');
+  return [
+    { selector: 'node', style: { 'background-color': token('--surface-2', '#e8f3f7'), 'border-width': 2, 'border-color': line, label: 'data(label)', color: token('--ink', '#153345'), 'font-size': 11, 'font-weight': 700, 'text-wrap': 'wrap', 'text-max-width': 132, 'text-valign': 'center', 'text-halign': 'center', width: 160, height: 58, shape: 'round-rectangle' } },
+    { selector: 'node[kind = "safe"]', style: { 'background-color': token('--btn', '#075477'), color: token('--on-accent', '#ffffff'), 'border-color': token('--btn', '#075477') } },
+    { selector: 'node[kind = "delegatecall"]', style: { 'background-color': token('--red-bg', '#fff0e7'), 'border-color': token('--red', '#bf643b') } },
+    { selector: 'node[kind = "schedule"]', style: { 'background-color': token('--amber-bg', '#fff7e4'), 'border-color': token('--amber', '#c99b3f') } },
+    { selector: 'edge', style: { width: 2, 'line-color': token('--muted', '#87adbc'), 'target-arrow-shape': 'triangle', 'target-arrow-color': token('--muted', '#87adbc'), 'curve-style': 'bezier' } },
+    { selector: ':selected', style: { 'border-width': 4, 'border-color': token('--blue-dark', '#087b95') } },
+  ];
+}
+document.addEventListener?.('skinchange', () => { activeGraph?.style(graphStyle()); });
 function showCallGraph(r) {
   activeGraph?.destroy();
   activeGraph = null;
@@ -372,14 +389,7 @@ function showCallGraph(r) {
   activeGraph = cytoscape({
     container: shell.querySelector('.call-graph'), elements,
     layout: { name: 'breadthfirst', directed: true, roots: '#safe', padding: 28, spacingFactor: 1.35 },
-    style: [
-      { selector: 'node', style: { 'background-color': '#e8f3f7', 'border-width': 2, 'border-color': '#6ca7bd', label: 'data(label)', color: '#153345', 'font-size': 11, 'font-weight': 700, 'text-wrap': 'wrap', 'text-max-width': 132, 'text-valign': 'center', 'text-halign': 'center', width: 160, height: 58, shape: 'round-rectangle' } },
-      { selector: 'node[kind = "safe"]', style: { 'background-color': '#075477', color: '#ffffff', 'border-color': '#075477' } },
-      { selector: 'node[kind = "delegatecall"]', style: { 'background-color': '#fff0e7', 'border-color': '#bf643b' } },
-      { selector: 'node[kind = "schedule"]', style: { 'background-color': '#fff7e4', 'border-color': '#c99b3f' } },
-      { selector: 'edge', style: { width: 2, 'line-color': '#87adbc', 'target-arrow-shape': 'triangle', 'target-arrow-color': '#87adbc', 'curve-style': 'bezier' } },
-      { selector: ':selected', style: { 'border-width': 4, 'border-color': '#087b95' } },
-    ],
+    style: graphStyle(),
   });
   activeGraph.on('tap', 'node', event => { detail.textContent = event.target.data('detail'); });
   }
@@ -588,9 +598,9 @@ function reportHtml(r, retryNote = '') {
   const safeUiKnown = r.network !== 'kat';
   const safeUrl = safeUiKnown ? `https://app.safe.global/home?safe=${encodeURIComponent(`${SAFE_UI_PREFIX[r.network] ?? r.network}:${tx.safe}`)}` : `https://katanascan.com/address/${encodeURIComponent(tx.safe)}`;
   const evidence = r.evidence?.source === 'onchain_execution'
-    ? `<div class="notice" style="margin:16px 28px 0"><strong>Verified from ${esc(r.network)} onchain execution</strong> · block ${esc(r.evidence.blockNumber)}${r.evidence.blockTime ? ` · ${esc(r.evidence.blockTime)}` : ''}<br>Execution transaction: <span class="mono">${esc(r.evidence.executionHash)}</span>. ${r.evidence.discoveredBy === 'etherscan_index' ? 'Located through an indexed Safe event. ' : ''}The call graph comes from its execTransaction calldata. State changes below require a separate trace or simulation.</div>`
+    ? `<div class="notice notice-inset"><strong>Verified from ${esc(r.network)} onchain execution</strong> · block ${esc(r.evidence.blockNumber)}${r.evidence.blockTime ? ` · ${esc(r.evidence.blockTime)}` : ''}<br>Execution transaction: <span class="mono">${esc(r.evidence.executionHash)}</span>. ${r.evidence.discoveredBy === 'etherscan_index' ? 'Located through an indexed Safe event. ' : ''}The call graph comes from its execTransaction calldata. State changes below require a separate trace or simulation.</div>`
     : ['safe_api', 'safe_api_untrusted', 'safe_gateway'].includes(r.evidence?.source)
-      ? `<div class="notice" style="margin:16px 28px 0"><strong>Fetched live from ${r.evidence.source === 'safe_api_untrusted' ? 'Safe Transaction Service (unsigned record)' : r.evidence.source === 'safe_api' ? 'Safe Transaction Service' : 'Safe Client Gateway'}</strong> · ${esc(r.evidence.retrievedAt)}<br>The Safe address, nonce, target and calldata came from this source. The EIP-712 hash is recalculated locally; check the RPC result and any limitations below.</div>`
+      ? `<div class="notice notice-inset"><strong>Fetched live from ${r.evidence.source === 'safe_api_untrusted' ? 'Safe Transaction Service (unsigned record)' : r.evidence.source === 'safe_api' ? 'Safe Transaction Service' : 'Safe Client Gateway'}</strong> · ${esc(r.evidence.retrievedAt)}<br>The Safe address, nonce, target and calldata came from this source. The EIP-712 hash is recalculated locally; check the RPC result and any limitations below.</div>`
       : '';
   const actionLabels = new Map(r.actions.map(action => [action.path, action.label]));
   const flow = `<p class="flow-guide">Each call shows decoded calldata, its likely meaning, and how its function name was checked. Open “Source and limits” for full arguments and evidence.</p><div class="flow-map"><div class="flow-origin"><span class="flow-kind">Safe transaction</span><strong>Nonce ${esc(tx.nonce)}</strong><span class="mono">${esc(tx.safe)}</span></div><ul class="flow-root">${flowHtml(r.call, '1', actionLabels)}</ul></div><details class="graph-extra"><summary>Explore this call tree as an interactive graph</summary><div class="graph-shell"><div class="graph-top"><strong>Interactive call graph</strong><span>Drag to pan · scroll or pinch to zoom · select a node</span></div><div class="call-graph" role="img" aria-label="Interactive graph of calls encoded in this Safe transaction"></div><div class="graph-selection" aria-live="polite"></div></div></details>`;
@@ -607,11 +617,11 @@ function reportHtml(r, retryNote = '') {
   const bytecodeStatus = targetVerificationSummary(r);
   const lifecycle = lifecycleStatus(r);
   const stage = lifecycle.detail;
-  return `<div class="report-header"><div class="safe-identity"><span>SAFE MULTISIG · ${esc(r.network)}</span><a href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${safeUiKnown ? 'Open Safe' : 'Open contract'} ${esc(tx.safe)} on ${safeUiKnown ? 'Safe Global' : 'KatanaScan'}">${esc(tx.safe)} ↗</a><small>${safeUiKnown ? 'Open in Safe' : 'Open in KatanaScan · Safe web UI availability not verified'}</small></div><div class="report-heading">${lifecycleBadge(lifecycle)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(stage)}</span></div><div class="hash-line mono">${esc(r.hash)}</div><div class="header-verification">${bytecodeStatus.tone === 'partial' ? '<span class="pill partial">Past code unchecked</span>' : pill(bytecodeStatus.tone)}<span>${esc(bytecodeStatus.label)}</span></div></div>${exampleContext}${evidence}${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('1 · Evidence and hash checks', verificationHtml(r))}${section('2 · What this transaction can do', `${riskHtml}${flow}<details class="technical"><summary>Technical details: decoded arguments and raw calldata for this call graph</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`)}${section('3 · Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('4 · Target bytecode and verified source', targetChecksHtml(r, retryNote))}${section('5 · Measured effects and simulation', `${sim}${effects}${checks}${simulateAction}`)}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', lifecycle.label)}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}`;
+  return `<div class="report-header"><div class="safe-identity"><span>SAFE MULTISIG · ${esc(r.network)}</span><a href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer" aria-label="${safeUiKnown ? 'Open Safe' : 'Open contract'} ${esc(tx.safe)} on ${safeUiKnown ? 'Safe Global' : 'KatanaScan'}">${esc(tx.safe)} ↗</a><small>${safeUiKnown ? 'Open in Safe' : 'Open in KatanaScan · Safe web UI availability not verified'}</small></div><div class="report-heading">${lifecycleBadge(lifecycle)}<h2>Safe nonce ${esc(tx.nonce)}</h2><span>${esc(stage)}</span></div><div class="hash-line mono">${esc(r.hash)}</div><div class="header-verification">${bytecodeStatus.tone === 'partial' ? '<span class="pill partial">Past code unchecked</span>' : pill(bytecodeStatus.tone)}<span>${esc(bytecodeStatus.label)}</span></div></div>${exampleContext}${evidence}${r.warnings.map(w => `<div class="notice notice-inset">${esc(w)}</div>`).join('')}${section('1 · Evidence and hash checks', verificationHtml(r))}${section('2 · What this transaction can do', `${riskHtml}${flow}<details class="technical"><summary>Technical details: decoded arguments and raw calldata for this call graph</summary><div class="technical-body">${callHtml(r.call)}${findings}</div></details>`)}${section('3 · Changes encoded in the transaction', `${actionSummary || '<p class="meta">No decoded action available.</p>'}<p class="meta">These are intended calls, not measured state changes. A scheduled call and an execute call can both appear in the same Safe transaction.</p>`)}${section('4 · Target bytecode and verified source', targetChecksHtml(r, retryNote))}${section('5 · Measured effects and simulation', `${sim}${effects}${checks}${simulateAction}`)}${section('Transaction facts', `<div class="field-grid">${field('Safe', tx.safe)}${field('Target', tx.to)}${field('Operation', tx.operation === 1 ? 'Delegatecall' : 'Call')}${field('Nonce', tx.nonce)}${field('Value', `${tx.value} wei`)}${field('Execution', lifecycle.label)}</div>`)}${section('What this review cannot prove', '<p class="meta">Decoded calldata shows intended calls. Confirm the Safe hash on the signing device, verify target bytecode and delegatecalls, and inspect a simulation trace for actual state changes. A simulation covers one block and one execution path.</p>')}`;
 }
 function queueHtml(result) {
   const title = result.availability === 'not_safe' ? 'This address does not appear to be a Safe' : result.availability === 'absent' ? 'No Safe contract on this network' : result.scope === 'history' ? 'Executed history' : result.scope === 'both' ? 'Pending and executed' : 'Queued proposals';
-  const notices = (result.warnings ?? []).map(warning => `<div class="notice" style="margin:14px 28px">${esc(warning)}</div>`).join('');
+  const notices = (result.warnings ?? []).map(warning => `<div class="notice notice-inset notice-inset-both">${esc(warning)}</div>`).join('');
   const choices = result.networks?.length > 1 ? `<div class="network-choices"><strong>Choose a network</strong><div>${result.networks.map(chain => `<button type="button" data-network="${esc(chain)}">${esc(chain)}</button>`).join('')}</div></div>` : '';
   const currentNonce = /^\d+$/.test(String(result.safeState?.nonce ?? '')) ? BigInt(result.safeState.nonce) : null;
   const rows = result.reports.map((report, index) => ({ report, index }));
@@ -634,7 +644,129 @@ function builderHtml(r) {
   const actions = r.risk.actionRatings.map(action => `<div class="semantic-action">${pill(action.level)}<div><strong>${action.stage === 'schedule' ? 'Would schedule' : 'Would execute'}: ${esc(action.label)}</strong><p>${esc(action.reason)}<br><span class="mono">${esc(action.to)}</span></p></div></div>`).join('');
   const comparison = `<div class="item">${pill(r.comparison.status)}<div class="item-content"><strong>Safe hash and JSON comparison</strong><p>${esc(r.comparison.detail)}${r.comparison.safeHash ? `<br>Verified hash: <span class="mono">${esc(r.comparison.safeHash)}</span> · nonce ${esc(r.comparison.nonce)}` : ''}</p></div></div>`;
   const findings = r.findings.map(f => `<div class="item">${pill(f.severity)}<div class="item-content"><strong>${esc(f.code)} · call ${esc(f.path)}</strong><p>${esc(f.message)}</p></div></div>`).join('');
-  return `<div class="report-header">${pill('BUILDER PLAN')}<h2>${esc(r.name)}</h2><div class="meta mono">Safe: ${esc(r.safe ?? 'not supplied')} · chain ${esc(r.chainId)} · ${r.calls.length} top-level calls</div></div>${r.warnings.map(w => `<div class="notice" style="margin:16px 28px 0">${esc(w)}</div>`).join('')}${section('Safe hash comparison', `${comparison}<p class="meta">A Builder export omits Safe nonce and gas fields. Its metadata checksum is not a Safe transaction hash.</p>`)}${section('What the JSON plans to do', `<div class="risk-summary"><div>${pill(r.risk.reviewPriority)}<strong>${esc(r.risk.reviewPriority)} review priority</strong><span>${esc(r.risk.impactLevel)} potential impact · decoded JSON only</span></div>${priorityExplanation(r.risk)}<p>${esc(r.risk.note)}</p></div>${actions}`)}${section('Decoded call path', `${r.calls.map(callHtml).join('')}${findings}`)}${section('What this review cannot prove', '<p class="meta">This is an unsigned Builder plan. To compare it with a Safe transaction, enter its Safe hash above. A pending hash needs the Safe Transaction Service; a recent executed hash can also be found through Ethereum RPC.</p>')}`;
+  return `<div class="report-header">${pill('BUILDER PLAN')}<h2>${esc(r.name)}</h2><div class="meta mono">Safe: ${esc(r.safe ?? 'not supplied')} · chain ${esc(r.chainId)} · ${r.calls.length} top-level calls</div></div>${r.warnings.map(w => `<div class="notice notice-inset">${esc(w)}</div>`).join('')}${section('Safe hash comparison', `${comparison}<p class="meta">A Builder export omits Safe nonce and gas fields. Its metadata checksum is not a Safe transaction hash.</p>`)}${section('What the JSON plans to do', `<div class="risk-summary"><div>${pill(r.risk.reviewPriority)}<strong>${esc(r.risk.reviewPriority)} review priority</strong><span>${esc(r.risk.impactLevel)} potential impact · decoded JSON only</span></div>${priorityExplanation(r.risk)}<p>${esc(r.risk.note)}</p></div>${actions}`)}${section('Decoded call path', `${r.calls.map(callHtml).join('')}${findings}`)}${section('What this review cannot prove', '<p class="meta">This is an unsigned Builder plan. To compare it with a Safe transaction, enter its Safe hash above. A pending hash needs the Safe Transaction Service; a recent executed hash can also be found through Ethereum RPC.</p>')}`;
+}
+// ---- Report views -------------------------------------------------------
+// One report, three ways to read it: a guided walk through its sections, the
+// complete report, or the raw data behind both. Nothing is sent anywhere:
+// the saved file and the print view are built in this browser.
+const GUIDED_STEPS = [
+  ['1 ·', 'Hash', 'Your signing device shows a hash. This step recalculates it from the transaction fields, so an altered interface cannot fake it. Compare it with the hash on your device.'],
+  ['2 ·', 'Action', 'This is what the calldata does, in plain words. It is the part an attacker disguises, so read it here and not in the signing interface.'],
+  ['3 ·', 'Changes', 'These are the changes the calls ask for. They are intended calls, not measured results.'],
+  ['4 ·', 'Contracts', 'A call is only as safe as the code that runs it. Each source says separately whether it verified the code at this address.'],
+  ['5 ·', 'Effects', 'A simulation shows what would change in one block, on one path. It adds evidence; it does not prove safety.'],
+  ['Transaction facts', 'Facts', 'The raw fields of this Safe transaction.'],
+  ['What this review cannot prove', 'Limits', 'What still needs your own check before you sign.'],
+];
+const REPORT_VIEWS = ['guided', 'complete', 'raw'];
+function guidedStepFor(title) {
+  const known = GUIDED_STEPS.find(([prefix]) => String(title).startsWith(prefix));
+  return known ? { label: known[1], why: known[2] } : { label: String(title), why: '' };
+}
+function storedReportView() {
+  try { const value = localStorage.getItem('reportView'); return REPORT_VIEWS.includes(value) ? value : 'guided'; } catch { return 'guided'; }
+}
+function reportViewBarHtml(view = 'guided') {
+  const button = (name, label) => `<button type="button" data-view="${name}" aria-pressed="${name === view}">${label}</button>`;
+  return `<div class="view-bar"><div class="view-switch" role="group" aria-label="How to read this report">${button('guided', 'Guided')}${button('complete', 'Complete')}${button('raw', 'Raw')}</div><div class="view-actions"><button type="button" class="secondary-action" data-report-action="download">Save report file</button><button type="button" class="secondary-action" data-report-action="print">Print or save as PDF</button></div><p class="view-note" role="status"></p></div>`;
+}
+// A saved report is a self-contained file: the report as shown, its styles,
+// and the raw data. "<" is escaped inside the data block so no transaction
+// field can close the script element.
+function exportReportHtml(result, css, skin, savedAt) {
+  const data = JSON.stringify(result).replace(/</g, '\\u003c');
+  const styles = String(css).replace(/<\/style/gi, '<\\/style');
+  return `<!doctype html><html lang="en" data-skin="${esc(skin)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Safe Tx Lens report · ${esc(result.hash ?? '')}</title><style>${styles}\nbutton,.view-bar,.guided-steps,.guided-pager,.guided-why{display:none!important}.report-section[hidden]{display:block!important}.export-note{max-width:1100px;margin:18px auto;padding:0 18px;font-size:13px}main.results{max-width:1100px;margin:0 auto 40px;padding:0 18px}</style></head><body><p class="export-note">Saved from Safe Tx Lens on ${esc(savedAt)}. This file is a copy of the report as it was shown. It was built in your browser and was not stored by the service. A report cannot prove a transaction is safe: confirm the hash on your signing device.</p><main class="results"><div id="report">${reportHtml(result)}</div></main><script type="application/json" id="report-data">${data}</script></body></html>`;
+}
+async function saveReportFile(result, note) {
+  try {
+    const skin = document.documentElement.dataset.skin === 'modern' ? 'modern' : 'retro';
+    const css = (await Promise.all(['/web/style.css', `/web/skins/${skin}.css`].map(url => fetch(url).then(response => response.ok ? response.text() : '')))).join('\n');
+    const file = new Blob([exportReportHtml(result, css, skin, new Date().toISOString())], { type: 'text/html' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(file);
+    link.download = `safe-tx-lens-${String(result.network ?? 'report')}-${String(result.hash ?? '').slice(0, 10)}.html`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+    note.textContent = 'Report file built in your browser. Nothing was uploaded or stored.';
+  } catch { note.textContent = 'Could not build the file here. Use Print or save as PDF instead.'; }
+}
+function setupReportViews(result) {
+  report.insertAdjacentHTML('afterbegin', reportViewBarHtml(storedReportView()));
+  const sections = [...report.querySelectorAll('.report-section')];
+  if (!sections.length) return;
+  const bar = report.querySelector('.view-bar');
+  const note = bar.querySelector('.view-note');
+  const attention = section => section.querySelector('.pill.fail,.pill.mismatch,.pill.critical') ? 'fail' : section.querySelector('.pill.warning,.pill.high,.pill.unverified,.pill.unavailable,.pill.partial,.pill.verified_current') ? 'warn' : 'ok';
+  const steps = document.createElement('ol');
+  steps.className = 'guided-steps';
+  const whys = [];
+  sections.forEach((section, index) => {
+    const heading = section.querySelector('h3');
+    const step = guidedStepFor(heading?.textContent ?? `Step ${index + 1}`);
+    const state = attention(section);
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.step = String(index);
+    const dot = document.createElement('span');
+    dot.className = `step-dot step-${state}`;
+    dot.textContent = state === 'ok' ? String(index + 1) : '!';
+    const label = document.createElement('span');
+    label.textContent = step.label;
+    if (state !== 'ok') button.title = state === 'fail' ? 'This step has a failed check' : 'This step has something to review';
+    button.append(dot, label);
+    item.append(button);
+    steps.append(item);
+    if (step.why && heading) { const why = document.createElement('p'); why.className = 'guided-why'; why.textContent = step.why; heading.insertAdjacentElement('afterend', why); whys.push(why); }
+  });
+  bar.insertAdjacentElement('afterend', steps);
+  const pager = document.createElement('div');
+  pager.className = 'guided-pager';
+  const back = document.createElement('button'); back.type = 'button'; back.className = 'secondary-action'; back.textContent = 'Back';
+  const next = document.createElement('button'); next.type = 'button'; next.textContent = 'Next';
+  const position = document.createElement('span');
+  pager.append(back, position, next);
+  report.append(pager);
+  const raw = document.createElement('div');
+  raw.className = 'raw-view';
+  raw.hidden = true;
+  report.append(raw);
+  let view = storedReportView();
+  let step = 0;
+  const apply = () => {
+    sections.forEach((section, index) => { section.hidden = view === 'raw' || (view === 'guided' && index !== step); });
+    whys.forEach(why => { why.hidden = view !== 'guided'; });
+    steps.hidden = pager.hidden = view !== 'guided';
+    raw.hidden = view !== 'raw';
+    if (view === 'raw' && !raw.firstChild) {
+      const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'secondary-action'; copy.textContent = 'Copy JSON';
+      const pre = document.createElement('pre'); pre.className = 'raw-json'; pre.tabIndex = 0; pre.textContent = JSON.stringify(result, null, 2);
+      copy.addEventListener('click', () => (navigator.clipboard?.writeText(pre.textContent) ?? Promise.reject()).then(() => { note.textContent = 'JSON copied.'; }, () => { note.textContent = 'Select the text to copy it.'; }));
+      const lead = document.createElement('p'); lead.className = 'meta'; lead.textContent = 'The exact data behind the other two views, as returned for this inspection.';
+      raw.append(lead, copy, pre);
+    }
+    bar.querySelectorAll('[data-view]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.view === view)));
+    steps.querySelectorAll('[data-step]').forEach(button => { if (Number(button.dataset.step) === step) button.setAttribute('aria-current', 'step'); else button.removeAttribute('aria-current'); });
+    back.disabled = step === 0;
+    next.disabled = step === sections.length - 1;
+    position.textContent = `Step ${step + 1} of ${sections.length}`;
+    activeGraph?.resize();
+  };
+  bar.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => { view = button.dataset.view; try { localStorage.setItem('reportView', view); } catch {} note.textContent = ''; apply(); }));
+  steps.querySelectorAll('[data-step]').forEach(button => button.addEventListener('click', () => { step = Number(button.dataset.step); apply(); }));
+  back.addEventListener('click', () => { step = Math.max(0, step - 1); apply(); steps.scrollIntoView({ block: 'nearest' }); });
+  next.addEventListener('click', () => { step = Math.min(sections.length - 1, step + 1); apply(); steps.scrollIntoView({ block: 'nearest' }); });
+  // A link inside the report may point at a section the guided view hides.
+  report.querySelectorAll('a[href^="#"]').forEach(link => link.addEventListener('click', () => {
+    const target = report.querySelector(link.getAttribute('href'));
+    const index = target ? sections.findIndex(section => section === target || section.contains(target)) : -1;
+    if (index >= 0 && view === 'guided') { step = index; apply(); }
+  }));
+  bar.querySelector('[data-report-action="download"]').addEventListener('click', () => saveReportFile(result, note));
+  bar.querySelector('[data-report-action="print"]').addEventListener('click', () => window.print());
+  apply();
 }
 function showTransactionReport(result, retryNote = '') {
   // Reuse the already resolved transaction for simulation. A queue row may
@@ -645,6 +777,7 @@ function showTransactionReport(result, retryNote = '') {
   activeReportTargetChecks = result.targetChecks ?? null;
   report.innerHTML = reportHtml(result, retryNote);
   showCallGraph(result);
+  setupReportViews(result);
   report.querySelectorAll('[data-approved-hash]').forEach(button => button.addEventListener('click', () => {
     inputMode.value = 'hash';
     input.value = button.dataset.approvedHash;

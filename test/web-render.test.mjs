@@ -1115,5 +1115,43 @@ test('landing page obeys the strict CSP and offers both designs with retro first
     assert.doesNotMatch(css, /https?:\/\//, `${skin} loads nothing from another origin`);
     for (const token of ['--ink', '--paper', '--white', '--surface-2', '--btn', '--on-accent', '--red-bg', '--amber-bg', '--green-bg']) assert.match(css, new RegExp(`${token}:`), `${skin} defines ${token}`);
   }
-  assert.doesNotMatch((await readFile(pathResolve('web/style.css'), 'utf8')).split('\n').slice(1).join('\n'), /#[0-9a-f]{3,8}\b/i, 'component colours come from skin tokens');
+  assert.doesNotMatch((await readFile(pathResolve('web/style.css'), 'utf8')).split('@media print')[0].split('\n').slice(1).join('\n'), /#[0-9a-f]{3,8}\b/i, 'component colours come from skin tokens');
+});
+
+test('report offers guided, complete and raw views and builds its file in the browser', () => {
+  const page = ui();
+  const bar = page.evaluate('reportViewBarHtml()');
+  assert.match(bar, /data-view="guided" aria-pressed="true">Guided/);
+  assert.match(bar, /data-view="complete" aria-pressed="false">Complete/);
+  assert.match(bar, /data-view="raw" aria-pressed="false">Raw/);
+  assert.match(bar, /data-report-action="download">Save report file/);
+  assert.match(bar, /data-report-action="print">Print or save as PDF/);
+  assert.match(page.evaluate('reportViewBarHtml("raw")'), /data-view="raw" aria-pressed="true"/);
+  assert.equal(page.evaluate('guidedStepFor("1 · Evidence and hash checks").label'), 'Hash');
+  assert.equal(page.evaluate('guidedStepFor("4 · Target bytecode and verified source").label'), 'Contracts');
+  assert.match(page.evaluate('guidedStepFor("2 · What this transaction can do").why'), /read it here and not in the signing interface/);
+  assert.equal(page.evaluate('guidedStepFor("Something new").label'), 'Something new');
+  assert.equal(page.evaluate('storedReportView()'), 'guided');
+});
+
+test('saved report file is self-contained and cannot be broken out of by transaction data', async () => {
+  const page = ui();
+  const review = await analyze({ safe: '0x1111111111111111111111111111111111111111', to: '0x2222222222222222222222222222222222222222', nonce: '7', value: '0', data: '0x', operation: 0 }, 'eth', { fetchState: false });
+  page.context.sample = { ...review, hash: `0x${'a'.repeat(64)}`, transaction: { ...review.transaction, data: '0x', origin: '</script><script>alert(1)</script>' } };
+  const file = page.evaluate('exportReportHtml(sample, "body{color:red}</style>body{color:blue}", "retro", "2026-11-28T12:00:00.000Z")');
+  assert.match(file, /^<!doctype html><html lang="en" data-skin="retro">/);
+  assert.match(file, /Saved from Safe Tx Lens on 2026-11-28T12:00:00\.000Z/);
+  assert.match(file, /It was built in your browser and was not stored by the service/);
+  assert.match(file, /<script type="application\/json" id="report-data">/);
+  assert.equal(file.match(/<script/g).length, 1, 'only the data block is a script element');
+  assert.equal(file.match(/<\/style>/g).length, 1, 'styles cannot be closed early');
+  assert.doesNotMatch(file, /https?:\/\/(?!app\.safe\.global|etherscan|[a-z.]*scan|repo\.sourcify|github\.com|forum\.safefoundation)[^"\s<]*\.(js|css)/, 'no remote code or styles');
+  const data = JSON.parse(file.match(/id="report-data">([\s\S]*?)<\/script>/)[1]);
+  assert.equal(data.transaction.origin, '</script><script>alert(1)</script>');
+  assert.equal(page.evaluate('graphStyle().length'), 6);
+});
+
+test('rendered reports carry no inline styles, which the CSP would block', async () => {
+  const source = await readFile(pathResolve('web/app.js'), 'utf8');
+  assert.doesNotMatch(source, / style="/);
 });
