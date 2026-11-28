@@ -47,7 +47,8 @@
         apply(next); sync(next);
         try { localStorage.setItem('skin', next); } catch (error) {}
         loadHero(next);
-        window.dispatchEvent(new Event('resize'));
+        // Let the stylesheet apply before canvases re-read their colours.
+        requestAnimationFrame(function () { document.dispatchEvent(new Event('skinchange')); window.dispatchEvent(new Event('resize')); });
       });
     });
     document.querySelectorAll('.lp-tabs').forEach(tabs);
