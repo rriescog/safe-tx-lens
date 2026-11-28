@@ -26,14 +26,79 @@
   <link rel="icon" type="image/png" sizes="192x192" href="/web/icons/icon-192.png">
   <link rel="apple-touch-icon" href="/web/icons/icon-192.png">
   <link rel="stylesheet" href="/web/style.css">
+  <link rel="stylesheet" href="/web/skins/retro.css" id="skin-retro">
+  <link rel="stylesheet" href="/web/skins/modern.css" id="skin-modern" media="not all">
+  <script src="/web/skin.js"></script>
 </head>
 <body>
-  <header class="masthead">
-    <a class="brand" href="/" aria-label="Safe Tx Lens home"><span class="mark" aria-hidden="true">◎</span><span>Safe Tx Lens</span><span class="beta-badge">Beta</span></a>
-    <span class="edition">Free independent tx review</span><nav class="primary-nav" aria-label="Main navigation"><a href="/">Home</a><a href="#how-it-works">How it works</a><a href="#examples">Examples</a></nav><button id="refresh-app" class="refresh-app" type="button" hidden aria-label="Refresh app">↻ Refresh</button><button id="install-app" class="install-app" type="button" hidden>Install app</button>
+  <header class="lp-hero lp" id="top">
+    <div class="lp-wrap">
+      <div class="lp-nav">
+        <a class="lp-brand" href="/" aria-label="Safe Tx Lens home"><i class="lp-mark" aria-hidden="true"></i><span>Safe Tx Lens</span><span class="lp-beta">Beta</span></a>
+        <span class="lp-edition">Free independent tx review</span>
+        <nav class="lp-primary-nav" aria-label="Main navigation"><ul><li><a href="#why">Why check</a></li><li><a href="#inspect-form">Check</a></li><li><a href="#how-it-works">How it works</a></li><li><a href="#networks">Networks</a></li><li><a href="#examples">Examples</a></li><li><a href="#use">Use it your way</a></li><li><a href="#community-support">Support</a></li><li><a href="https://github.com/rriescog/safe-tx-lens" target="_blank" rel="noopener noreferrer">GitHub</a></li></ul></nav>
+        <div class="lp-skin-switch" role="group" aria-label="Design"><button type="button" data-skin-pick="retro" aria-pressed="true">Retro</button><button type="button" data-skin-pick="modern" aria-pressed="false">Modern</button></div>
+        <button type="button" class="lp-btn lp-btn-line lp-btn-sm lp-only-retro" id="scanlines" aria-pressed="true">Scanlines: on</button>
+        <button id="refresh-app" class="refresh-app lp-btn lp-btn-line lp-btn-sm" type="button" hidden aria-label="Refresh app">↻ Refresh</button><button id="install-app" class="install-app lp-btn lp-btn-line lp-btn-sm" type="button" hidden>Install app</button>
+        <details class="lp-menu"><summary>Menu</summary><nav aria-label="Main navigation (mobile)"><a href="#why">Why check</a><a href="#inspect-form">Check</a><a href="#how-it-works">How it works</a><a href="#networks">Networks</a><a href="#examples">Examples</a><a href="#use">Use it your way</a><a href="#community-support">Support</a><a href="https://github.com/rriescog/safe-tx-lens" target="_blank" rel="noopener noreferrer">GitHub</a></nav></details>
+      </div>
+      <div class="lp-hero-grid">
+        <div class="lp-hero-copy">
+          <p class="lp-kicker">Before signing · while queued · after execution</p>
+          <h1>Read what you sign before you sign it.</h1>
+          <p class="lp-lead">Safe Tx Lens recalculates the hash, decodes the calls and checks the contract code behind any Safe multisig transaction. Start with a Safe hash, execution hash, address, URL, or JSON.</p>
+          <div class="lp-cta-row lp-intro-actions"><a class="lp-btn lp-btn-primary lp-start-review" href="#inspect-form">Start a review</a><button class="lp-btn lp-btn-ghost" id="try-example" type="button">Try a real example</button></div>
+          <p class="lp-hero-note"><strong>Read-only by design.</strong> No wallet connection, private key, or signature. A simulation does not prove safety. Independent project; not affiliated with Safe or the Safe Ecosystem Foundation.</p>
+        </div>
+        <div class="lp-stage lp-only-retro" id="stage-retro">
+          <canvas id="hero-retro" role="img" aria-label="A 3D retro computer. Its screen loads a Safe transaction, lists the decoded calls and ends with: review before signing."></canvas>
+          <div class="lp-crt-wrap"><div class="lp-crt"><div class="lp-frame"><div class="lp-screen"><pre>
+    **** SAFE TX LENS 64 V0.2 ****
+
+ 64K RAM SYSTEM  READ-ONLY  0 KEYS HELD
+
+READY.
+LOAD "0X3DAF...0D78",8,1
+
+SEARCHING FOR 0X3DAF...0D78
+LOADING
+READY.
+LIST
+
+10 REM SAFE NONCE 385 ON POLYGON
+<span class="lp-ok">20 HASH CHECK ........... OK</span>
+30 CALL ADDOWNERWITHTHRESHOLD
+40   OWNER 0X5B38...DDC4
+50   THRESHOLD 3
+<span class="lp-ok">60 CONTRACT CODE ..... VERIFIED</span>
+
+<span class="lp-hot">?REVIEW BEFORE SIGNING</span>
+READY.</pre></div></div></div></div>
+          <button type="button" class="lp-btn lp-btn-line lp-btn-sm lp-stage-ctl" id="replay-retro" hidden>Run again</button>
+        </div>
+        <div class="lp-stage lp-only-modern" id="stage-modern">
+          <canvas id="hero-modern" role="img" aria-label="A stack of four layers opens. On top, what a signing screen shows: send 10 ETH, looks routine. Underneath: the hash you really sign, a delegatecall that is not a transfer, and a contract with no verified source."></canvas>
+          <p class="lp-stage-cap">The friendly screen is only the top layer. Safe Tx Lens shows you the three underneath. <button type="button" id="replay-modern">Replay</button></p>
+        </div>
+      </div>
+    </div>
   </header>
   <main>
-    <section class="intro"><div><p class="kicker">Before signing · while queued · after execution</p><h1>Review a Safe transaction at every stage.</h1><p>Inspect a proposal before signing, or investigate what an executed transaction did. Start with a Safe hash, execution hash, address, URL, or JSON.</p><div class="why-inline"><strong>Why this exists</strong><p>A compromised multisig interface can describe one action while presenting different data for approval. Inspect the calls before signing, compare the hash on your signing device, and review execution evidence afterward.</p></div><div class="intro-actions"><a class="start-review" href="#inspect-form">Start a review ↓</a><button id="try-example" type="button">Try a real example</button></div></div><div class="trust-note"><strong>Read-only by design</strong><span>No wallet connection, private key, or signature. A simulation does not prove safety. Independent project; not affiliated with Safe or the Safe Ecosystem Foundation.</span></div></section>
+    <section id="why" class="lp">
+  <div class="lp-wrap">
+    <h2>What you see is not always what you sign</h2>
+    <p class="lp-sub">The largest multisig thefts of 2024 and 2025 had one thing in common: the signers approved transactions that did not do what their screen described. Together they cost well over a billion dollars. They followed three patterns.</p>
+    <div class="lp-cases lp-patterns">
+      <article class="lp-case"><div class="lp-case-meta"><h3>The disguised delegatecall</h3><p>A transfer on the surface, a takeover underneath.</p></div>
+        <div class="lp-compare"><div class="lp-pane"><h4>The screen said</h4><p>A routine transfer between the team's own wallets.</p></div><div class="lp-pane lp-signed"><h4>The signature approved</h4><p>A delegatecall that hands the Safe's logic to another contract.</p><code>operation = 1 (delegatecall)</code></div><p class="lp-lens-says"><b>Safe Tx Lens</b> flags the delegatecall and the unverified target contract before anyone signs.</p></div></article>
+      <article class="lp-case"><div class="lp-case-meta"><h3>The silent upgrade</h3><p>An ordinary approval that swaps the code behind the wallet.</p></div>
+        <div class="lp-compare"><div class="lp-pane"><h4>The screen said</h4><p>An ordinary transaction, ready to approve.</p></div><div class="lp-pane lp-signed"><h4>The signature approved</h4><p>A call that replaces the contract behind the Safe.</p><code>upgrade → new implementation</code></div><p class="lp-lens-says"><b>Safe Tx Lens</b> decodes the calldata itself, says plainly that the call swaps the implementation, and checks the new code.</p></div></article>
+      <article class="lp-case"><div class="lp-case-meta"><h3>The ownership handover</h3><p>Routine on screen and in simulation, final onchain.</p></div>
+        <div class="lp-compare"><div class="lp-pane"><h4>The screen said</h4><p>Routine transactions that matched their simulations.</p></div><div class="lp-pane lp-signed"><h4>The signature approved</h4><p>Calls that hand ownership of the protocol's contracts to someone else.</p><code>transferOwnership(new owner)</code></div><p class="lp-lens-says"><b>Safe Tx Lens</b> reads the raw data independently of the signing interface and names the new owner.</p></div></article>
+    </div>
+    <p class="lp-fine">Patterns drawn from public post-mortems; the figure is checked against them before launch. A review is one more pair of eyes. It cannot promise to catch every attack, and the hash on your signing device remains the last check.</p>
+  </div>
+</section>
     <section class="workspace">
       <div class="sidebar"><aside class="input-panel">
         <h2>Inspect</h2>
@@ -68,7 +133,7 @@
         <div class="how-boundary"><strong>The security boundary</strong><p>Hash calculation is independent of the Safe API; the truth of input fields is a separate question. A compromised Safe service could return altered fields and a matching hash. Use a hash obtained independently, your signing device, and onchain evidence where available. No single service or simulation proves a transaction is safe.</p></div>
       </section>
     </section>
-    <section class="community-section" aria-label="Supported networks and community support">
+    <section id="networks" class="community-section" aria-label="Supported networks and community support">
       <div class="community-heading"><p class="kicker">Coverage</p><h2>Network coverage by capability</h2><p>These are the 13 named EVM networks with configured RPC routes. A matching chain ID confirms only that an RPC answered. Safe queue and history lookup, transaction reconstruction, historical code verification, and simulation are separate checks. The dated status below shows which Safe list endpoints answered; Amoy and Immutable zkEVM currently need an execution hash or supplied JSON because their Safe list endpoints are unavailable. Try a real transaction to see which evidence its providers can return. Other EVM chain IDs can be attempted without a promise of offchain discovery.</p><p id="network-coverage-note" class="coverage-note">Network coverage snapshot unavailable.</p></div>
       <div class="network-carousel" aria-label="Networks available now"><div class="network-grid" id="network-track">
         <div data-network="eth"><img src="/web/assets/chains/eth.png" alt="" loading="lazy"><strong>Ethereum</strong></div><div data-network="pol"><img src="/web/assets/chains/pol.png" alt="" loading="lazy"><strong>Polygon</strong></div><div data-network="gno"><img src="/web/assets/chains/gno.png" alt="" loading="lazy"><strong>Gnosis</strong></div><div data-network="arb1"><img src="/web/assets/chains/arb1.png" alt="" loading="lazy"><strong>Arbitrum</strong></div><div data-network="oeth"><img src="/web/assets/chains/oeth.png" alt="" loading="lazy"><strong>Optimism</strong></div><div data-network="base"><img src="/web/assets/chains/base.png" alt="" loading="lazy"><strong>Base</strong></div><div data-network="bnb"><img src="/web/assets/chains/bnb.png" alt="" loading="lazy"><strong>BNB Chain</strong></div><div data-network="avax"><img src="/web/assets/chains/avax.png" alt="" loading="lazy"><strong>Avalanche</strong></div><div data-network="kat"><img src="/web/assets/chains/kat.svg" alt="" loading="lazy"><strong>Katana</strong></div><div data-network="xlayer"><img src="/web/assets/chains/xlayer.svg" alt="" loading="lazy"><strong>X Layer</strong></div><div data-network="sep"><img src="/web/assets/chains/sep.png" alt="" loading="lazy"><strong>Sepolia</strong></div><div data-network="amoy"><span class="network-symbol" aria-hidden="true">◈</span><strong>Polygon Amoy</strong></div><div data-network="imx"><span class="network-symbol" aria-hidden="true">◈</span><strong>Immutable zkEVM</strong></div>
@@ -76,15 +141,49 @@
       <section id="examples" class="example-browser" aria-labelledby="examples-title"><div class="example-browser-heading"><h3 id="examples-title">Try a transaction by network</h3><p id="example-coverage">Loading verified examples…</p></div><div id="example-catalog" class="example-catalog" aria-live="polite"></div></section>
       <div class="support-grid" id="community-support"><div class="support-panel donation-panel"><p class="kicker">Community funded</p><h2>Help keep reviews free</h2><p>Donations help pay for the infrastructure behind this service: hosting, bandwidth, monitoring, transaction lookups, historical RPC reads, and simulations. Thank you for supporting independent review.</p><div id="donation-wallets" aria-live="polite"><p class="meta">Donation addresses will appear here once configured.</p></div></div><div class="support-panel sponsorship-panel"><p class="kicker">Sponsor recognition</p><h2>Put your name behind safer signing</h2><p>Diamond, Gold, Silver, and Bronze spaces have room for multiple sponsors. We also welcome infrastructure contributions such as RPC and simulation capacity. Recognition requires agreement before listing.</p><a class="sponsor-contact" href="https://x.com/rriescog" target="_blank" rel="noopener noreferrer">Ask about sponsorship on X ↗</a></div></div>
     </section>
-    <section class="disclaimer" aria-labelledby="disclaimer-title"><h2 id="disclaimer-title">Use the evidence, verify independently</h2><p>Safe Tx Lens is an independent community project, not affiliated with or endorsed by Safe or the Safe Ecosystem Foundation. It is free software with MIT-licensed source available on GitHub. Its data and analysis can be incomplete, outdated, or incorrect. It offers no guarantee that a transaction is safe and its maintainers accept no responsibility for decisions made from its output. Check the hash on your signing device, use independent sources, and review the contract behavior yourself.</p><p>For control over the code, keys, RPCs, and logs, <a href="https://github.com/rriescog/safe-tx-lens" target="_blank" rel="noopener noreferrer">deploy your own instance</a>. If you find an error, <a href="https://github.com/rriescog/safe-tx-lens/issues" target="_blank" rel="noopener noreferrer">report it on GitHub</a> with public, non-sensitive details.</p></section>
-  </main>
-  <footer class="site-footer">
-    <div class="footer-inner">
-      <div class="footer-about"><strong>Safe Tx Lens</strong><p>Read-only help before signing and after execution. MIT-licensed source is public on GitHub. No guarantee of safety. Confirm the hash on your signing device when signing.</p></div>
-      <nav class="footer-links" aria-label="Project links"><strong>Project</strong><a href="https://github.com/rriescog/safe-tx-lens" target="_blank" rel="noopener noreferrer">GitHub repository</a><a href="https://github.com/rriescog/safe-tx-lens/blob/main/docs/MCP.md" target="_blank" rel="noopener noreferrer">Use the MCP server ↗</a><a href="https://github.com/rriescog/safe-tx-lens/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT license</a><a href="https://x.com/rriescog" target="_blank" rel="noopener noreferrer">Sponsor inquiries on X</a></nav>
-      <nav class="footer-links" aria-label="Other recommended projects"><strong>Other recommended projects</strong><a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">Safe transaction hashes ↗</a><a href="https://github.com/OpenZeppelin/safe-utils" target="_blank" rel="noopener noreferrer">OpenZeppelin Safe Utils ↗</a><a href="https://github.com/security-alliance/frameworks" target="_blank" rel="noopener noreferrer">Security Alliance frameworks ↗</a></nav>
+    <section id="use" class="lp">
+  <div class="lp-wrap">
+    <h2>Use it your way</h2>
+    <p class="lp-sub">The same analysis runs in the browser, inside your AI assistant, from the command line, or on your own machine.</p>
+    <div class="lp-tabs" id="use-tabs">
+      <div class="lp-tablist" role="tablist" aria-label="How to use it"><button role="tab" type="button">MCP server</button><button role="tab" type="button">Command line</button><button role="tab" type="button">Agent skill</button><button role="tab" type="button">Run your own</button></div>
+      <div class="lp-tabpanel" role="tabpanel"><div class="lp-use-grid"><div><p>Add the community endpoint to any MCP client that supports Streamable HTTP. It exposes read-only tools and shares the web quota. It does not run arbitrary URLs or accept your RPC endpoint.</p><ul class="lp-tools"><li>inspect</li><li>inspect_json</li><li>list_pending</li><li>list_history</li></ul><p class="lp-mt"><a href="https://github.com/rriescog/safe-tx-lens/blob/main/docs/MCP.md" target="_blank" rel="noopener">Read the MCP guide</a></p></div><div><div class="lp-cmd"><pre class="lp-code">codex mcp add safe-tx-lens --url https://safetxlens.org/mcp</pre><button class="lp-btn lp-btn-line lp-btn-sm" data-copy type="button">Copy</button></div><p class="lp-hint">Other clients: add https://safetxlens.org/mcp as a Streamable HTTP server in that client's own settings.</p></div></div></div>
+      <div class="lp-tabpanel" role="tabpanel"><div class="lp-use-grid"><div><p>The CLI uses the same analysis as the website. Add <span class="lp-mono">--json</span> for machine-readable output, or point it at a Safe address to list its queue and history.</p><p>Needs Node.js 20 or newer.</p></div><div><div class="lp-cmd"><pre class="lp-code">git clone https://github.com/rriescog/safe-tx-lens.git
+cd safe-tx-lens &amp;&amp; npm ci
+node bin/safe-tx-lens.mjs inspect 0xSAFE_TRANSACTION_HASH --network auto</pre><button class="lp-btn lp-btn-line lp-btn-sm" data-copy type="button">Copy</button></div></div></div></div>
+      <div class="lp-tabpanel" role="tabpanel"><div class="lp-use-grid"><div><p>The <span class="lp-mono">safe-tx-investigator</span> skill teaches an agent to trace a Safe transaction from a hash, execution hash, address, URL or JSON, and to separate a queued proposal from verified onchain execution.</p><p class="lp-mt"><a href="https://github.com/rriescog/safe-tx-lens/tree/main/skills/safe-tx-investigator" target="_blank" rel="noopener">View the skill</a></p></div><div><div class="lp-cmd"><pre class="lp-code">skills/safe-tx-investigator/SKILL.md</pre><button class="lp-btn lp-btn-line lp-btn-sm" data-copy type="button">Copy</button></div><p class="lp-hint">Copy the folder into your agent's skills directory.</p></div></div></div>
+      <div class="lp-tabpanel" role="tabpanel"><div class="lp-use-grid"><div><p>For control over the code, keys, RPCs and logs, deploy your own instance. The local interface binds to your machine, keeps API keys on it, and unlocks watching a Safe and simulation.</p><p class="lp-mt"><a href="https://github.com/rriescog/safe-tx-lens" target="_blank" rel="noopener">Open the repository</a></p></div><div><div class="lp-cmd"><pre class="lp-code">git clone https://github.com/rriescog/safe-tx-lens.git
+cd safe-tx-lens
+npm ci &amp;&amp; npm start
+# then open the local address it prints</pre><button class="lp-btn lp-btn-line lp-btn-sm" data-copy type="button">Copy</button></div></div></div></div>
     </div>
-    <small class="copyright">© 2026 Raúl Riesco. All rights reserved except as granted under the MIT License.</small>
+  </div>
+</section>
+  <section id="privacy" class="lp lp-alt">
+  <div class="lp-wrap">
+    <h2>What this service keeps about you</h2>
+    <p class="lp-sub">It needs no account and sets no cookies. To keep the free service available to everyone it enforces usage limits, and this is everything that involves.</p>
+    <div class="lp-ledger lp-ledger3">
+      <div><h3>Never stored</h3><ul><li>The hashes, addresses, links or JSON you inspect</li><li>Reports, which are built for your browser only</li><li>Cookies, accounts or per-request logs</li></ul></div>
+      <div><h3>Held in memory until the UTC day ends</h3><ul><li>A salted hash of your IP address, used only to apply the daily request limit</li><li>It is never written to disk and is gone when the service restarts</li></ul></div>
+      <div><h3>Written to disk</h3><ul><li>Total usage counters for the day and the month, with nothing that identifies a visitor</li></ul></div>
+    </div>
+    <p class="lp-verify">Error reports contain a random reference, a time, a category and a status code; no input, address or IP. You can read all of it in <a href="https://github.com/rriescog/safe-tx-lens" target="_blank" rel="noopener noreferrer">the source code</a>, or run your own copy.</p>
+  </div>
+</section>
+  <section class="disclaimer" aria-labelledby="disclaimer-title"><h2 id="disclaimer-title">Use the evidence, verify independently</h2><p>Safe Tx Lens is an independent community project, not affiliated with or endorsed by Safe or the Safe Ecosystem Foundation. It is free software with MIT-licensed source available on GitHub. Its data and analysis can be incomplete, outdated, or incorrect. It offers no guarantee that a transaction is safe and its maintainers accept no responsibility for decisions made from its output. Check the hash on your signing device, use independent sources, and review the contract behavior yourself.</p><p>For control over the code, keys, RPCs, and logs, <a href="https://github.com/rriescog/safe-tx-lens" target="_blank" rel="noopener noreferrer">deploy your own instance</a>. If you find an error, <a href="https://github.com/rriescog/safe-tx-lens/issues" target="_blank" rel="noopener noreferrer">report it on GitHub</a> with public, non-sensitive details.</p></section>
+  </main>
+  <footer class="lp-site-footer lp">
+    <div class="lp-wrap">
+      <div class="lp-foot">
+        <div><a class="lp-brand" href="/"><i class="lp-mark" aria-hidden="true"></i><span>Safe Tx Lens</span></a><p>Read-only help before signing and after execution. MIT-licensed source is public on GitHub. No guarantee of safety. Confirm the hash on your signing device when signing.</p></div>
+        <nav aria-label="Project links"><h4>Project</h4><ul><li><a href="https://github.com/rriescog/safe-tx-lens" target="_blank" rel="noopener noreferrer">GitHub repository</a></li><li><a href="https://github.com/rriescog/safe-tx-lens/blob/main/docs/MCP.md" target="_blank" rel="noopener noreferrer">Use the MCP server ↗</a></li><li><a href="https://github.com/rriescog/safe-tx-lens/issues" target="_blank" rel="noopener noreferrer">Report an issue</a></li><li><a href="https://github.com/rriescog/safe-tx-lens/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT license</a></li></ul></nav>
+        <nav aria-label="Support links"><h4>Support</h4><ul><li><a href="#community-support">Donate</a></li><li><a href="https://x.com/rriescog" target="_blank" rel="noopener noreferrer">Sponsor inquiries on X</a></li></ul></nav>
+        <nav aria-label="Other recommended projects"><h4>Other recommended projects</h4><ul><li><a href="https://github.com/pcaversaccio/safe-tx-hashes-util" target="_blank" rel="noopener noreferrer">Safe transaction hashes ↗</a></li><li><a href="https://github.com/OpenZeppelin/safe-utils" target="_blank" rel="noopener noreferrer">OpenZeppelin Safe Utils ↗</a></li><li><a href="https://github.com/security-alliance/frameworks" target="_blank" rel="noopener noreferrer">Security Alliance frameworks ↗</a></li></ul></nav>
+      </div>
+      <p class="lp-ready lp-only-retro" aria-hidden="true">READY.<br><span class="lp-cursor"></span></p>
+      <small class="lp-copy lp-copyright">© 2026 Raúl Riesco. All rights reserved except as granted under the MIT License.</small>
+    </div>
   </footer>
   <script src="/web/vendor/cytoscape.min.js" defer></script>
   <script src="/web/app.js" defer></script>
